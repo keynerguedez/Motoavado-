@@ -59,7 +59,9 @@ module.exports = function crear(DATA) {
   }
 
   // Los envíos van en fila, con pausa, y con tope diario: es lo que más baja el riesgo de bloqueo.
-  function enviarTexto(numero, texto) {
+  function enviarTexto(numero, texto) { return enviar(numero, { text: texto }); }
+  function enviarImagen(numero, png, pie) { return enviar(numero, { image: png, caption: pie, mimetype: 'image/png' }); }
+  function enviar(numero, contenido) {
     const tarea = cola.then(async () => {
       if (e.estado !== 'conectado' || !sock) return { ok: false, error: 'WhatsApp no está conectado.' };
       const hoy = new Date().toISOString().slice(0, 10);
@@ -69,7 +71,7 @@ module.exports = function crear(DATA) {
         const r = await sock.onWhatsApp(numero);
         const jid = r && r[0] && r[0].exists && r[0].jid;
         if (!jid) return { ok: false, error: 'Ese número no tiene WhatsApp.' };
-        await sock.sendMessage(jid, { text: texto });
+        await sock.sendMessage(jid, contenido);
         e.enviadosHoy++;
         await new Promise(ok => setTimeout(ok, PAUSA_MS));
         return { ok: true };
@@ -80,5 +82,5 @@ module.exports = function crear(DATA) {
   }
 
   if (haySesion()) iniciar().catch(() => {});
-  return { publico, iniciar, desvincular, enviarTexto, conectado: () => e.estado === 'conectado' };
+  return { publico, iniciar, desvincular, enviarTexto, enviarImagen, conectado: () => e.estado === 'conectado' };
 };

@@ -22,3 +22,5 @@ Nunca van en este repositorio. Viven en el servidor: `/opt/motolavado/vault/.env
 3. Fotos, lectura de placa, tasa euro automática, tickets por WhatsApp.
 4. Comisiones, gastos con autorización, cierre.
 5. Vigilante por cámara.
+
+La nota de entrega usa la tipografía Inter (licencia SIL Open Font License 1.1), incluida en server/fuentes.

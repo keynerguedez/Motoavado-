@@ -228,7 +228,14 @@ async function api(req, res, ruta) {
     const para = waNumero(d.telefono); if (!para) return json(res, 400, { error: 'Teléfono no válido.' });
     const texto = ticketTexto(d); if (!texto) return json(res, 400, { error: 'Ticket vacío.' });
     if (!waqr || !waqr.conectado()) return json(res, 503, { ok: false, error: 'WhatsApp no está conectado.' });
-    const r = await waqr.enviarTexto(para, texto);
+    // Nota de entrega como imagen con el logo; si por algo no se puede dibujar, sale el texto.
+    let png = null;
+    try {
+      png = require('./nota').notaPng({ num: d.num, fecha: new Date().toLocaleString('es-VE', { timeZone: 'America/Caracas', dateStyle: 'short', timeStyle: 'short' }), cliente: d.cliente && d.cliente !== 'Sin nombre' ? d.cliente : '', modelo: d.modelo, placa: d.placa,
+        servicios: (Array.isArray(d.servicios) ? d.servicios : []).map(x => ({ nombre: x && x.nombre, precio: x && x.precio })), pagado: d.pagado, metodo: txt(d.metodo, 20) + (d.ref ? ' · ref. ' + txt(d.ref, 20) : '') }, 'claro');
+    } catch (e) { console.error('nota:', e.message); }
+    const hola = d.cliente && d.cliente !== 'Sin nombre' ? 'Hola ' + txt(d.cliente, 40).split(' ')[0] + ', aquí' : 'Aquí';
+    const r = png ? await waqr.enviarImagen(para, png, hola + ' tienes tu nota de entrega de *Motolavado R1*. ¡Gracias por tu visita!') : await waqr.enviarTexto(para, texto);
     return json(res, r.ok ? 200 : 502, r);
   }
   if (ruta.startsWith('/api/waqr/')) {
@@ -305,7 +312,7 @@ async function api(req, res, ruta) {
 const servidor = http.createServer((req, res) => {
   const url = new URL(req.url, 'http://localhost');
   let ruta; try { ruta = decodeURIComponent(url.pathname); } catch (e) { res.writeHead(400); return res.end(); }
-  if (ruta === '/health') return json(res, 200, { ok: true, sistema: 'motolavado', version: version(), waqr: waqr ? waqr.publico().estado : 'no-disponible', libs: fs.existsSync(path.join(ROOT, 'node_modules', 'baileys')), encendido: INICIO.toISOString(), hora: new Date().toISOString() });
+  if (ruta === '/health') return json(res, 200, { ok: true, sistema: 'motolavado', version: version(), waqr: waqr ? waqr.publico().estado : 'no-disponible', libs: fs.existsSync(path.join(ROOT, 'node_modules', 'baileys')), nota: (() => { try { require.resolve('@resvg/resvg-js'); return true; } catch (e) { return false; } })(), encendido: INICIO.toISOString(), hora: new Date().toISOString() });
   if (ruta.startsWith('/api/')) return api(req, res, ruta).catch(() => json(res, 500, { error: 'Error del servidor.' }));
 
   const yo = sesion(req);

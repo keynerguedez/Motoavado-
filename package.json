@@ -10,6 +10,7 @@
     "node": ">=20"
   },
   "dependencies": {
+    "@resvg/resvg-js": "^2.6.2",
     "baileys": "^7.0.0-rc14",
     "pino": "^10.4.0",
     "qrcode": "^1.5.4"

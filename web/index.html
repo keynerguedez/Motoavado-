@@ -465,15 +465,15 @@ function renderClientes(){
   $("c-cuenta").textContent=CLI.length+(CLI.length===1?" cliente":" clientes");
   $("c-rows").innerHTML=l.length?l.map(function(c){return '<tr><td>'+esc(c.nombre||"Sin nombre")+'</td><td class="num">'+esc(fmtTel(c.telefono))+'</td><td>'+c.motos.map(function(m){return '<b>'+esc(m.placa)+'</b>'+(m.modelo?' · '+esc(m.modelo):'')}).join("<br>")+'</td><td class="r num">'+c.visitas+'</td><td>'+(c.ultima?new Date(c.ultima).toLocaleDateString("es-VE"):"hoy")+'</td><td>'+esc(c.ultimoServicio||"")+'</td><td class="r num">'+usd(c.gastado)+'</td></tr>'}).join(""):'<tr><td colspan="7" class="note">'+(CLI.length?"Nadie coincide con la búsqueda.":"Todavía no hay clientes. Aparecen aquí al cobrar la primera moto.")+'</td></tr>';
 }
-function saveSale(o){
-  if(!window.__yo)return; var a=paidAmt(o);
+function saveSale(o,sigue){
+  if(!window.__yo){sigue();return} var a=paidAmt(o);
   fetch("/api/ventas",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({telefono:o.tel,cliente:cliName(o),placa:o.placa,modelo:o.modelo,servicios:o.svc.map(function(id){return{id:id,nombre:svc(id).name,precio:svc(id).price}}),total:total(o),descuento:o.disc&&o.disc.status==="approved"?o.disc.pct+"%":"",lavador:o.lav,metodo:o.pay.method,ref:o.pay.ref,moneda:a.cur,monto:a.val,tasa:o.pay.tasa})})
-  .then(function(r){if(!r.ok)$("f-err").textContent="Ojo: la moto #"+o.num+" no se guardó en el servidor. Avisa al dueño."}).catch(function(){$("f-err").textContent="Ojo: sin conexión, la moto #"+o.num+" no se guardó en el servidor."});
+  .then(function(r){return r.json().then(function(j){if(!r.ok)$("f-err").textContent="Ojo: la moto #"+o.num+" no se guardó en el servidor. Avisa al dueño.";sigue(r.ok?j.num:null)})}).catch(function(){$("f-err").textContent="Ojo: sin conexión, la moto #"+o.num+" no se guardó en el servidor.";sigue(null)});
 }
-function sendTicket(o){
+function sendTicket(o,numSrv){
   var k=$("k-estado"); if(!window.__yo){k.textContent="Así le llega por WhatsApp.";return}
   var a=paidAmt(o); k.textContent="Enviando por WhatsApp…";
-  fetch("/api/ticket",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({telefono:o.tel,num:String(o.num).padStart(3,"0"),cliente:cliName(o),placa:o.placa,modelo:o.modelo,
+  fetch("/api/ticket",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({telefono:o.tel,num:String(numSrv||o.num).padStart(3,"0"),cliente:cliName(o),placa:o.placa,modelo:o.modelo,
     servicios:o.svc.map(function(id){return{nombre:svc(id).name,precio:usd(svc(id).price)}}),descuento:o.disc&&o.disc.status==="approved"?o.disc.pct+"%":"",total:usd(total(o)),pagado:a.txt,metodo:o.pay.method,ref:o.pay.ref,tasa:a.cur==="Bs"?fmtN(o.pay.tasa):""})})
   .then(function(r){return r.json().then(function(j){k.textContent=r.ok?"Enviado por WhatsApp al "+fmtTel(o.tel)+".":"No se envió por WhatsApp: "+(j.error||"error")})}).catch(function(){k.textContent="No se envió por WhatsApp: sin conexión."});
 }
@@ -487,7 +487,7 @@ function confirmPay(){
   var po=paying; po.ticket=true; $("ov-pay").classList.remove("on");
   if(pendingNew===po){pendingNew=null;commitOrder(po);$("f-err").textContent="Moto #"+po.num+" cobrada y registrada. Ya puede pasar al puente."}
   else renderAll();
-  showTicket(po); saveSale(po); sendTicket(po);
+  showTicket(po); saveSale(po,function(n){sendTicket(po,n)});
 }
 
 /* ---------- Admin ---------- */

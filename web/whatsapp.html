@@ -11,8 +11,23 @@
 <body>
 <div class="wrap wide" style="display:flex;flex-direction:column;gap:16px">
   <p style="margin:0"><a href="/">← Volver al sistema</a></p>
+  <div class="card">
+    <h1>WhatsApp por código QR</h1>
+    <p class="note">Provisional, con el teléfono de la tienda. Solo manda el ticket de cada moto. El teléfono sigue funcionando normal.</p>
+    <p id="q-estado"><b>Cargando…</b></p>
+    <img id="q-img" alt="Código QR para vincular" hidden style="width:280px;max-width:100%;align-self:center;background:#fff;border-radius:8px">
+    <p class="note" id="q-ayuda" hidden>En el teléfono de la tienda: WhatsApp → Ajustes (o los tres puntos) → Dispositivos vinculados → Vincular un dispositivo, y apunta la cámara a este código. El código cambia cada pocos segundos.</p>
+    <div class="err" id="q-err"></div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap"><button class="pri" id="q-conectar" type="button">Conectar con QR</button><button id="q-quitar" type="button" hidden>Desvincular</button></div>
+    <form id="f-qprueba" hidden style="display:flex;flex-direction:column;gap:10px;border-top:1px solid var(--line);padding-top:14px">
+      <label>Mensaje de prueba a este teléfono<input id="q-tel" type="tel" inputmode="numeric" placeholder="04141234567" required></label>
+      <div class="err" id="qp-err"></div>
+      <button>Enviar prueba</button>
+    </form>
+  </div>
   <form class="card" id="f-wa">
-    <h1>WhatsApp del negocio</h1>
+    <h1>WhatsApp oficial (Meta)</h1>
+    <p class="note">Para después, con la línea nueva.</p>
     <p class="note" id="estado">Cargando…</p>
     <label>Identificador del número (Phone number ID)<input id="w-id" type="text" inputmode="numeric" autocomplete="off" required></label>
     <label>Llave de acceso (token permanente)<input id="w-token" type="password" autocomplete="off" placeholder="Pégala aquí. No se vuelve a mostrar."></label>
@@ -34,6 +49,21 @@
   function enviar(ruta,datos){return fetch(ruta,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(datos)}).then(function(r){return r.json().then(function(j){return{ok:r.ok,j:j}})})}
   function pintar(c){$("estado").textContent=c.configurado?"Conectado. Para cambiar la llave, pega una nueva y guarda.":"Todavía no está conectado.";$("w-id").value=c.phoneId||"";$("w-token").required=!c.configurado}
   fetch("/api/whatsapp").then(function(r){if(!r.ok){location.replace("/");throw 0}return r.json()}).then(pintar).catch(function(){});
+  var NOMBRE={apagado:"No conectado.",conectando:"Conectando…",esperando_qr:"Escanea el código con el teléfono de la tienda.",conectado:"Conectado",reconectando:"Reconectando…",error:"Error."};
+  function qpintar(q){
+    $("q-estado").innerHTML="<b>"+(NOMBRE[q.estado]||q.estado)+"</b>"+(q.estado==="conectado"?" con el número +"+(q.numero||"")+" · "+q.enviadosHoy+" de "+q.maxDia+" mensajes hoy":"");
+    $("q-img").hidden=!q.qr; if(q.qr)$("q-img").src=q.qr; $("q-ayuda").hidden=!q.qr;
+    $("q-err").textContent=q.error||""; $("q-conectar").hidden=q.estado!=="apagado"&&q.estado!=="error";
+    $("q-quitar").hidden=q.estado==="apagado"; $("f-qprueba").hidden=q.estado!=="conectado"; if($("f-qprueba").hidden)$("f-qprueba").style.display="none";else $("f-qprueba").style.display="flex";
+  }
+  function qcargar(){fetch("/api/waqr").then(function(r){return r.ok?r.json():null}).then(function(q){if(q)qpintar(q)}).catch(function(){})}
+  qcargar(); setInterval(qcargar,3000);
+  $("q-conectar").addEventListener("click",function(){$("q-estado").innerHTML="<b>Conectando…</b>";enviar("/api/waqr/conectar",{}).then(function(r){qpintar(r.j)})});
+  $("q-quitar").addEventListener("click",function(){var t=this;if(t.dataset.ok!=="1"){t.dataset.ok="1";t.textContent="¿Seguro? Toca otra vez";return}t.dataset.ok="";t.textContent="Desvincular";enviar("/api/waqr/desvincular",{}).then(function(r){qpintar(r.j)})});
+  $("f-qprueba").addEventListener("submit",function(ev){
+    ev.preventDefault();var e=$("qp-err");e.className="err";e.textContent="Enviando…";
+    enviar("/api/waqr/prueba",{telefono:$("q-tel").value}).then(function(r){if(r.ok){e.className="ok";e.textContent="Enviado. Revisa ese WhatsApp."}else e.textContent=r.j.error||"No se pudo enviar."}).catch(function(){e.textContent="Sin conexión."});
+  });
   $("f-wa").addEventListener("submit",function(ev){
     ev.preventDefault();var e=$("w-err");e.className="err";e.textContent="";
     enviar("/api/whatsapp",{phoneId:$("w-id").value,token:$("w-token").value}).then(function(r){

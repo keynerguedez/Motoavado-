@@ -284,10 +284,10 @@ details.grp summary{cursor:pointer;font-weight:600;font-size:.9rem;color:var(--m
 </div></div>
 
 <div class="overlay" id="ov-ticket"><div class="sheet stack">
-  <h2>Ticket enviado al cliente</h2>
+  <h2>Ticket del cliente</h2>
   <span class="note" id="k-to"></span>
   <div id="k-body"></div>
-  <p class="note">En el demo no se envía de verdad; así le llegaría por WhatsApp.</p>
+  <p class="note" id="k-estado">Así le llega por WhatsApp.</p>
   <button class="btn pri" data-act="closeticket">Listo</button>
 </div></div>
 
@@ -444,6 +444,13 @@ function ticketHtml(o){
     +'<b class="row" style="justify-content:space-between"><span>Total</span><span class="num">'+usd(total(o))+'</span></b><span>Pagado: <b class="num">'+a.txt+'</b> por '+esc(o.pay.method)+(o.pay.ref?' (ref. '+esc(o.pay.ref)+')':'')+'</span>'
     +(a.cur==="Bs"?'<span class="note num">Tasa euro BCV: Bs '+fmtN(o.pay.tasa)+'</span>':'')+'<span>Gracias por tu visita.</span></div>';
 }
+function sendTicket(o){
+  var k=$("k-estado"); if(!window.__yo){k.textContent="Así le llega por WhatsApp.";return}
+  var a=paidAmt(o); k.textContent="Enviando por WhatsApp…";
+  fetch("/api/ticket",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({telefono:o.tel,num:String(o.num).padStart(3,"0"),cliente:cliName(o),placa:o.placa,modelo:o.modelo,
+    servicios:o.svc.map(function(id){return{nombre:svc(id).name,precio:usd(svc(id).price)}}),descuento:o.disc&&o.disc.status==="approved"?o.disc.pct+"%":"",total:usd(total(o)),pagado:a.txt,metodo:o.pay.method,ref:o.pay.ref,tasa:a.cur==="Bs"?fmtN(o.pay.tasa):""})})
+  .then(function(r){return r.json().then(function(j){k.textContent=r.ok?"Enviado por WhatsApp al "+fmtTel(o.tel)+".":"No se envió por WhatsApp: "+(j.error||"error")})}).catch(function(){k.textContent="No se envió por WhatsApp: sin conexión."});
+}
 function showTicket(o){$("k-to").textContent="WhatsApp al "+fmtTel(o.tel)+" · "+cliName(o);$("k-body").innerHTML=ticketHtml(o);$("ov-ticket").classList.add("on")}
 function renderMethods(){renderConv();$("p-methods").innerHTML=METHODS.map(function(m){return '<button type="button" class="chip" data-act="method" data-m="'+m+'" aria-pressed="'+(payMethod===m)+'">'+m+'</button>'}).join("")}
 function confirmPay(){
@@ -454,7 +461,7 @@ function confirmPay(){
   var po=paying; po.ticket=true; $("ov-pay").classList.remove("on");
   if(pendingNew===po){pendingNew=null;commitOrder(po);$("f-err").textContent="Moto #"+po.num+" cobrada y registrada. Ya puede pasar al puente."}
   else renderAll();
-  showTicket(po);
+  showTicket(po); sendTicket(po);
 }
 
 /* ---------- Admin ---------- */

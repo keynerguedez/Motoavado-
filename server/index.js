@@ -97,6 +97,26 @@ async function waEnviar(para, cuerpo) {
   } catch (e) { return { ok: false, error: 'No se pudo llegar a Meta. Intenta de nuevo.' }; }
 }
 
+// ---------- WhatsApp por QR (provisional) y ticket ----------
+// Un fallo de la librería de WhatsApp nunca debe tumbar la facturación.
+process.on('unhandledRejection', (r) => console.error('rechazo sin atender:', r && r.message || r));
+process.on('uncaughtException', (r) => console.error('error sin atender:', r && r.message || r));
+let waqr = null;
+try { waqr = require('./waqr')(DATA); } catch (e) { console.error('WhatsApp QR no disponible:', e.message); }
+function txt(v, max) { return String(v == null ? '' : v).replace(/[\r\n\t]+/g, ' ').replace(/[*_~`]/g, '').trim().slice(0, max); }
+function ticketTexto(d) {
+  const serv = (Array.isArray(d.servicios) ? d.servicios : []).slice(0, 12).map(x => '• ' + txt(x.nombre, 60) + '  ' + txt(x.precio, 12));
+  if (!serv.length) return null;
+  const L = ['*Motolavado R1*', 'Ticket #' + txt(d.num, 8) + ' · ' + new Date().toLocaleString('es-VE', { timeZone: 'America/Caracas', dateStyle: 'short', timeStyle: 'short' }), ''];
+  if (d.cliente) L.push('Hola ' + txt(d.cliente, 40) + ', este es el ticket de tu lavado.');
+  L.push('Placa: *' + txt(d.placa, 12) + '*' + (d.modelo ? ' · ' + txt(d.modelo, 40) : ''), '', ...serv);
+  if (d.descuento) L.push('Descuento: ' + txt(d.descuento, 10));
+  L.push('', '*Total: ' + txt(d.total, 14) + '*', 'Pagado: ' + txt(d.pagado, 24) + ' por ' + txt(d.metodo, 20) + (d.ref ? ' (ref. ' + txt(d.ref, 20) + ')' : ''));
+  if (d.tasa) L.push('Tasa euro BCV: Bs ' + txt(d.tasa, 14));
+  L.push('', 'Gracias por tu visita.');
+  return L.join('\n');
+}
+
 // ---------- freno a intentos de clave ----------
 const intentos = new Map();
 function ipDe(req) { return String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim(); }
@@ -127,6 +147,7 @@ async function api(req, res, ruta) {
   if (req.method === 'GET') {
     if (ruta === '/api/estado') return json(res, 200, { hayUsuarios: leerUsuarios().length > 0, yo: yo ? publico(yo) : null });
     if (ruta === '/api/yo') return yo ? json(res, 200, publico(yo)) : json(res, 401, { error: 'Sin sesión.' });
+    if (ruta === '/api/waqr') return yo && yo.rol === 'dueno' ? json(res, 200, waqr ? waqr.publico() : { estado: 'error', error: 'No disponible en este servidor.' }) : json(res, 403, { error: 'Solo el dueño.' });
     if (ruta === '/api/whatsapp') return yo && yo.rol === 'dueno' ? json(res, 200, waPublico(waLeer())) : json(res, 403, { error: 'Solo el dueño.' });
     if (ruta === '/api/usuarios') return puede(yo, 'usuarios') ? json(res, 200, leerUsuarios().map(publico)) : json(res, 403, { error: 'No tienes permiso.' });
     return json(res, 404, { error: 'No encontrado.' });
@@ -159,6 +180,26 @@ async function api(req, res, ruta) {
     if (String(d.clave || '').length < 8) return json(res, 400, { error: 'La clave debe tener al menos 8 caracteres.' });
     const u = lista.find(x => x.id === yo.id); u.sal = crypto.randomBytes(16).toString('hex'); u.hash = cifrar(d.clave, u.sal); guardarUsuarios(lista);
     return json(res, 200, { ok: true }, { 'set-cookie': cookieSesion(u) });
+  }
+  if (ruta === '/api/ticket') {
+    if (!puede(yo, 'tablet')) return json(res, 403, { error: 'No tienes permiso.' });
+    const para = waNumero(d.telefono); if (!para) return json(res, 400, { error: 'Teléfono no válido.' });
+    const texto = ticketTexto(d); if (!texto) return json(res, 400, { error: 'Ticket vacío.' });
+    if (!waqr || !waqr.conectado()) return json(res, 503, { ok: false, error: 'WhatsApp no está conectado.' });
+    const r = await waqr.enviarTexto(para, texto);
+    return json(res, r.ok ? 200 : 502, r);
+  }
+  if (ruta.startsWith('/api/waqr/')) {
+    if (yo.rol !== 'dueno') return json(res, 403, { error: 'Solo el dueño.' });
+    if (!waqr) return json(res, 503, { error: 'No disponible en este servidor.' });
+    if (ruta === '/api/waqr/conectar') return json(res, 200, await waqr.iniciar());
+    if (ruta === '/api/waqr/desvincular') return json(res, 200, await waqr.desvincular());
+    if (ruta === '/api/waqr/prueba') {
+      const para = waNumero(d.telefono); if (!para) return json(res, 400, { error: 'Teléfono no válido. Ejemplo: 04141234567.' });
+      const r = await waqr.enviarTexto(para, '*Motolavado R1*\nMensaje de prueba del sistema. Si lo ves, los tickets ya pueden salir por WhatsApp.');
+      return json(res, r.ok ? 200 : 502, r);
+    }
+    return json(res, 404, { error: 'No encontrado.' });
   }
   if (ruta === '/api/whatsapp' || ruta === '/api/whatsapp/prueba') {
     if (yo.rol !== 'dueno') return json(res, 403, { error: 'Solo el dueño.' });
@@ -222,7 +263,7 @@ async function api(req, res, ruta) {
 const servidor = http.createServer((req, res) => {
   const url = new URL(req.url, 'http://localhost');
   let ruta; try { ruta = decodeURIComponent(url.pathname); } catch (e) { res.writeHead(400); return res.end(); }
-  if (ruta === '/health') return json(res, 200, { ok: true, sistema: 'motolavado', version: version(), encendido: INICIO.toISOString(), hora: new Date().toISOString() });
+  if (ruta === '/health') return json(res, 200, { ok: true, sistema: 'motolavado', version: version(), waqr: waqr ? waqr.publico().estado : 'no-disponible', libs: fs.existsSync(path.join(ROOT, 'node_modules', 'baileys')), encendido: INICIO.toISOString(), hora: new Date().toISOString() });
   if (ruta.startsWith('/api/')) return api(req, res, ruta).catch(() => json(res, 500, { error: 'Error del servidor.' }));
 
   const yo = sesion(req);

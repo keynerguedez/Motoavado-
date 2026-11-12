@@ -667,13 +667,14 @@ function renderAll(){
   if(!Object.keys(S.clients).length)$("a-cli").innerHTML='<tr><td colspan="5" class="note">Se llena sola con cada moto que factures.</td></tr>';
 }
 function isEnc(){return $("role").value==="enc"}
+function allowed(v){var y=window.__yo; if(y&&y.rol!=="dueno")return y.permisos.indexOf(v)>=0; return !(isEnc()&&(v==="admin"||v==="vigilante"))}
 function applyRole(){
-  var e=isEnc(); $("tab-admin").hidden=e; $("tab-vigilante").hidden=e;
+  VIEWS.forEach(function(x){$("tab-"+x).hidden=!allowed(x)});
   var cur=VIEWS.filter(function(x){return $("v-"+x).classList.contains("on")})[0]||"tablet"; go(cur);
 }
 function go(v){
   if(VIEWS.indexOf(v)<0)v="tablet";
-  if(isEnc()&&(v==="admin"||v==="vigilante"))v="tablet";
+  if(!allowed(v))v=VIEWS.filter(allowed)[0]||"tablet";
   VIEWS.forEach(function(x){$("v-"+x).classList.toggle("on",x===v);$("tab-"+x).setAttribute("aria-selected",x===v)});
   try{if(location.hash!=="#"+v)location.hash=v}catch(e){}
 }
@@ -812,7 +813,7 @@ renderChips(); renderPrices(); renderAll(); go(location.hash.slice(1)||"tablet")
 if(location.protocol!=="file:"&&window.fetch){fetch("/api/yo").then(function(r){if(r.status===401){location.replace("/entrar");return null}return r.ok?r.json():null}).then(function(u){
   if(!u)return; window.__yo=u; S.user=u.nombre; S.orders.forEach(function(o){o.op=u.nombre}); S.gastos.forEach(function(g){g.op=u.nombre});
   $("btn-salir").hidden=false;
-  if(u.rol==="dueno"){$("lnk-usuarios").hidden=false}else{$("role").value="enc";$("role-lbl").style.display="none"}
+  if(u.permisos.indexOf("usuarios")>=0)$("lnk-usuarios").hidden=false; if(u.rol!=="dueno"){$("role").value="enc";$("role-lbl").style.display="none"}
   applyRole(); renderAll();
 }).catch(function(){})}
  $("a-meta").value=S.meta; renderRules(); setInterval(function(){renderVigilante();renderMeta()},30000);

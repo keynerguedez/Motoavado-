@@ -4,14 +4,23 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Moto Lavado · Usuarios</title>
+<link rel="icon" href="/icono.png">
 <link rel="stylesheet" href="/base.css">
+<style>
+.u{border-top:1px solid var(--line);padding:14px 0;display:flex;flex-direction:column;gap:10px}
+.u .cab{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.u .cab .quien{margin-right:auto}
+.perm{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:8px}
+.perm label{flex-direction:row;align-items:center;gap:8px;font-weight:500;border:1px solid var(--line);border-radius:8px;padding:10px}
+.perm input{width:20px;height:20px;flex:none}
+.ok{color:var(--pri);font-size:.9rem}
+</style>
 </head>
 <body>
 <div class="wrap wide" style="display:flex;flex-direction:column;gap:16px">
   <p style="margin:0"><a href="/">← Volver al sistema</a></p>
   <div class="card">
-    <h1>Usuarios</h1>
-    <p class="note">El encargado solo ve Facturación, Comisiones y Gastos. El dueño ve todo.</p>
+    <h1>Usuarios y permisos</h1>
+    <p class="note">Toca "Editar" para cambiar el tipo de usuario y marcar qué puede ver y hacer cada quien. El dueño (o socio) ve y autoriza todo.</p>
     <div id="lista"></div>
     <div class="err" id="l-err"></div>
   </div>
@@ -20,43 +29,61 @@
     <label>Nombre<input id="n-nombre" type="text" required></label>
     <label>Correo<input id="n-correo" type="email" autocomplete="off" required></label>
     <label>Clave (mínimo 8 caracteres)<input id="n-clave" type="password" autocomplete="new-password" minlength="8" required></label>
-    <label>Tipo<select id="n-rol"><option value="enc">Encargado de tienda</option><option value="dueno">Dueño (ve todo)</option></select></label>
+    <label>Tipo<select id="n-rol"><option value="enc">Encargado de tienda</option><option value="dueno">Dueño / socio (ve todo)</option></select></label>
     <div class="err" id="n-err"></div>
     <button class="pri">Agregar</button>
   </form>
 </div>
 <script>
 (function(){
-  var $=function(i){return document.getElementById(i)}, yo=null;
+  var $=function(i){return document.getElementById(i)}, yo=null, abierto=null, usuarios=[];
+  var PERM=[["tablet","Facturación"],["comisiones","Comisiones"],["gastos","Gastos"],["admin","Administración (ventas, cierre, clientes)"],["vigilante","Vigilante (cámara)"],["autorizar","Autorizar descuentos y gastos"],["usuarios","Crear y editar usuarios"]];
   function esc(s){return String(s).replace(/[&<>"']/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]})}
   function enviar(ruta,datos){return fetch(ruta,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(datos)}).then(function(r){return r.json().then(function(j){return{ok:r.ok,j:j}})})}
-  function cargar(){
-    fetch("/api/usuarios").then(function(r){if(!r.ok){location.replace("/");throw 0}return r.json()}).then(function(l){
-      $("lista").innerHTML=l.map(function(u){
-        return '<div class="fila"><div class="quien"><b>'+esc(u.nombre)+'</b> <span class="note">· '+(u.rol==="dueno"?"Dueño":"Encargado")+'</span><br><span class="note">'+esc(u.correo)+'</span></div>'+
-          '<button class="sm" data-clave="'+u.id+'" data-n="'+esc(u.nombre)+'">Cambiar clave</button>'+
-          (yo&&u.id===yo.id?'':'<button class="sm" data-borrar="'+u.id+'" data-n="'+esc(u.nombre)+'">Quitar</button>')+'</div>';
-      }).join("");
-    }).catch(function(){});
+  function resumen(u){return u.rol==="dueno"?"Ve y autoriza todo":PERM.filter(function(p){return u.permisos.indexOf(p[0])>=0}).map(function(p){return p[1].split(" (")[0]}).join(", ")||"Sin permisos"}
+  function pintar(){
+    var soyDueno=yo&&yo.rol==="dueno";
+    $("lista").innerHTML=usuarios.map(function(u){
+      var puedo=soyDueno||u.rol!=="dueno", h='<div class="u"><div class="cab"><div class="quien"><b>'+esc(u.nombre)+'</b> <span class="note">· '+(u.rol==="dueno"?"Dueño / socio":"Encargado")+(yo&&u.id===yo.id?" · tú":"")+'</span><br><span class="note">'+esc(u.correo)+'</span><br><span class="note">'+esc(resumen(u))+'</span></div>'+
+        (puedo?'<button class="sm" data-editar="'+u.id+'">'+(abierto===u.id?"Cerrar":"Editar")+'</button>':'')+'</div>';
+      if(abierto===u.id&&puedo){
+        h+='<label>Nombre<input data-f="nombre" type="text" value="'+esc(u.nombre)+'"></label>'+
+          '<label>Tipo<select data-f="rol"'+(soyDueno&&u.id!==yo.id?'':' disabled')+'><option value="enc"'+(u.rol==="enc"?" selected":"")+'>Encargado de tienda</option><option value="dueno"'+(u.rol==="dueno"?" selected":"")+'>Dueño / socio (ve todo)</option></select></label>'+
+          '<div data-f="perms"'+(u.rol==="dueno"?" hidden":"")+'><p class="note" style="margin-bottom:8px">Qué puede ver y hacer:</p><div class="perm">'+PERM.map(function(p){var bloque=!soyDueno&&yo.permisos.indexOf(p[0])<0;return '<label><input type="checkbox" value="'+p[0]+'"'+(u.permisos.indexOf(p[0])>=0?" checked":"")+(bloque?" disabled":"")+'>'+p[1]+'</label>'}).join("")+'</div></div>'+
+          '<div class="cab"><button class="pri" data-guardar="'+u.id+'">Guardar cambios</button></div>'+
+          '<label>Clave nueva (solo si la quieres cambiar)<input data-f="clave" type="password" autocomplete="new-password" placeholder="Mínimo 8 caracteres"></label>'+
+          '<div class="cab"><button class="sm" data-clave="'+u.id+'">Cambiar clave</button>'+(u.id===yo.id?'':'<button class="sm" data-borrar="'+u.id+'">Quitar usuario</button>')+'</div>';
+      }
+      return h+'</div>';
+    }).join("");
   }
-  fetch("/api/yo").then(function(r){return r.json()}).then(function(u){yo=u;cargar()});
+  function cargar(){return fetch("/api/usuarios").then(function(r){if(!r.ok){location.replace("/");throw 0}return r.json()}).then(function(l){usuarios=l;pintar()}).catch(function(){})}
+  function aviso(t,bien){var e=$("l-err");e.textContent=t;e.className=bien?"ok":"err"}
+  fetch("/api/yo").then(function(r){return r.json()}).then(function(u){yo=u;if(u.rol!=="dueno")$("n-rol").querySelector('[value="dueno"]').remove();cargar()});
+  $("lista").addEventListener("change",function(ev){
+    if(ev.target.dataset.f==="rol")ev.target.closest(".u").querySelector('[data-f="perms"]').hidden=ev.target.value==="dueno";
+  });
   $("lista").addEventListener("click",function(ev){
-    var t=ev.target;$("l-err").textContent="";
-    if(t.dataset.borrar){
+    var t=ev.target, caja=t.closest(".u"); if(!t.dataset)return;
+    if(t.dataset.editar){abierto=abierto===t.dataset.editar?null:t.dataset.editar;aviso("");pintar()}
+    else if(t.dataset.guardar){
+      var perms=[].slice.call(caja.querySelectorAll('.perm input:checked')).map(function(i){return i.value});
+      enviar("/api/usuarios/editar",{id:t.dataset.guardar,nombre:caja.querySelector('[data-f="nombre"]').value,rol:caja.querySelector('[data-f="rol"]').value,permisos:perms}).then(function(r){
+        if(r.ok){abierto=null;cargar().then(function(){aviso("Cambios guardados. "+r.j.nombre+" los ve la próxima vez que abra el sistema.",true)})}else aviso(r.j.error||"No se pudo guardar.");
+      });
+    }
+    else if(t.dataset.clave){
+      enviar("/api/usuarios/clave",{id:t.dataset.clave,clave:caja.querySelector('[data-f="clave"]').value}).then(function(r){if(r.ok){caja.querySelector('[data-f="clave"]').value="";aviso("Clave cambiada.",true)}else aviso(r.j.error)});
+    }
+    else if(t.dataset.borrar){
       if(t.dataset.ok!=="1"){t.dataset.ok="1";t.textContent="¿Seguro? Toca otra vez";return}
-      enviar("/api/usuarios/borrar",{id:t.dataset.borrar}).then(function(r){if(!r.ok)$("l-err").textContent=r.j.error;cargar()});
-    }else if(t.dataset.clave){
-      var fila=t.parentNode;if(fila.querySelector("input"))return;
-      var i=document.createElement("input");i.type="password";i.placeholder="Clave nueva (mínimo 8)";i.autocomplete="new-password";i.style.flex="1 1 200px";
-      var b=document.createElement("button");b.className="sm pri";b.textContent="Guardar";
-      b.addEventListener("click",function(){enviar("/api/usuarios/clave",{id:t.dataset.clave,clave:i.value}).then(function(r){if(r.ok){cargar();$("l-err").textContent="Clave cambiada."}else $("l-err").textContent=r.j.error})});
-      fila.appendChild(i);fila.appendChild(b);i.focus();
+      enviar("/api/usuarios/borrar",{id:t.dataset.borrar}).then(function(r){if(!r.ok)aviso(r.j.error);else{abierto=null;aviso("Usuario quitado.",true)}cargar()});
     }
   });
   $("f-nuevo").addEventListener("submit",function(ev){
     ev.preventDefault();$("n-err").textContent="";
     enviar("/api/usuarios",{nombre:$("n-nombre").value,correo:$("n-correo").value,clave:$("n-clave").value,rol:$("n-rol").value}).then(function(r){
-      if(r.ok){ev.target.reset();cargar()}else $("n-err").textContent=r.j.error||"No se pudo agregar.";
+      if(r.ok){ev.target.reset();abierto=r.j.rol==="enc"?r.j.id:null;cargar()}else $("n-err").textContent=r.j.error||"No se pudo agregar.";
     });
   });
 })();

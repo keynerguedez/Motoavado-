@@ -36,7 +36,12 @@ function claveCorrecta(u, clave) {
   const a = Buffer.from(cifrar(clave, u.sal), 'hex'), b = Buffer.from(u.hash, 'hex');
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
-function publico(u) { return { id: u.id, nombre: u.nombre, correo: u.correo, rol: u.rol, creado: u.creado }; }
+const PERMISOS = ['tablet', 'comisiones', 'gastos', 'admin', 'vigilante', 'autorizar', 'usuarios'];
+const BASE_ENC = ['tablet', 'comisiones', 'gastos'];
+// El dueño siempre tiene todo. Al encargado se le marca qué puede ver y hacer.
+function permisos(u) { return u.rol === 'dueno' ? PERMISOS.slice() : (Array.isArray(u.permisos) ? u.permisos.filter(x => PERMISOS.includes(x)) : BASE_ENC.slice()); }
+function puede(u, p) { return !!u && permisos(u).includes(p); }
+function publico(u) { return { id: u.id, nombre: u.nombre, correo: u.correo, rol: u.rol, permisos: permisos(u), creado: u.creado }; }
 function validar(d, lista, pedirClave) {
   const nombre = String(d.nombre || '').trim(), correo = String(d.correo || '').trim().toLowerCase(), clave = String(d.clave || '');
   if (nombre.length < 2 || nombre.length > 60) return { error: 'Escribe el nombre.' };
@@ -100,7 +105,7 @@ async function api(req, res, ruta) {
   if (req.method === 'GET') {
     if (ruta === '/api/estado') return json(res, 200, { hayUsuarios: leerUsuarios().length > 0, yo: yo ? publico(yo) : null });
     if (ruta === '/api/yo') return yo ? json(res, 200, publico(yo)) : json(res, 401, { error: 'Sin sesión.' });
-    if (ruta === '/api/usuarios') return yo && yo.rol === 'dueno' ? json(res, 200, leerUsuarios().map(publico)) : json(res, 403, { error: 'Solo el dueño.' });
+    if (ruta === '/api/usuarios') return puede(yo, 'usuarios') ? json(res, 200, leerUsuarios().map(publico)) : json(res, 403, { error: 'No tienes permiso.' });
     return json(res, 404, { error: 'No encontrado.' });
   }
   if (req.method !== 'POST') return json(res, 405, { error: 'Método no permitido.' });
@@ -132,11 +137,33 @@ async function api(req, res, ruta) {
     const u = lista.find(x => x.id === yo.id); u.sal = crypto.randomBytes(16).toString('hex'); u.hash = cifrar(d.clave, u.sal); guardarUsuarios(lista);
     return json(res, 200, { ok: true }, { 'set-cookie': cookieSesion(u) });
   }
-  if (yo.rol !== 'dueno') return json(res, 403, { error: 'Solo el dueño.' });
+  if (!puede(yo, 'usuarios')) return json(res, 403, { error: 'No tienes permiso.' });
+  const soyDueno = yo.rol === 'dueno';
+  // Solo un dueño puede tocar a otro dueño o nombrar dueños.
+  const objetivo = lista.find(x => x.id === d.id);
+  if (!soyDueno && ((objetivo && objetivo.rol === 'dueno') || d.rol === 'dueno')) return json(res, 403, { error: 'Solo un dueño puede hacer eso.' });
+  if (ruta === '/api/usuarios/editar') {
+    const u = objetivo; if (!u) return json(res, 404, { error: 'No existe.' });
+    const rol = d.rol === 'dueno' ? 'dueno' : 'enc';
+    if (u.rol === 'dueno' && rol !== 'dueno') {
+      if (u.id === yo.id) return json(res, 400, { error: 'No puedes quitarte a ti mismo el acceso de dueño.' });
+      if (lista.filter(x => x.rol === 'dueno').length < 2) return json(res, 400, { error: 'Tiene que quedar al menos un dueño.' });
+    }
+    const nombre = String(d.nombre || u.nombre).trim();
+    if (nombre.length < 2 || nombre.length > 60) return json(res, 400, { error: 'Escribe el nombre.' });
+    u.nombre = nombre; u.rol = rol;
+    if (rol === 'enc') {
+      let p = Array.isArray(d.permisos) ? d.permisos.filter(x => PERMISOS.includes(x)) : permisos(u);
+      if (!soyDueno) p = p.filter(x => puede(yo, x)); // nadie da permisos que no tiene
+      u.permisos = p;
+    } else delete u.permisos;
+    guardarUsuarios(lista);
+    return json(res, 200, publico(u));
+  }
   if (ruta === '/api/usuarios') {
     const rol = d.rol === 'dueno' ? 'dueno' : 'enc';
     const v = validar(d, lista, true); if (v.error) return json(res, 400, v);
-    const u = nuevoUsuario(v, rol); lista.push(u); guardarUsuarios(lista);
+    const u = nuevoUsuario(v, rol); if (rol === 'enc') u.permisos = BASE_ENC.slice(); lista.push(u); guardarUsuarios(lista);
     return json(res, 200, publico(u));
   }
   if (ruta === '/api/usuarios/clave') {
@@ -162,7 +189,7 @@ const servidor = http.createServer((req, res) => {
 
   const yo = sesion(req);
   if (!PUBLICAS.has(ruta) && !yo) { res.writeHead(302, { location: '/entrar', 'cache-control': 'no-store' }); return res.end(); }
-  if (SOLO_DUENO.has(ruta) && (!yo || yo.rol !== 'dueno')) { res.writeHead(302, { location: '/', 'cache-control': 'no-store' }); return res.end(); }
+  if (SOLO_DUENO.has(ruta) && !(ruta === '/_instalacion.log' ? yo && yo.rol === 'dueno' : puede(yo, 'usuarios'))) { res.writeHead(302, { location: '/', 'cache-control': 'no-store' }); return res.end(); }
   if (ruta === '/_instalacion.log') {
     return fs.readFile('/var/log/motolavado-install.log', (err, data) => {
       res.writeHead(err ? 404 : 200, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' });

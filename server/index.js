@@ -37,7 +37,7 @@ function claveCorrecta(u, clave) {
   const a = Buffer.from(cifrar(clave, u.sal), 'hex'), b = Buffer.from(u.hash, 'hex');
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
-const PERMISOS = ['tablet', 'comisiones', 'gastos', 'admin', 'vigilante', 'autorizar', 'usuarios'];
+const PERMISOS = ['tablet', 'comisiones', 'gastos', 'clientes', 'admin', 'vigilante', 'autorizar', 'usuarios'];
 const BASE_ENC = ['tablet', 'comisiones', 'gastos'];
 // El dueño siempre tiene todo. Al encargado se le marca qué puede ver y hacer.
 function permisos(u) { return u.rol === 'dueno' ? PERMISOS.slice() : (Array.isArray(u.permisos) ? u.permisos.filter(x => PERMISOS.includes(x)) : BASE_ENC.slice()); }
@@ -76,6 +76,35 @@ function sesion(req) {
   return u && u.hash.slice(0, 12) === d.h ? u : null;
 }
 
+// ---------- ventas y base de datos de clientes (archivos en data/) ----------
+const CLIENTES = path.join(DATA, 'clientes.json');
+function leerClientes() { try { return JSON.parse(fs.readFileSync(CLIENTES, 'utf8')); } catch (e) { return {}; } }
+function guardarClientes(c) { const tmp = CLIENTES + '.tmp'; fs.writeFileSync(tmp, JSON.stringify(c), { mode: 0o600 }); fs.renameSync(tmp, CLIENTES); }
+function limpio(v, max) { return String(v == null ? '' : v).replace(/[\r\n\t]+/g, ' ').trim().slice(0, max); }
+function dinero(v) { const n = Math.round(Number(v) * 100) / 100; return n >= 0 && n < 100000 ? n : null; }
+function fechaCaracas(d) { return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Caracas' }).format(d); }
+function registrarVenta(d, yo) {
+  const tel = String(d.telefono || '').replace(/\D/g, '');
+  if (!/^0[24]\d{9}$/.test(tel)) return { error: 'Teléfono no válido.' };
+  const placa = limpio(d.placa, 12).toUpperCase(); if (!placa) return { error: 'Falta la placa.' };
+  const servicios = (Array.isArray(d.servicios) ? d.servicios : []).slice(0, 12).map(x => ({ id: limpio(x.id, 10), nombre: limpio(x.nombre, 60), precio: dinero(x.precio) })).filter(x => x.nombre && x.precio != null);
+  const total = dinero(d.total);
+  if (!servicios.length || total == null) return { error: 'Venta incompleta.' };
+  const ahora = new Date(), dia = fechaCaracas(ahora), archivo = path.join(DATA, 'ventas-' + dia.slice(0, 7) + '.jsonl');
+  let delDia = 0; try { delDia = fs.readFileSync(archivo, 'utf8').split('\n').filter(l => l.includes('"dia":"' + dia + '"')).length; } catch (e) {}
+  const v = { id: crypto.randomBytes(6).toString('hex'), num: delDia + 1, dia, fecha: ahora.toISOString(), usuario: yo.nombre, usuarioId: yo.id, telefono: tel, cliente: limpio(d.cliente, 60), placa, modelo: limpio(d.modelo, 60),
+    servicios, total, descuento: limpio(d.descuento, 10), lavador: limpio(d.lavador, 40), metodo: limpio(d.metodo, 20), ref: limpio(d.ref, 30), moneda: limpio(d.moneda, 6), monto: dinero(d.monto), tasa: Number(d.tasa) > 0 ? Number(d.tasa) : null };
+  fs.appendFileSync(archivo, JSON.stringify(v) + '\n', { mode: 0o600 });
+  const cs = leerClientes(), c = cs[tel] || { telefono: tel, nombre: '', motos: [], visitas: 0, gastado: 0, primera: v.fecha };
+  if (v.cliente && v.cliente !== 'Sin nombre') c.nombre = v.cliente;
+  const m = c.motos.find(x => x.placa === placa);
+  if (m) { m.ultima = v.fecha; m.visitas = (m.visitas || 1) + 1; if (v.modelo) m.modelo = v.modelo; } else c.motos.push({ placa, modelo: v.modelo, ultima: v.fecha, visitas: 1 });
+  c.visitas++; c.gastado = Math.round((c.gastado + total) * 100) / 100; c.ultima = v.fecha; c.ultimoServicio = servicios.map(x => x.nombre).join(' + ');
+  cs[tel] = c; guardarClientes(cs);
+  return { ok: true, id: v.id, num: v.num };
+}
+function csv(v) { v = String(v == null ? '' : v); if (/^[=+\-@]/.test(v)) v = "'" + v; return '"' + v.replace(/"/g, '""') + '"'; }
+
 // ---------- WhatsApp oficial (Meta Cloud API). La llave la pega el dueño en pantalla y queda en data/, nunca en el repositorio ----------
 const WA_ARCHIVO = path.join(DATA, 'whatsapp.json');
 const WA_BASE = process.env.WA_BASE || 'https://graph.facebook.com';
@@ -108,7 +137,7 @@ function ticketTexto(d) {
   const serv = (Array.isArray(d.servicios) ? d.servicios : []).slice(0, 12).map(x => '• ' + txt(x.nombre, 60) + '  ' + txt(x.precio, 12));
   if (!serv.length) return null;
   const L = ['*Motolavado R1*', 'Ticket #' + txt(d.num, 8) + ' · ' + new Date().toLocaleString('es-VE', { timeZone: 'America/Caracas', dateStyle: 'short', timeStyle: 'short' }), ''];
-  if (d.cliente) L.push('Hola ' + txt(d.cliente, 40) + ', este es el ticket de tu lavado.');
+  if (d.cliente && d.cliente !== 'Sin nombre') L.push('Hola ' + txt(d.cliente, 40) + ', este es el ticket de tu lavado.');
   L.push('Placa: *' + txt(d.placa, 12) + '*' + (d.modelo ? ' · ' + txt(d.modelo, 40) : ''), '', ...serv);
   if (d.descuento) L.push('Descuento: ' + txt(d.descuento, 10));
   L.push('', '*Total: ' + txt(d.total, 14) + '*', 'Pagado: ' + txt(d.pagado, 24) + ' por ' + txt(d.metodo, 20) + (d.ref ? ' (ref. ' + txt(d.ref, 20) + ')' : ''));
@@ -147,6 +176,14 @@ async function api(req, res, ruta) {
   if (req.method === 'GET') {
     if (ruta === '/api/estado') return json(res, 200, { hayUsuarios: leerUsuarios().length > 0, yo: yo ? publico(yo) : null });
     if (ruta === '/api/yo') return yo ? json(res, 200, publico(yo)) : json(res, 401, { error: 'Sin sesión.' });
+    if (ruta === '/api/clientes' || ruta === '/api/clientes.csv') {
+      if (!puede(yo, 'clientes')) return json(res, 403, { error: 'No tienes permiso.' });
+      const lista = Object.values(leerClientes()).sort((a, b) => String(b.ultima).localeCompare(String(a.ultima)));
+      if (ruta === '/api/clientes') return json(res, 200, lista);
+      const filas = [['Nombre', 'Teléfono', 'Motos', 'Visitas', 'Gastado', 'Primera visita', 'Última visita', 'Último servicio']].concat(lista.map(c => [c.nombre, c.telefono, c.motos.map(m => m.placa + (m.modelo ? ' ' + m.modelo : '')).join(' / '), c.visitas, c.gastado, fechaCaracas(new Date(c.primera)), fechaCaracas(new Date(c.ultima)), c.ultimoServicio]));
+      res.writeHead(200, { 'content-type': 'text/csv; charset=utf-8', 'content-disposition': 'attachment; filename="clientes-motolavado.csv"', 'cache-control': 'no-store' });
+      return res.end('\ufeff' + filas.map(f => f.map(csv).join(',')).join('\r\n'));
+    }
     if (ruta === '/api/waqr') return yo && yo.rol === 'dueno' ? json(res, 200, waqr ? waqr.publico() : { estado: 'error', error: 'No disponible en este servidor.' }) : json(res, 403, { error: 'Solo el dueño.' });
     if (ruta === '/api/whatsapp') return yo && yo.rol === 'dueno' ? json(res, 200, waPublico(waLeer())) : json(res, 403, { error: 'Solo el dueño.' });
     if (ruta === '/api/usuarios') return puede(yo, 'usuarios') ? json(res, 200, leerUsuarios().map(publico)) : json(res, 403, { error: 'No tienes permiso.' });
@@ -180,6 +217,11 @@ async function api(req, res, ruta) {
     if (String(d.clave || '').length < 8) return json(res, 400, { error: 'La clave debe tener al menos 8 caracteres.' });
     const u = lista.find(x => x.id === yo.id); u.sal = crypto.randomBytes(16).toString('hex'); u.hash = cifrar(d.clave, u.sal); guardarUsuarios(lista);
     return json(res, 200, { ok: true }, { 'set-cookie': cookieSesion(u) });
+  }
+  if (ruta === '/api/ventas') {
+    if (!puede(yo, 'tablet')) return json(res, 403, { error: 'No tienes permiso.' });
+    const r = registrarVenta(d, yo);
+    return json(res, r.error ? 400 : 200, r);
   }
   if (ruta === '/api/ticket') {
     if (!puede(yo, 'tablet')) return json(res, 403, { error: 'No tienes permiso.' });

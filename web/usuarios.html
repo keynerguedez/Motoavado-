@@ -37,7 +37,7 @@
 <script>
 (function(){
   var $=function(i){return document.getElementById(i)}, yo=null, abierto=null, usuarios=[];
-  var PERM=[["tablet","Facturación"],["comisiones","Comisiones"],["gastos","Gastos"],["admin","Administración (ventas, cierre, clientes)"],["vigilante","Vigilante (cámara)"],["autorizar","Autorizar descuentos y gastos"],["usuarios","Crear y editar usuarios"]];
+  var PERM=[["tablet","Facturación"],["comisiones","Comisiones"],["gastos","Gastos"],["clientes","Base de datos de clientes"],["admin","Administración (ventas, cierre, clientes)"],["vigilante","Vigilante (cámara)"],["autorizar","Autorizar descuentos y gastos"],["usuarios","Crear y editar usuarios"]];
   function esc(s){return String(s).replace(/[&<>"']/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]})}
   function enviar(ruta,datos){return fetch(ruta,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(datos)}).then(function(r){return r.json().then(function(j){return{ok:r.ok,j:j}})})}
   function resumen(u){return u.rol==="dueno"?"Ve y autoriza todo":PERM.filter(function(p){return u.permisos.indexOf(p[0])>=0}).map(function(p){return p[1].split(" (")[0]}).join(", ")||"Sin permisos"}

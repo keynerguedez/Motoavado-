@@ -132,6 +132,7 @@ details.grp summary{cursor:pointer;font-weight:600;font-size:.9rem;color:var(--m
     <button role="tab" id="tab-tablet" data-act="go" data-v="tablet">Facturación</button>
     <button role="tab" id="tab-comisiones" data-act="go" data-v="comisiones">Comisiones</button>
     <button role="tab" id="tab-gastos" data-act="go" data-v="gastos">Gastos</button>
+    <button role="tab" id="tab-clientes" data-act="go" data-v="clientes">Clientes</button>
     <button role="tab" id="tab-admin" data-act="go" data-v="admin">Administración<span class="badge" id="badge" hidden>0</span></button>
     <button role="tab" id="tab-vigilante" data-act="go" data-v="vigilante">Vigilante (cámara)<span class="badge" id="badge-v" hidden>0</span></button>
   </div>
@@ -258,6 +259,16 @@ details.grp summary{cursor:pointer;font-weight:600;font-size:.9rem;color:var(--m
     </div>
   </section>
 
+  <!-- ============ CLIENTES ============ -->
+  <section class="view" id="v-clientes">
+    <div class="card stack">
+      <div class="row" style="flex-wrap:wrap;gap:10px"><h2 style="margin-right:auto">Base de datos de clientes</h2><span class="note" id="c-cuenta"></span><a class="btn sm" href="/api/clientes.csv">Descargar en Excel</a></div>
+      <input type="text" id="c-buscar" placeholder="Buscar por nombre, teléfono o placa">
+      <div class="tablewrap"><table style="min-width:640px"><thead><tr><th>Cliente</th><th>Teléfono</th><th>Moto (placa · modelo)</th><th class="r">Visitas</th><th>Última visita</th><th>Último servicio</th><th class="r">Ha gastado</th></tr></thead><tbody id="c-rows"></tbody></table></div>
+      <p class="note">Se llena sola con cada moto que se cobra en Facturación.</p>
+    </div>
+  </section>
+
   <!-- ============ VIGILANTE ============ -->
   <section class="view" id="v-vigilante">
     <div class="stack" style="gap:16px">
@@ -322,7 +333,7 @@ var S={
   week:[["Vie",0],["Sáb",0],["Dom",0],["Lun",0],["Mar",0],["Mié",0]]
 };
 var draft={photo:null,svc:{}}, paying=null, payMethod=null;
-var VIEWS=["tablet","comisiones","gastos","admin","vigilante"], EXPECT={lp:15,la:20,rp:15,ra:20,pre:35,vip:45,pc:10,pp:30,pg:40,px:50,cp:45,cg:55,cx:65,ca:15,lc:5,kit:5}, NOW=Date.now();
+var VIEWS=["tablet","comisiones","gastos","clientes","admin","vigilante"], EXPECT={lp:15,la:20,rp:15,ra:20,pre:35,vip:45,pc:10,pp:30,pg:40,px:50,cp:45,cg:55,cx:65,ca:15,lc:5,kit:5}, NOW=Date.now();
 function hhmm(d){return String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0")}
 S.bridges=[{n:1,state:"libre"},{n:2,state:"libre"},{n:3,state:"libre"},{n:4,state:"libre"}];
 S.camCount=0;
@@ -444,6 +455,21 @@ function ticketHtml(o){
     +'<b class="row" style="justify-content:space-between"><span>Total</span><span class="num">'+usd(total(o))+'</span></b><span>Pagado: <b class="num">'+a.txt+'</b> por '+esc(o.pay.method)+(o.pay.ref?' (ref. '+esc(o.pay.ref)+')':'')+'</span>'
     +(a.cur==="Bs"?'<span class="note num">Tasa euro BCV: Bs '+fmtN(o.pay.tasa)+'</span>':'')+'<span>Gracias por tu visita.</span></div>';
 }
+var CLI=[];
+function loadClientes(){
+  if(!window.__yo){CLI=Object.keys(S.clients).map(function(t){var os=S.orders.filter(function(o){return o.tel===t});return{nombre:S.clients[t].nombre,telefono:t,motos:os.map(function(o){return{placa:o.placa,modelo:o.modelo}}),visitas:os.length,gastado:os.reduce(function(a,o){return a+total(o)},0),ultima:null,ultimoServicio:os.length?os[os.length-1].svc.map(function(id){return svc(id).name}).join(" + "):""}});renderClientes();return}
+  fetch("/api/clientes").then(function(r){return r.ok?r.json():[]}).then(function(l){CLI=l;renderClientes()}).catch(function(){});
+}
+function renderClientes(){
+  var q=$("c-buscar").value.trim().toLowerCase(), l=CLI.filter(function(c){return !q||(c.nombre+" "+c.telefono+" "+c.motos.map(function(m){return m.placa+" "+(m.modelo||"")}).join(" ")).toLowerCase().indexOf(q)>=0});
+  $("c-cuenta").textContent=CLI.length+(CLI.length===1?" cliente":" clientes");
+  $("c-rows").innerHTML=l.length?l.map(function(c){return '<tr><td>'+esc(c.nombre||"Sin nombre")+'</td><td class="num">'+esc(fmtTel(c.telefono))+'</td><td>'+c.motos.map(function(m){return '<b>'+esc(m.placa)+'</b>'+(m.modelo?' · '+esc(m.modelo):'')}).join("<br>")+'</td><td class="r num">'+c.visitas+'</td><td>'+(c.ultima?new Date(c.ultima).toLocaleDateString("es-VE"):"hoy")+'</td><td>'+esc(c.ultimoServicio||"")+'</td><td class="r num">'+usd(c.gastado)+'</td></tr>'}).join(""):'<tr><td colspan="7" class="note">'+(CLI.length?"Nadie coincide con la búsqueda.":"Todavía no hay clientes. Aparecen aquí al cobrar la primera moto.")+'</td></tr>';
+}
+function saveSale(o){
+  if(!window.__yo)return; var a=paidAmt(o);
+  fetch("/api/ventas",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({telefono:o.tel,cliente:cliName(o),placa:o.placa,modelo:o.modelo,servicios:o.svc.map(function(id){return{id:id,nombre:svc(id).name,precio:svc(id).price}}),total:total(o),descuento:o.disc&&o.disc.status==="approved"?o.disc.pct+"%":"",lavador:o.lav,metodo:o.pay.method,ref:o.pay.ref,moneda:a.cur,monto:a.val,tasa:o.pay.tasa})})
+  .then(function(r){if(!r.ok)$("f-err").textContent="Ojo: la moto #"+o.num+" no se guardó en el servidor. Avisa al dueño."}).catch(function(){$("f-err").textContent="Ojo: sin conexión, la moto #"+o.num+" no se guardó en el servidor."});
+}
 function sendTicket(o){
   var k=$("k-estado"); if(!window.__yo){k.textContent="Así le llega por WhatsApp.";return}
   var a=paidAmt(o); k.textContent="Enviando por WhatsApp…";
@@ -461,7 +487,7 @@ function confirmPay(){
   var po=paying; po.ticket=true; $("ov-pay").classList.remove("on");
   if(pendingNew===po){pendingNew=null;commitOrder(po);$("f-err").textContent="Moto #"+po.num+" cobrada y registrada. Ya puede pasar al puente."}
   else renderAll();
-  showTicket(po); sendTicket(po);
+  showTicket(po); saveSale(po); sendTicket(po);
 }
 
 /* ---------- Admin ---------- */
@@ -675,7 +701,7 @@ function renderAll(){
   if(!Object.keys(S.clients).length)$("a-cli").innerHTML='<tr><td colspan="5" class="note">Se llena sola con cada moto que factures.</td></tr>';
 }
 function isEnc(){return $("role").value==="enc"}
-function allowed(v){var y=window.__yo; if(y&&y.rol!=="dueno")return y.permisos.indexOf(v)>=0; return !(isEnc()&&(v==="admin"||v==="vigilante"))}
+function allowed(v){var y=window.__yo; if(y&&y.rol!=="dueno")return y.permisos.indexOf(v)>=0; return !(isEnc()&&(v==="admin"||v==="vigilante"||v==="clientes"))}
 function applyRole(){
   VIEWS.forEach(function(x){$("tab-"+x).hidden=!allowed(x)});
   var cur=VIEWS.filter(function(x){return $("v-"+x).classList.contains("on")})[0]||"tablet"; go(cur);
@@ -685,6 +711,7 @@ function go(v){
   if(!allowed(v))v=VIEWS.filter(allowed)[0]||"tablet";
   VIEWS.forEach(function(x){$("v-"+x).classList.toggle("on",x===v);$("tab-"+x).setAttribute("aria-selected",x===v)});
   try{if(location.hash!=="#"+v)location.hash=v}catch(e){}
+  if(v==="clientes")loadClientes();
 }
 
 document.addEventListener("click",function(ev){
@@ -799,6 +826,7 @@ document.addEventListener("input",function(ev){
   else if(t.id==="a-meta"){var mv=parseInt(t.value,10);if(mv>0){S.meta=mv;renderMeta()}}
   else if(t.id==="a-tasa"){var x=parseFloat(t.value);if(x>0){S.tasa=x;draftTotal();renderAll()}}
 });
+$("c-buscar").addEventListener("input",renderClientes);
 window.addEventListener("hashchange",function(){go(location.hash.slice(1))});
 
 (function seedDay(){
@@ -819,7 +847,7 @@ window.addEventListener("hashchange",function(){go(location.hash.slice(1))});
 renderChips(); renderPrices(); renderAll(); go(location.hash.slice(1)||"tablet");
 // Sesión real: el servidor dice quién entró y qué puede ver.
 if(location.protocol!=="file:"&&window.fetch){fetch("/api/yo").then(function(r){if(r.status===401){location.replace("/entrar");return null}return r.ok?r.json():null}).then(function(u){
-  if(!u)return; window.__yo=u; S.user=u.nombre; S.orders.forEach(function(o){o.op=u.nombre}); S.gastos.forEach(function(g){g.op=u.nombre});
+  if(!u)return; window.__yo=u; S.user=u.nombre; S.orders=[];S.clients={};S.gastos=[];S.log=[];S.camCount=0;S.bridges.forEach(function(b){b.state="libre"});
   $("btn-salir").hidden=false;
   if(u.permisos.indexOf("usuarios")>=0)$("lnk-usuarios").hidden=false; if(u.rol==="dueno")$("lnk-wa").hidden=false; if(u.rol!=="dueno"){$("role").value="enc";$("role-lbl").style.display="none"}
   applyRole(); renderAll();

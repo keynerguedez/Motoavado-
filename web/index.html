@@ -140,7 +140,8 @@ details.grp summary{cursor:pointer;font-weight:600;font-size:.9rem;color:var(--m
   <a class="btn sm" id="lnk-wa" href="/whatsapp" hidden>WhatsApp</a>
   <button class="btn sm" id="btn-salir" data-act="salir" hidden>Salir</button>
   <label class="row note" id="role-lbl" style="gap:6px">Ver como<select id="role" style="width:auto"><option value="dueno">Dueño (ve todo)</option><option value="enc">Encargado de tienda</option></select></label>
-  <button class="btn sm" data-act="reset">Vaciar el día</button>
+  <button class="btn sm" id="btn-reset" data-act="reset">Vaciar el día</button>
+  <button class="btn sm" id="btn-ejborrar" data-act="ejborrar" hidden>Borrar datos de ejemplo</button>
 </header>
 <main>
   <!-- ============ TABLET ============ -->
@@ -470,6 +471,38 @@ function saveSale(o,sigue){
   fetch("/api/ventas",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({telefono:o.tel,cliente:cliName(o),placa:o.placa,modelo:o.modelo,servicios:o.svc.map(function(id){return{id:id,nombre:svc(id).name,precio:svc(id).price}}),total:total(o),descuento:o.disc&&o.disc.status==="approved"?o.disc.pct+"%":"",lavador:o.lav,metodo:o.pay.method,ref:o.pay.ref,moneda:a.cur,monto:a.val,tasa:o.pay.tasa})})
   .then(function(r){return r.json().then(function(j){if(!r.ok)$("f-err").textContent="Ojo: la moto #"+o.num+" no se guardó en el servidor. Avisa al dueño.";sigue(r.ok?j.num:null)})}).catch(function(){$("f-err").textContent="Ojo: sin conexión, la moto #"+o.num+" no se guardó en el servidor.";sigue(null)});
 }
+function loadDia(){
+  return fetch("/api/dia").then(function(r){return r.ok?r.json():null}).then(function(d){
+    if(!d)return; var cols=["#2f3b46","#a8443c","#2b5f9e","#8a9aa5","#6b7780","#3f7a52"];
+    S.orders=[];S.clients={};
+    d.ventas.forEach(function(v,i){
+      var ids=v.servicios.map(function(x){return x.id}).filter(function(id){return svc(id)}); if(!ids.length)return;
+      var pct=parseFloat(v.descuento)||0;
+      S.clients[v.telefono]={nombre:v.cliente||"Sin nombre",prev:(d.previas&&d.previas[v.telefono])||0};
+      S.orders.push({num:v.num,time:hhmm(new Date(v.fecha)),placa:v.placa,modelo:v.modelo,photo:ph(cols[i%cols.length]),svc:ids,lav:v.lavador,tel:v.telefono,disc:pct?{pct:pct,motivo:"",status:"approved"}:null,pay:{method:v.metodo,ref:v.ref,tasa:v.tasa||S.tasa,cur:v.moneda,val:v.monto},op:v.usuario,ticket:true,ejemplo:!!v.ejemplo});
+    });
+    S.gastos=d.gastos.map(function(g,i){return{id:i+1,time:"",desc:g.desc,monto:g.monto,real:g.monto,cat:"Otros",pago:g.pago,foto:ph("#6b7780"),factura:ph("#8a9aa5"),status:"done",op:g.usuario}});
+    $("btn-ejborrar").hidden=!(d.hayEjemplo&&window.__yo&&window.__yo.rol==="dueno");
+    renderAll();
+  }).catch(function(){});
+}
+// Enlace de ejemplo: /?ej=lp:5,pc:1&ef=0&g=33:pm:Jabon|8:ef:Delivery  (solo el dueño, y pide confirmación)
+function ejemploDesdeEnlace(){
+  var q=new URLSearchParams(location.search), ej=q.get("ej"); if(!ej||!window.__yo||window.__yo.rol!=="dueno")return;
+  var cant={}, txt=[]; ej.split(",").forEach(function(p){var kv=p.split(":"), s=svc(kv[0]), n=parseInt(kv[1],10); if(s&&n>0){cant[kv[0]]=n;txt.push(n+" × "+s.name)}});
+  var gastos=(q.get("g")||"").split("|").filter(Boolean).map(function(x){var a=x.split(":");return{monto:parseFloat(a[0]),pago:a[1],desc:a.slice(2).join(":")}});
+  history.replaceState(null,"",location.pathname+location.hash);
+  if(!txt.length)return;
+  var ov=document.createElement("div"); ov.className="overlay on";
+  ov.innerHTML='<div class="sheet stack"><h2>¿Cargar este día de ejemplo?</h2><div>'+txt.map(esc).join("<br>")+'</div>'+(gastos.length?'<div class="note">Gastos: '+gastos.map(function(g){return "$"+g.monto+" "+esc(g.desc)}).join(", ")+'</div>':'')+'<p class="note">Los clientes, placas y teléfonos son inventados. No se envía ningún WhatsApp. Después se borra con el botón "Borrar datos de ejemplo".</p><div class="err" id="ej-err"></div><div class="row"><button class="btn pri" id="ej-si">Cargar</button><button class="btn" id="ej-no">No</button></div></div>';
+  document.body.appendChild(ov);
+  ov.querySelector("#ej-no").onclick=function(){ov.remove()};
+  ov.querySelector("#ej-si").onclick=function(){
+    this.disabled=true;
+    fetch("/api/ejemplo",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({cantidades:cant,efectivo:parseFloat(q.get("ef"))||0,gastos:gastos,tasa:S.tasa,lavadores:S.lavadores,catalogo:S.services.map(function(s){return{id:s.id,nombre:s.name,precio:s.price,principal:!!s.pay}})})})
+    .then(function(r){return r.json()}).then(function(j){if(j.error){ov.querySelector("#ej-err").textContent=j.error;return}ov.remove();return loadDia()});
+  };
+}
 var buscaT=null, buscaN=0;
 function buscarCli(q){
   if(!window.__yo)return; clearTimeout(buscaT);
@@ -767,6 +800,7 @@ document.addEventListener("click",function(ev){
   else if(a==="mis")go("comisiones");
   else if(a==="closeticket")$("ov-ticket").classList.remove("on");
   else if(a==="lavdet"){comSel=t.dataset.l;renderCom()}
+  else if(a==="ejborrar"){if(t.dataset.ok!=="1"){t.dataset.ok="1";t.textContent="¿Seguro? Toca otra vez";return}t.dataset.ok="";t.textContent="Borrar datos de ejemplo";fetch("/api/ejemplo/borrar",{method:"POST",headers:{"content-type":"application/json"},body:"{}"}).then(function(){return loadDia()})}
   else if(a==="reset"){S.orders=[];S.clients={};S.gastos=[];S.log=[];S.camCount=0;S.bridges.forEach(function(b){b.state="libre"});comSel=null;renderAll()}
   else if(a==="tglT"){openT[t.dataset.k]=!openT[t.dataset.k];renderTablet()}
   else if(a==="tglA"){openA[t.dataset.k]=!openA[t.dataset.k];renderAll()}
@@ -867,7 +901,8 @@ if(location.protocol!=="file:"&&window.fetch){fetch("/api/yo").then(function(r){
   if(!u)return; window.__yo=u; S.user=u.nombre; S.orders=[];S.clients={};S.gastos=[];S.log=[];S.camCount=0;S.bridges.forEach(function(b){b.state="libre"});
   $("btn-salir").hidden=false;
   if(u.permisos.indexOf("usuarios")>=0)$("lnk-usuarios").hidden=false; if(u.rol==="dueno")$("lnk-wa").hidden=false; if(u.rol!=="dueno"){$("role").value="enc";$("role-lbl").style.display="none"}
-  applyRole(); renderAll();
+  $("btn-reset").hidden=true; applyRole(); renderAll();
+  loadDia().then(ejemploDesdeEnlace);
 }).catch(function(){})}
  $("a-meta").value=S.meta; renderRules(); setInterval(function(){renderVigilante();renderMeta()},30000);
 })();

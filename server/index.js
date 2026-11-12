@@ -115,6 +115,60 @@ function buscarCliente(placa, tel) {
   // Con esta visita serían visitas+1: frecuente si ya pasó de 3.
   return { encontrado: true, nombre: c.nombre, telefono: c.telefono, placa: m.placa || '', modelo: m.modelo || '', visitas: c.visitas, visitasMoto: m.visitas || 0, frecuente: c.visitas >= FRECUENTE_DESDE, ultima: c.ultima, ultimoServicio: c.ultimoServicio || '' };
 }
+// ---------- día en pantalla: lo cobrado hoy, leído del servidor ----------
+function archivosVentas() { try { return fs.readdirSync(DATA).filter(f => /^ventas-\d{4}-\d{2}\.jsonl$/.test(f)).map(f => path.join(DATA, f)); } catch (e) { return []; } }
+function leerLineas(archivo) { try { return fs.readFileSync(archivo, 'utf8').split('\n').filter(Boolean).map(l => { try { return JSON.parse(l); } catch (e) { return null; } }).filter(Boolean); } catch (e) { return []; } }
+function escribirLineas(archivo, filas) { const tmp = archivo + '.tmp'; fs.writeFileSync(tmp, filas.map(f => JSON.stringify(f)).join('\n') + (filas.length ? '\n' : ''), { mode: 0o600 }); fs.renameSync(tmp, archivo); }
+const GASTOS_EJ = path.join(DATA, 'gastos-ejemplo.json');
+function diaDeHoy() {
+  const dia = fechaCaracas(new Date());
+  const ventas = leerLineas(path.join(DATA, 'ventas-' + dia.slice(0, 7) + '.jsonl')).filter(v => v.dia === dia);
+  let gastos = []; try { gastos = JSON.parse(fs.readFileSync(GASTOS_EJ, 'utf8')).filter(g => g.dia === dia); } catch (e) {}
+  const cs = leerClientes(), previas = {};
+  ventas.forEach(v => { const c = cs[v.telefono]; previas[v.telefono] = c ? Math.max(0, c.visitas - ventas.filter(x => x.telefono === v.telefono).length) : 0; });
+  return { dia, ventas, gastos, previas, hayEjemplo: ventas.some(v => v.ejemplo) || gastos.length > 0 };
+}
+// Día de ejemplo: arma ventas inventadas (placas, teléfonos y nombres falsos, marcados como ejemplo) a partir de las cantidades reales del cuadre.
+function cargarEjemplo(d, yo) {
+  const cat = {}; (Array.isArray(d.catalogo) ? d.catalogo : []).slice(0, 60).forEach(x => { const pr = dinero(x.precio); if (x && x.id && pr != null) cat[limpio(x.id, 10)] = { nombre: limpio(x.nombre, 60), precio: pr, principal: !!x.principal }; });
+  const cant = d.cantidades || {}, motos = [], extras = [];
+  Object.keys(cat).forEach(id => { const n = Math.min(300, Math.max(0, parseInt(cant[id], 10) || 0)); for (let i = 0; i < n; i++) (cat[id].principal ? motos : extras).push(id); });
+  if (!motos.length && extras.length) motos.push(extras.shift());
+  if (!motos.length) return { error: 'El ejemplo no trae ningún servicio.' };
+  if (motos.length > 300) return { error: 'Demasiadas motos.' };
+  const lav = (Array.isArray(d.lavadores) ? d.lavadores : []).map(x => limpio(x, 40)).filter(Boolean).slice(0, 12);
+  const tasa = Number(d.tasa) > 0 ? Number(d.tasa) : null, ahora = new Date(), dia = fechaCaracas(ahora), archivo = path.join(DATA, 'ventas-' + dia.slice(0, 7) + '.jsonl');
+  const NOM = ['Carlos Pérez', 'Luis Rojas', 'María Gómez', 'José Medina', 'Pedro Salas', 'Ana Torres', 'Miguel Díaz', 'Rosa Blanco', 'Juan Castillo', 'Elena Rivas', 'Andrés Mora', 'Carmen León', 'Rafael Soto', 'Daniel Peña', 'Óscar Vera', 'Gabriel Lugo', 'Sofía Rangel', 'Héctor Bravo'];
+  const MOD = ['Empire Horse negra', 'Bera SBR roja', 'Empire Owen azul', 'Bera BR200 blanca', 'Yamaha DT azul', 'Suzuki GN gris', 'Kawasaki KLR verde', 'Empire Arsen roja'], L = 'ABCDEFGHJKLMNPRSTVWXYZ';
+  const mezcla = motos.map((id, i) => ({ id, k: (i * 7919) % 101 })).sort((a, b) => a.k - b.k).map(x => x.id);
+  let efectivo = dinero(d.efectivo) || 0;
+  const existentes = leerLineas(archivo), base = existentes.filter(v => v.dia === dia).length, nuevas = [], cs = leerClientes();
+  // La hora se reparte entre las 8:10 a. m. y las 5:40 p. m. de Caracas (UTC-4).
+  const ini = Date.parse(dia + 'T12:10:00Z'), paso = Math.floor((9.5 * 3600e3) / Math.max(1, mezcla.length));
+  mezcla.forEach((id, i) => {
+    const servicios = [{ id, nombre: cat[id].nombre, precio: cat[id].precio }];
+    if (extras.length && (i % Math.max(1, Math.floor(mezcla.length / extras.length)) === 0 || mezcla.length - i <= extras.length)) { const e = extras.shift(); servicios.push({ id: e, nombre: cat[e].nombre, precio: cat[e].precio }); }
+    const total = Math.round(servicios.reduce((a, x) => a + x.precio, 0) * 100) / 100;
+    const enEfectivo = efectivo >= total; if (enEfectivo) efectivo = Math.round((efectivo - total) * 100) / 100;
+    const tel = '0414555' + String(1000 + ((base + i) * 37) % 9000), placa = 'A' + L[(i * 7) % L.length] + (i % 10) + L[(i * 3 + 5) % L.length] + ((i * 3) % 10) + ((i * 7 + 2) % 10) + L[(i * 11 + 1) % L.length];
+    const fecha = new Date(ini + i * paso).toISOString();
+    const v = { id: crypto.randomBytes(6).toString('hex'), num: base + i + 1, dia, fecha, usuario: yo.nombre, usuarioId: yo.id, telefono: tel, cliente: NOM[i % NOM.length], placa, modelo: MOD[i % MOD.length], servicios, total, descuento: '', lavador: lav.length ? lav[i % lav.length] : '',
+      metodo: enEfectivo ? 'Efectivo $' : 'Pago móvil', ref: enEfectivo ? '' : String(4100 + i * 37), moneda: enEfectivo ? '$' : 'Bs', monto: enEfectivo ? total : (tasa ? Math.round(total * tasa * 100) / 100 : total), tasa, ejemplo: true };
+    nuevas.push(v);
+    if (!cs[tel] || cs[tel].ejemplo) cs[tel] = { telefono: tel, nombre: v.cliente, motos: [{ placa, modelo: v.modelo, ultima: fecha, visitas: 1 }], visitas: 1, gastado: total, primera: fecha, ultima: fecha, ultimoServicio: servicios.map(x => x.nombre).join(' + '), ejemplo: true };
+  });
+  escribirLineas(archivo, existentes.concat(nuevas)); guardarClientes(cs);
+  const gastos = (Array.isArray(d.gastos) ? d.gastos : []).slice(0, 20).map((g, i) => ({ id: i + 1, dia, desc: limpio(g.desc, 80), monto: dinero(g.monto) || 0, pago: g.pago === 'ef' ? 'Efectivo $' : 'Pago móvil', usuario: yo.nombre })).filter(g => g.desc && g.monto > 0);
+  fs.writeFileSync(GASTOS_EJ, JSON.stringify(gastos), { mode: 0o600 });
+  return { ok: true, motos: nuevas.length, gastos: gastos.length };
+}
+function borrarEjemplo() {
+  let n = 0;
+  archivosVentas().forEach(a => { const f = leerLineas(a), q = f.filter(v => !v.ejemplo); if (q.length !== f.length) { n += f.length - q.length; escribirLineas(a, q); } });
+  const cs = leerClientes(); let c = 0; Object.keys(cs).forEach(t => { if (cs[t].ejemplo) { delete cs[t]; c++; } }); if (c) guardarClientes(cs);
+  try { fs.unlinkSync(GASTOS_EJ); } catch (e) {}
+  return { ok: true, ventas: n, clientes: c };
+}
 function csv(v) { v = String(v == null ? '' : v); if (/^[=+\-@]/.test(v)) v = "'" + v; return '"' + v.replace(/"/g, '""') + '"'; }
 
 // ---------- WhatsApp oficial (Meta Cloud API). La llave la pega el dueño en pantalla y queda en data/, nunca en el repositorio ----------
@@ -172,7 +226,7 @@ function cuerpoJson(req) {
   return new Promise((ok, mal) => {
     if (!/^application\/json/.test(req.headers['content-type'] || '')) return mal(new Error('tipo'));
     let t = '';
-    req.on('data', c => { t += c; if (t.length > 20000) { mal(new Error('grande')); req.destroy(); } });
+    req.on('data', c => { t += c; if (t.length > 60000) { mal(new Error('grande')); req.destroy(); } });
     req.on('end', () => { try { ok(JSON.parse(t || '{}')); } catch (e) { mal(e); } });
     req.on('error', mal);
   });
@@ -188,6 +242,7 @@ async function api(req, res, ruta) {
   if (req.method === 'GET') {
     if (ruta === '/api/estado') return json(res, 200, { hayUsuarios: leerUsuarios().length > 0, yo: yo ? publico(yo) : null });
     if (ruta === '/api/yo') return yo ? json(res, 200, publico(yo)) : json(res, 401, { error: 'Sin sesión.' });
+    if (ruta === '/api/dia') return puede(yo, 'tablet') ? json(res, 200, diaDeHoy()) : json(res, 403, { error: 'No tienes permiso.' });
     if (ruta === '/api/cliente') {
       if (!puede(yo, 'tablet')) return json(res, 403, { error: 'No tienes permiso.' });
       const q = new URL(req.url, 'http://localhost').searchParams;
@@ -236,6 +291,11 @@ async function api(req, res, ruta) {
     if (String(d.clave || '').length < 8) return json(res, 400, { error: 'La clave debe tener al menos 8 caracteres.' });
     const u = lista.find(x => x.id === yo.id); u.sal = crypto.randomBytes(16).toString('hex'); u.hash = cifrar(d.clave, u.sal); guardarUsuarios(lista);
     return json(res, 200, { ok: true }, { 'set-cookie': cookieSesion(u) });
+  }
+  if (ruta === '/api/ejemplo' || ruta === '/api/ejemplo/borrar') {
+    if (yo.rol !== 'dueno') return json(res, 403, { error: 'Solo el dueño.' });
+    const r = ruta === '/api/ejemplo' ? cargarEjemplo(d, yo) : borrarEjemplo();
+    return json(res, r.error ? 400 : 200, r);
   }
   if (ruta === '/api/ventas') {
     if (!puede(yo, 'tablet')) return json(res, 403, { error: 'No tienes permiso.' });
@@ -335,7 +395,7 @@ const servidor = http.createServer((req, res) => {
   if (ruta.startsWith('/api/')) return api(req, res, ruta).catch(() => json(res, 500, { error: 'Error del servidor.' }));
 
   const yo = sesion(req);
-  if (!PUBLICAS.has(ruta) && !yo) { res.writeHead(302, { location: '/entrar', 'cache-control': 'no-store' }); return res.end(); }
+  if (!PUBLICAS.has(ruta) && !yo) { res.writeHead(302, { location: '/entrar' + (ruta === '/' && url.search ? '?n=' + encodeURIComponent('/' + url.search) : ''), 'cache-control': 'no-store' }); return res.end(); }
   if ((SOLO_DUENO.has(ruta) && !puede(yo, 'usuarios')) || (SOLO_DUENO_ESTRICTO.has(ruta) && !(yo && yo.rol === 'dueno'))) { res.writeHead(302, { location: '/', 'cache-control': 'no-store' }); return res.end(); }
   if (ruta === '/_instalacion.log') {
     return fs.readFile('/var/log/motolavado-install.log', (err, data) => {

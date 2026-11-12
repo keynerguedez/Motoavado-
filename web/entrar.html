@@ -33,15 +33,16 @@
 <script>
 (function(){
   var $=function(i){return document.getElementById(i)};
+  var sig=new URLSearchParams(location.search).get("n")||"/"; if(sig.charAt(0)!=="/"||sig.charAt(1)==="/"||sig.charAt(1)==="\\")sig="/";
   function enviar(ruta,datos){return fetch(ruta,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(datos)}).then(function(r){return r.json().then(function(j){return{ok:r.ok,j:j}})})}
   fetch("/api/estado").then(function(r){return r.json()}).then(function(e){
-    if(e.yo){location.replace("/");return}
+    if(e.yo){location.replace(sig);return}
     $(e.hayUsuarios?"f-entrar":"f-dueno").hidden=false;
   });
   $("f-entrar").addEventListener("submit",function(ev){
     ev.preventDefault();$("e-err").textContent="";
     enviar("/api/entrar",{correo:$("e-correo").value,clave:$("e-clave").value}).then(function(r){
-      if(r.ok)location.replace("/");else $("e-err").textContent=r.j.error||"No se pudo entrar.";
+      if(r.ok)location.replace(sig);else $("e-err").textContent=r.j.error||"No se pudo entrar.";
     }).catch(function(){$("e-err").textContent="Sin conexión. Intenta de nuevo."});
   });
   $("f-dueno").addEventListener("submit",function(ev){

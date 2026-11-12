@@ -472,9 +472,9 @@ function saveSale(o,sigue){
 }
 function sendTicket(o,numSrv){
   var k=$("k-estado"); if(!window.__yo){k.textContent="Así le llega por WhatsApp.";return}
-  var a=paidAmt(o); k.textContent="Enviando por WhatsApp…";
+  var a=paidAmt(o), tz=o.pay.tasa||S.tasa; k.textContent="Enviando por WhatsApp…";
   fetch("/api/ticket",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({telefono:o.tel,num:String(numSrv||o.num).padStart(3,"0"),cliente:cliName(o),placa:o.placa,modelo:o.modelo,
-    servicios:o.svc.map(function(id){return{nombre:svc(id).name,precio:usd(svc(id).price)}}),descuento:o.disc&&o.disc.status==="approved"?o.disc.pct+"%":"",total:usd(total(o)),pagado:a.txt,metodo:o.pay.method,ref:o.pay.ref,tasa:a.cur==="Bs"?fmtN(o.pay.tasa):""})})
+    servicios:o.svc.map(function(id){return{nombre:svc(id).name,precio:"Bs "+fmtN(svc(id).price*tz)}}).concat(o.disc&&o.disc.status==="approved"?[{nombre:"Descuento "+o.disc.pct+"%",precio:"- Bs "+fmtN((subtotal(o)-total(o))*tz)}]:[]),descuento:"",total:"Bs "+fmtN(total(o)*tz),pagado:"Bs "+fmtN(total(o)*tz),metodo:o.pay.method,ref:o.pay.ref,tasa:""})})
   .then(function(r){return r.json().then(function(j){k.textContent=r.ok?"Enviado por WhatsApp al "+fmtTel(o.tel)+".":"No se envió por WhatsApp: "+(j.error||"error")})}).catch(function(){k.textContent="No se envió por WhatsApp: sin conexión."});
 }
 function showTicket(o){$("k-to").textContent="WhatsApp al "+fmtTel(o.tel)+" · "+cliName(o);$("k-body").innerHTML=ticketHtml(o);$("ov-ticket").classList.add("on")}

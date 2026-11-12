@@ -37,7 +37,7 @@ function notaSvg(d, tema) {
 <text x="${W - 270}" y="701" text-anchor="middle" font-size="${String(d.placa || '').length > 8 ? 32 : 42}" font-weight="800" fill="${T.ink}" letter-spacing="3">${esc(corta(d.placa, 10))}</text>`;
   serv.forEach((x, i) => {
     const y = yServ + i * 74;
-    s += `<circle cx="118" cy="${y + 22}" r="10" fill="${T.acc}"/><text x="150" y="${y + 36}" font-size="38" font-weight="500" fill="${T.ink}">${esc(corta(x.nombre, 30))}</text><text x="${W - 100}" y="${y + 36}" text-anchor="end" font-size="38" font-weight="700" fill="${T.ink}">${esc(corta(x.precio, 10))}</text><line x1="100" y1="${y + 62}" x2="${W - 100}" y2="${y + 62}" stroke="${T.line}" stroke-width="2"/>`;
+    s += `<circle cx="118" cy="${y + 22}" r="10" fill="${T.acc}"/><text x="150" y="${y + 36}" font-size="38" font-weight="500" fill="${T.ink}">${esc(corta(x.nombre, 26))}</text><text x="${W - 100}" y="${y + 36}" text-anchor="end" font-size="38" font-weight="700" fill="${T.ink}">${esc(corta(x.precio, 18))}</text><line x1="100" y1="${y + 62}" x2="${W - 100}" y2="${y + 62}" stroke="${T.line}" stroke-width="2"/>`;
   });
   s += `<rect x="100" y="${yTot}" width="${W - 200}" height="200" rx="34" fill="${T.pill}"/>
 <text x="150" y="${yTot + 78}" font-size="32" font-weight="700" fill="${T.pillInk}" opacity=".75" letter-spacing="5">PAGADO</text>

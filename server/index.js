@@ -134,7 +134,7 @@ let waqr = null;
 try { waqr = require('./waqr')(DATA); } catch (e) { console.error('WhatsApp QR no disponible:', e.message); }
 function txt(v, max) { return String(v == null ? '' : v).replace(/[\r\n\t]+/g, ' ').replace(/[*_~`]/g, '').trim().slice(0, max); }
 function ticketTexto(d) {
-  const serv = (Array.isArray(d.servicios) ? d.servicios : []).slice(0, 12).map(x => '• ' + txt(x.nombre, 60) + '  ' + txt(x.precio, 12));
+  const serv = (Array.isArray(d.servicios) ? d.servicios : []).slice(0, 12).map(x => '• ' + txt(x.nombre, 60) + '  ' + txt(x.precio, 18));
   if (!serv.length) return null;
   const L = ['*Motolavado R1*', 'Ticket #' + txt(d.num, 8) + ' · ' + new Date().toLocaleString('es-VE', { timeZone: 'America/Caracas', dateStyle: 'short', timeStyle: 'short' }), ''];
   if (d.cliente && d.cliente !== 'Sin nombre') L.push('Hola ' + txt(d.cliente, 40) + ', este es el ticket de tu lavado.');

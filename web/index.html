@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="icono.png"><link rel="apple-touch-icon" href="icono.png">
 <title>Moto Lavado Sistema Demo</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Barlow:wght@400;500;600&display=swap" rel="stylesheet">
@@ -126,7 +127,7 @@ details.grp summary{cursor:pointer;font-weight:600;font-size:.9rem;color:var(--m
 </head>
 <body>
 <header class="top">
-  <div class="brand">MOTO LAVADO <small>DEMO · datos de ejemplo</small></div>
+  <div class="brand"><img src="logo.png" alt="Motolavado R1" style="height:52px;vertical-align:middle;margin-right:6px"> <small>DEMO · datos de ejemplo</small></div>
   <div class="tabs" role="tablist">
     <button role="tab" id="tab-tablet" data-act="go" data-v="tablet">Facturación</button>
     <button role="tab" id="tab-comisiones" data-act="go" data-v="comisiones">Comisiones</button>
@@ -307,20 +308,14 @@ function ph(color){return "data:image/svg+xml;utf8,"+encodeURIComponent('<svg xm
 var METHODS=["Pago móvil","Binance","Efectivo $","Efectivo Bs","Zelle"];
 var NEEDREF={"Pago móvil":1,"Binance":1,"Zelle":1};
 var S={
-  user:"Operador 1", tasa:1003.49, recordDias:15, meta:30, encPct:0.5, lavPago:1, prodPct:10, prestamos:{}, abre:8, cierra:18, closed:null,
+  user:"Operador 1", tasa:1003.49, recordDias:15, meta:30, encPct:2, encFijo:200, lavPago:1, pulPago:1.5, prodPct:10, prestamos:{}, abre:8, cierra:18, closed:null,
   lavadores:["Yonaiker","Keive","Yondri"],
   services:[
-    {id:"lp",name:"Lavado moto pequeña",price:4,cat:"Lavados"},{id:"la",name:"Lavado alta cilindrada",price:5,cat:"Lavados"},
-    {id:"rp",name:"Ridery promo pequeña",price:3,cat:"Lavados"},{id:"ra",name:"Ridery promo alta cilindrada",price:4,cat:"Lavados"},
-    {id:"pre",name:"Lavado premium",price:12,cat:"Lavados"},{id:"vip",name:"Lavado VIP",price:15,cat:"Lavados"},
-    {id:"pc",name:"Pulitura de casco",price:1,cat:"Pulitura"},{id:"pp",name:"Pulitura moto pequeña",price:5,cat:"Pulitura"},
-    {id:"pg",name:"Pulitura moto grande",price:7,cat:"Pulitura"},{id:"px",name:"Pulitura moto extra grande",price:9,cat:"Pulitura"},
-    {id:"cp",name:"Combo moto pequeña",price:8,cat:"Combos (lavado + pulitura + cadena)"},{id:"cg",name:"Combo moto grande",price:11,cat:"Combos (lavado + pulitura + cadena)"},{id:"cx",name:"Combo moto extra grande",price:15,cat:"Combos (lavado + pulitura + cadena)"},
-    {id:"ca",name:"Cambio de aceite",price:1,cat:"Servicios"},{id:"lc",name:"Lubricación de cadena",price:1,cat:"Servicios"},{id:"kit",name:"Kit R1",price:2,cat:"Servicios"},
-    {id:"am",name:"Aceite Motul",price:12,cat:"Productos"},{id:"as",name:"Aceite Shell",price:12,cat:"Productos"},{id:"ac",name:"Aceite clásico",price:12,cat:"Productos"},
-    {id:"c1",name:"Caucho 2.75-18",price:18,cat:"Productos"},{id:"c2",name:"Caucho 90/90-18",price:20,cat:"Productos"},{id:"c3",name:"Caucho 100/90-18",price:22,cat:"Productos"},{id:"c4",name:"Caucho 90/90-21",price:28,cat:"Productos"},
-    {id:"t1",name:"Tripa 2.75-18",price:5,cat:"Productos"},{id:"t2",name:"Tripa 3.00-18",price:5.5,cat:"Productos"},{id:"t3",name:"Tripa 2.75/3.00-21",price:6,cat:"Productos"},
-    {id:"pa",name:"Pañitos",price:1.5,cat:"Productos"}
+    {id:"lp",cod:"LAV-01",name:"Lavado moto pequeña",price:5,cat:"Lavados",pay:"lav"},{id:"la",cod:"LAV-02",name:"Lavado moto grande",price:6,cat:"Lavados",pay:"lav"},
+    {id:"rp",cod:"RID-01",name:"Ridery moto pequeña",price:4,cat:"Promoción Ridery",pay:"lav"},{id:"ra",cod:"RID-02",name:"Ridery moto grande",price:5,cat:"Promoción Ridery",pay:"lav"},
+    {id:"pp",cod:"SRV-05",name:"Pulitura moto pequeña",price:6,cat:"Pulitura",pay:"pul"},{id:"pg",cod:"SRV-06",name:"Pulitura moto grande",price:8,cat:"Pulitura",pay:"pul"},{id:"px",cod:"SRV-07",name:"Pulitura moto extra grande",price:10,cat:"Pulitura",pay:"pul"},{id:"pc",cod:"SRV-04",name:"Pulitura de casco",price:1,cat:"Pulitura"},
+    {id:"cp",cod:"CMB-01",name:"Combo moto pequeña",price:9,cat:"Combos (lavado + pulitura + cadena)",pay:"combo"},{id:"cg",cod:"CMB-02",name:"Combo moto grande",price:12,cat:"Combos (lavado + pulitura + cadena)",pay:"combo"},{id:"cx",cod:"CMB-03",name:"Combo moto extra grande",price:16,cat:"Combos (lavado + pulitura + cadena)",pay:"combo"},
+    {id:"lc",cod:"SRV-01",name:"Lubricación o ajuste de cadena",price:1,cat:"Servicios"},{id:"ca",cod:"SRV-02",name:"Cambio de aceite (mano de obra)",price:1,cat:"Servicios"},{id:"kit",cod:"SRV-03",name:"Kit R1",price:2,cat:"Servicios"}
   ],
   orders:[],
   week:[["Vie",0],["Sáb",0],["Dom",0],["Lun",0],["Mar",0],["Mié",0]]
@@ -345,7 +340,8 @@ function pendingAuth(){return S.orders.filter(function(o){return o.disc&&o.disc.
 
 /* ---------- Tablet ---------- */
 function chipHtml(s){return '<button type="button" class="chip" data-act="chip" data-id="'+s.id+'" aria-pressed="'+(!!draft.svc[s.id])+'">'+esc(s.name)+' <span class="num">'+usd(s.price)+'</span></button>'}
-function comm(o){return S.lavPago}
+function comm(o){return lavPay(o).t}
+function lavPay(o){var l=0,p=0;o.svc.forEach(function(id){var k=(svc(id)||{}).pay;if(k==="lav"||k==="combo")l++;if(k==="pul"||k==="combo")p++});return{l:l,p:p,t:l*S.lavPago+p*S.pulPago}}
 function renderChips(){
   var cats=[]; S.services.forEach(function(s){if(cats.indexOf(s.cat)<0)cats.push(s.cat)});
   $("f-chips").innerHTML=cats.map(function(c){
@@ -524,7 +520,7 @@ function cierreText(){
   L.push("","Meta del día: "+S.orders.length+" de "+S.meta+" motos"+(S.orders.length>=S.meta?" (cumplida)":""));
   var ops={}; S.orders.forEach(function(o){ops[o.op]=(ops[o.op]||0)+1});
   L.push("","Encargado ("+S.encPct+"% de lo que factura):"); Object.keys(ops).forEach(function(k){var tv=S.orders.filter(function(o){return o.op===k}).reduce(function(a,o){return a+total(o)},0);L.push("  "+k+": "+ops[k]+" motos, vendió "+usd(tv)+", gana "+usd(tv*S.encPct/100))});
-  L.push("","Lavadores ("+usd(S.lavPago)+" por moto):"); S.lavadores.forEach(function(l){var c=lavCalc(l);if(c.n)L.push("  "+l+": "+c.n+" motos, "+usd(c.bruto)+" - productos "+usd(c.prod)+" - préstamo "+usd(c.pres)+" = "+usd(c.neto))});
+  L.push("","Lavadores ("+usd(S.lavPago)+" por lavado, "+usd(S.pulPago)+" por pulitura):"); S.lavadores.forEach(function(l){var c=lavCalc(l);if(c.n)L.push("  "+l+": "+c.n+" motos, "+usd(c.bruto)+" - productos "+usd(c.prod)+" - préstamo "+usd(c.pres)+" = "+usd(c.neto))});
   L.push("","Servicios:"); S.services.forEach(function(s){if(byS[s.id])L.push("  "+s.name+": "+byS[s.id])});
   return L.join("\n");
 }
@@ -555,18 +551,18 @@ function renderVigilante(){
 function mine(){return S.orders.filter(function(o){return o.op===S.user})}
 function encGain(){return mine().reduce(function(a,o){return a+total(o)},0)*S.encPct/100}
 function lavCalc(l){
-  var n=S.orders.filter(function(o){return o.lav===l}).length, bruto=n*S.lavPago, prod=bruto*S.prodPct/100;
+  var mias=S.orders.filter(function(o){return o.lav===l}), n=mias.length, nl=0, np=0; mias.forEach(function(o){var x=lavPay(o);nl+=x.l;np+=x.p}); var bruto=nl*S.lavPago+np*S.pulPago, prod=bruto*S.prodPct/100;
   var pres=Math.min(S.prestamos[l]||0,Math.max(0,bruto-prod));
-  return {n:n,bruto:bruto,prod:prod,pres:pres,debe:S.prestamos[l]||0,neto:bruto-prod-pres};
+  return {n:n,nl:nl,np:np,bruto:bruto,prod:prod,pres:pres,debe:S.prestamos[l]||0,neto:bruto-prod-pres};
 }
 var comSel=null;
 function renderCom(){
   var eo=mine(), et=eo.reduce(function(a,o){return a+total(o)},0), rw=function(a,b,strong){return '<div class="row" style="justify-content:space-between"><span>'+a+'</span><'+(strong?'b':'span')+' class="num">'+b+'</'+(strong?'b':'span')+'></div>'};
   $("q-list").innerHTML='<button class="btn'+(comSel==="__enc"?' pri':'')+'" data-act="lavdet" data-l="__enc" style="display:flex;justify-content:space-between;gap:12px"><span>'+esc(S.user)+' (encargado)</span><span class="num">'+eo.length+' motos facturadas</span></button>'+S.lavadores.map(function(l){var c=lavCalc(l);return '<button class="btn'+(comSel===l?' pri':'')+'" data-act="lavdet" data-l="'+esc(l)+'" style="display:flex;justify-content:space-between;gap:12px"><span>'+esc(l)+'</span><span class="num">'+c.n+' motos</span></button>'}).join("");
   if(!comSel){$("q-det").innerHTML="";return}
-  if(comSel==="__enc"){$("q-det").innerHTML='<div class="card stack" style="gap:6px"><h3>'+esc(S.user)+' (encargado)</h3>'+rw("Motos facturadas",eo.length)+rw("Total vendido",usd(et))+rw("Porcentaje sobre las ventas",S.encPct+"%")+'<div style="border-top:1px solid var(--line);padding-top:6px">'+rw("Le toca cobrar",usd(encGain()),true)+'</div><span class="note">Se calcula sobre todo lo que facturó.</span></div>';return}
+  if(comSel==="__enc"){$("q-det").innerHTML='<div class="card stack" style="gap:6px"><h3>'+esc(S.user)+' (encargado)</h3>'+rw("Motos facturadas",eo.length)+rw("Total vendido",usd(et))+rw("Porcentaje sobre las ventas",S.encPct+"%")+'<div style="border-top:1px solid var(--line);padding-top:6px">'+rw("Le toca cobrar",usd(encGain()),true)+'</div><span class="note">Se calcula sobre todo lo que facturó. Aparte tiene su sueldo fijo de '+usd(S.encFijo)+' al mes.</span></div>';return}
   var c=lavCalc(comSel), row=function(a,b,strong){return '<div class="row" style="justify-content:space-between"><span>'+a+'</span><'+(strong?'b':'span')+' class="num">'+b+'</'+(strong?'b':'span')+'></div>'};
-  $("q-det").innerHTML='<div class="card stack" style="gap:6px"><h3>'+esc(comSel)+'</h3>'+row("Motos atendidas",c.n)+row("Comisión ("+usd(S.lavPago)+" por moto)",usd(c.bruto))+row("Menos productos ("+S.prodPct+"%)","- "+usd(c.prod))+row("Menos préstamo","- "+usd(c.pres))+'<div style="border-top:1px solid var(--line);padding-top:6px">'+row("Le toca cobrar",usd(c.neto),true)+'</div>'+(c.debe>c.pres?'<span class="note">Le quedan '+usd(c.debe-c.pres)+' de préstamo por descontar.</span>':'')+'<span class="note">Sin sueldo fijo. Sale de las motos facturadas a su nombre.</span></div>';
+  $("q-det").innerHTML='<div class="card stack" style="gap:6px"><h3>'+esc(comSel)+'</h3>'+row("Motos atendidas",c.n)+row("Lavados ("+c.nl+" × "+usd(S.lavPago)+")",usd(c.nl*S.lavPago))+row("Pulituras ("+c.np+" × "+usd(S.pulPago)+")",usd(c.np*S.pulPago))+row("Menos productos ("+S.prodPct+"%)","- "+usd(c.prod))+row("Menos préstamo","- "+usd(c.pres))+'<div style="border-top:1px solid var(--line);padding-top:6px">'+row("Le toca cobrar",usd(c.neto),true)+'</div>'+(c.debe>c.pres?'<span class="note">Le quedan '+usd(c.debe-c.pres)+' de préstamo por descontar.</span>':'')+'<span class="note">Sin sueldo fijo. Sale de las motos facturadas a su nombre.</span></div>';
 }
 function renderAdminCom(){
   var eo=mine(), et=eo.reduce(function(a,o){return a+total(o)},0);
@@ -574,7 +570,7 @@ function renderAdminCom(){
 }
 function renderRules(){
   var f=function(label,attr,val,step){return '<label class="row price" style="justify-content:space-between"><span>'+label+'</span><input type="number" min="0" step="'+step+'" '+attr+' value="'+val+'"></label>'};
-  $("a-rules").innerHTML=f("Encargado: % de lo que factura",'id="r-enc"',S.encPct,"0.1")+f("Lavador: $ por moto",'id="r-lav"',S.lavPago,"0.25")+f("Lavador: % que paga por productos",'id="r-prod"',S.prodPct,"1")
+  $("a-rules").innerHTML=f("Encargado: % de lo que factura",'id="r-enc"',S.encPct,"0.1")+f("Lavador: $ por lavado",'id="r-lav"',S.lavPago,"0.25")+f("Lavador: $ por pulitura",'id="r-pul"',S.pulPago,"0.25")+f("Lavador: % que paga por productos",'id="r-prod"',S.prodPct,"1")
     +S.lavadores.map(function(l,i){return f("Préstamo a descontar: "+esc(l),'id="r-pres-'+i+'" data-pres="'+esc(l)+'"',S.prestamos[l]||0,"1")}).join("");
 }
 function renderMeta(){
@@ -787,7 +783,7 @@ document.addEventListener("input",function(ev){
   }
   else if(t.id==="r-enc"||t.id==="r-lav"||t.id==="r-prod"||(t.dataset&&t.dataset.pres)){
     var rv=parseFloat(t.value); if(!(rv>=0))return;
-    if(t.id==="r-enc")S.encPct=rv; else if(t.id==="r-lav")S.lavPago=rv; else if(t.id==="r-prod")S.prodPct=rv; else S.prestamos[t.dataset.pres]=rv;
+    if(t.id==="r-enc")S.encPct=rv; else if(t.id==="r-lav")S.lavPago=rv; else if(t.id==="r-pul")S.pulPago=rv; else if(t.id==="r-prod")S.prodPct=rv; else S.prestamos[t.dataset.pres]=rv;
     renderAdminCom();renderMeta();
   }
   else if(t.dataset&&t.dataset.greal){var gr=S.gastos.filter(function(x){return x.id===+t.dataset.greal})[0], rr=parseFloat(t.value);gr.real=rr>=0?rr:null}

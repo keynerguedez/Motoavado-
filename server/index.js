@@ -15,7 +15,7 @@ const SECRETO = process.env.SESSION_SECRET || crypto.randomBytes(32).toString('h
 const INICIO = new Date();
 const DIAS_SESION = 14;
 const TIPOS = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8', '.png': 'image/png', '.jpg': 'image/jpeg', '.svg': 'image/svg+xml', '.ico': 'image/x-icon', '.webmanifest': 'application/manifest+json' };
-const PUBLICAS = new Set(['/entrar', '/entrar.html', '/health', '/favicon.ico']);
+const PUBLICAS = new Set(['/logo.png', '/icono.png', '/base.css', '/entrar', '/entrar.html', '/health', '/favicon.ico']);
 const SOLO_DUENO = new Set(['/usuarios', '/usuarios.html', '/_instalacion.log']);
 
 fs.mkdirSync(DATA, { recursive: true });

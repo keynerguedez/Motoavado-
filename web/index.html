@@ -134,7 +134,9 @@ details.grp summary{cursor:pointer;font-weight:600;font-size:.9rem;color:var(--m
     <button role="tab" id="tab-admin" data-act="go" data-v="admin">Administración<span class="badge" id="badge" hidden>0</span></button>
     <button role="tab" id="tab-vigilante" data-act="go" data-v="vigilante">Vigilante (cámara)<span class="badge" id="badge-v" hidden>0</span></button>
   </div>
-  <label class="row note" style="gap:6px">Entrar como<select id="role" style="width:auto"><option value="dueno">Dueño (ve todo)</option><option value="enc">Encargado de tienda</option></select></label>
+  <a class="btn sm" id="lnk-usuarios" href="/usuarios" hidden>Usuarios</a>
+  <button class="btn sm" id="btn-salir" data-act="salir" hidden>Salir</button>
+  <label class="row note" id="role-lbl" style="gap:6px">Ver como<select id="role" style="width:auto"><option value="dueno">Dueño (ve todo)</option><option value="enc">Encargado de tienda</option></select></label>
   <button class="btn sm" data-act="reset">Vaciar el día</button>
 </header>
 <main>
@@ -727,7 +729,7 @@ document.addEventListener("click",function(ev){
     if(a==="gclose")closeGasto(gx); else{ if(a==="gacc"){gx.status="done";gx.aceptado=true}else gx.status="observed"; renderAll() }
   }
   else if(a==="gapprove"||a==="gdeny"){var gg=S.gastos.filter(function(x){return x.id===+t.dataset.g})[0];gg.status=a==="gapprove"?"approved":"rejected";renderAll()}
-  else if(a==="logout"){$("work").style.display="none";$("login").style.display="flex";$("lg-pin").value="";$("lg-err").textContent=""}
+  else if(a==="logout"||a==="salir"){if(window.__yo){fetch("/api/salir",{method:"POST",headers:{"content-type":"application/json"},body:"{}"}).then(function(){location.replace("/entrar")})}else{$("work").style.display="none";$("login").style.display="flex";$("lg-pin").value="";$("lg-err").textContent=""}}
   else if(a==="login"){
     if($("lg-pin").value!=="1234"){$("lg-err").textContent="Clave incorrecta.";return}
     S.user=$("lg-user").value;$("login").style.display="none";$("work").style.display="";renderAll();
@@ -809,7 +811,15 @@ window.addEventListener("hashchange",function(){go(location.hash.slice(1))});
   S.camCount=22; var now=Date.now();
   [[1,20,25],[2,21,14],[3,22,6]].forEach(function(x){var b=S.bridges[x[0]-1];b.state="ok";b.num=x[1];b.plate=S.orders[x[1]-1].placa;b.t=now-x[2]*60000});
 })();
-renderChips(); renderPrices(); renderAll(); go(location.hash.slice(1)||"tablet"); $("a-meta").value=S.meta; renderRules(); setInterval(function(){renderVigilante();renderMeta()},30000);
+renderChips(); renderPrices(); renderAll(); go(location.hash.slice(1)||"tablet");
+// Sesión real: el servidor dice quién entró y qué puede ver.
+if(location.protocol!=="file:"&&window.fetch){fetch("/api/yo").then(function(r){if(r.status===401){location.replace("/entrar");return null}return r.ok?r.json():null}).then(function(u){
+  if(!u)return; window.__yo=u; S.user=u.nombre; S.orders.forEach(function(o){o.op=u.nombre}); S.gastos.forEach(function(g){g.op=u.nombre});
+  $("btn-salir").hidden=false;
+  if(u.rol==="dueno"){$("lnk-usuarios").hidden=false}else{$("role").value="enc";$("role-lbl").style.display="none"}
+  applyRole(); renderAll();
+}).catch(function(){})}
+ $("a-meta").value=S.meta; renderRules(); setInterval(function(){renderVigilante();renderMeta()},30000);
 })();
 </script>
 </body>

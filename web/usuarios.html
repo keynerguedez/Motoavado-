@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Moto Lavado · Usuarios</title>
+<link rel="stylesheet" href="/base.css">
+</head>
+<body>
+<div class="wrap wide" style="display:flex;flex-direction:column;gap:16px">
+  <p style="margin:0"><a href="/">← Volver al sistema</a></p>
+  <div class="card">
+    <h1>Usuarios</h1>
+    <p class="note">El encargado solo ve Facturación, Comisiones y Gastos. El dueño ve todo.</p>
+    <div id="lista"></div>
+    <div class="err" id="l-err"></div>
+  </div>
+  <form class="card" id="f-nuevo">
+    <h2>Agregar usuario</h2>
+    <label>Nombre<input id="n-nombre" type="text" required></label>
+    <label>Correo<input id="n-correo" type="email" autocomplete="off" required></label>
+    <label>Clave (mínimo 8 caracteres)<input id="n-clave" type="password" autocomplete="new-password" minlength="8" required></label>
+    <label>Tipo<select id="n-rol"><option value="enc">Encargado de tienda</option><option value="dueno">Dueño (ve todo)</option></select></label>
+    <div class="err" id="n-err"></div>
+    <button class="pri">Agregar</button>
+  </form>
+</div>
+<script>
+(function(){
+  var $=function(i){return document.getElementById(i)}, yo=null;
+  function esc(s){return String(s).replace(/[&<>"']/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]})}
+  function enviar(ruta,datos){return fetch(ruta,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(datos)}).then(function(r){return r.json().then(function(j){return{ok:r.ok,j:j}})})}
+  function cargar(){
+    fetch("/api/usuarios").then(function(r){if(!r.ok){location.replace("/");throw 0}return r.json()}).then(function(l){
+      $("lista").innerHTML=l.map(function(u){
+        return '<div class="fila"><div class="quien"><b>'+esc(u.nombre)+'</b> <span class="note">· '+(u.rol==="dueno"?"Dueño":"Encargado")+'</span><br><span class="note">'+esc(u.correo)+'</span></div>'+
+          '<button class="sm" data-clave="'+u.id+'" data-n="'+esc(u.nombre)+'">Cambiar clave</button>'+
+          (yo&&u.id===yo.id?'':'<button class="sm" data-borrar="'+u.id+'" data-n="'+esc(u.nombre)+'">Quitar</button>')+'</div>';
+      }).join("");
+    }).catch(function(){});
+  }
+  fetch("/api/yo").then(function(r){return r.json()}).then(function(u){yo=u;cargar()});
+  $("lista").addEventListener("click",function(ev){
+    var t=ev.target;$("l-err").textContent="";
+    if(t.dataset.borrar){
+      if(t.dataset.ok!=="1"){t.dataset.ok="1";t.textContent="¿Seguro? Toca otra vez";return}
+      enviar("/api/usuarios/borrar",{id:t.dataset.borrar}).then(function(r){if(!r.ok)$("l-err").textContent=r.j.error;cargar()});
+    }else if(t.dataset.clave){
+      var fila=t.parentNode;if(fila.querySelector("input"))return;
+      var i=document.createElement("input");i.type="password";i.placeholder="Clave nueva (mínimo 8)";i.autocomplete="new-password";i.style.flex="1 1 200px";
+      var b=document.createElement("button");b.className="sm pri";b.textContent="Guardar";
+      b.addEventListener("click",function(){enviar("/api/usuarios/clave",{id:t.dataset.clave,clave:i.value}).then(function(r){if(r.ok){cargar();$("l-err").textContent="Clave cambiada."}else $("l-err").textContent=r.j.error})});
+      fila.appendChild(i);fila.appendChild(b);i.focus();
+    }
+  });
+  $("f-nuevo").addEventListener("submit",function(ev){
+    ev.preventDefault();$("n-err").textContent="";
+    enviar("/api/usuarios",{nombre:$("n-nombre").value,correo:$("n-correo").value,clave:$("n-clave").value,rol:$("n-rol").value}).then(function(r){
+      if(r.ok){ev.target.reset();cargar()}else $("n-err").textContent=r.j.error||"No se pudo agregar.";
+    });
+  });
+})();
+</script>
+</body>
+</html>

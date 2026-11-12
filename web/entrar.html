@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Moto Lavado · Entrar</title>
+<link rel="stylesheet" href="/base.css">
+</head>
+<body>
+<div class="wrap">
+  <form class="card" id="f-entrar" hidden>
+    <h1>Moto Lavado</h1>
+    <p class="note">Entra con tu correo y tu clave.</p>
+    <label>Correo<input id="e-correo" type="email" autocomplete="username" required></label>
+    <label>Clave<input id="e-clave" type="password" autocomplete="current-password" required></label>
+    <div class="err" id="e-err"></div>
+    <button class="pri">Entrar</button>
+    <p class="note">¿Olvidaste la clave? Pídele al dueño que te ponga una nueva.</p>
+  </form>
+  <form class="card" id="f-dueno" hidden>
+    <h1>Primera vez</h1>
+    <p class="note">Crea la cuenta del dueño. Con ella después creas los usuarios de los encargados.</p>
+    <label>Tu nombre<input id="d-nombre" type="text" autocomplete="name" required></label>
+    <label>Correo<input id="d-correo" type="email" autocomplete="username" required></label>
+    <label>Clave (mínimo 8 caracteres)<input id="d-clave" type="password" autocomplete="new-password" minlength="8" required></label>
+    <label>Repite la clave<input id="d-clave2" type="password" autocomplete="new-password" minlength="8" required></label>
+    <div class="err" id="d-err"></div>
+    <button class="pri">Crear cuenta del dueño</button>
+  </form>
+</div>
+<script>
+(function(){
+  var $=function(i){return document.getElementById(i)};
+  function enviar(ruta,datos){return fetch(ruta,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(datos)}).then(function(r){return r.json().then(function(j){return{ok:r.ok,j:j}})})}
+  fetch("/api/estado").then(function(r){return r.json()}).then(function(e){
+    if(e.yo){location.replace("/");return}
+    $(e.hayUsuarios?"f-entrar":"f-dueno").hidden=false;
+  });
+  $("f-entrar").addEventListener("submit",function(ev){
+    ev.preventDefault();$("e-err").textContent="";
+    enviar("/api/entrar",{correo:$("e-correo").value,clave:$("e-clave").value}).then(function(r){
+      if(r.ok)location.replace("/");else $("e-err").textContent=r.j.error||"No se pudo entrar.";
+    }).catch(function(){$("e-err").textContent="Sin conexión. Intenta de nuevo."});
+  });
+  $("f-dueno").addEventListener("submit",function(ev){
+    ev.preventDefault();$("d-err").textContent="";
+    if($("d-clave").value!==$("d-clave2").value){$("d-err").textContent="Las dos claves no coinciden.";return}
+    enviar("/api/crear-dueno",{nombre:$("d-nombre").value,correo:$("d-correo").value,clave:$("d-clave").value}).then(function(r){
+      if(r.ok)location.replace("/usuarios");else $("d-err").textContent=r.j.error||"No se pudo crear.";
+    }).catch(function(){$("d-err").textContent="Sin conexión. Intenta de nuevo."});
+  });
+})();
+</script>
+</body>
+</html>

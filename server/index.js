@@ -17,6 +17,7 @@ const DIAS_SESION = 14;
 const TIPOS = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8', '.png': 'image/png', '.jpg': 'image/jpeg', '.svg': 'image/svg+xml', '.ico': 'image/x-icon', '.webmanifest': 'application/manifest+json' };
 const PUBLICAS = new Set(['/logo.png', '/icono.png', '/base.css', '/entrar', '/entrar.html', '/health', '/favicon.ico']);
 const SOLO_DUENO = new Set(['/usuarios', '/usuarios.html', '/_instalacion.log']);
+const SOLO_DUENO_ESTRICTO = new Set(['/_instalacion.log', '/whatsapp', '/whatsapp.html']);
 
 fs.mkdirSync(DATA, { recursive: true });
 
@@ -75,6 +76,27 @@ function sesion(req) {
   return u && u.hash.slice(0, 12) === d.h ? u : null;
 }
 
+// ---------- WhatsApp oficial (Meta Cloud API). La llave la pega el dueño en pantalla y queda en data/, nunca en el repositorio ----------
+const WA_ARCHIVO = path.join(DATA, 'whatsapp.json');
+const WA_BASE = process.env.WA_BASE || 'https://graph.facebook.com';
+function waLeer() { try { return JSON.parse(fs.readFileSync(WA_ARCHIVO, 'utf8')); } catch (e) { return {}; } }
+function waGuardar(c) { const tmp = WA_ARCHIVO + '.tmp'; fs.writeFileSync(tmp, JSON.stringify(c), { mode: 0o600 }); fs.renameSync(tmp, WA_ARCHIVO); }
+function waPublico(c) { return { configurado: !!(c.token && c.phoneId), phoneId: c.phoneId || '', version: c.version || 'v25.0', actualizado: c.actualizado || null }; }
+// 04141234567 -> 584141234567
+function waNumero(t) { let n = String(t || '').replace(/\D/g, ''); if (/^0[24]\d{9}$/.test(n)) n = '58' + n.slice(1); return /^\d{10,15}$/.test(n) ? n : null; }
+async function waEnviar(para, cuerpo) {
+  const c = waLeer();
+  if (!c.token || !c.phoneId) return { ok: false, error: 'WhatsApp todavía no está conectado.' };
+  try {
+    const r = await fetch(WA_BASE + '/' + (c.version || 'v25.0') + '/' + c.phoneId + '/messages', {
+      method: 'POST', headers: { authorization: 'Bearer ' + c.token, 'content-type': 'application/json' },
+      body: JSON.stringify(Object.assign({ messaging_product: 'whatsapp', to: para }, cuerpo)), signal: AbortSignal.timeout(15000) });
+    const j = await r.json().catch(() => ({}));
+    if (r.ok) return { ok: true, id: j.messages && j.messages[0] && j.messages[0].id };
+    return { ok: false, error: (j.error && (j.error.error_user_msg || j.error.message)) || 'Meta respondió ' + r.status };
+  } catch (e) { return { ok: false, error: 'No se pudo llegar a Meta. Intenta de nuevo.' }; }
+}
+
 // ---------- freno a intentos de clave ----------
 const intentos = new Map();
 function ipDe(req) { return String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim(); }
@@ -105,6 +127,7 @@ async function api(req, res, ruta) {
   if (req.method === 'GET') {
     if (ruta === '/api/estado') return json(res, 200, { hayUsuarios: leerUsuarios().length > 0, yo: yo ? publico(yo) : null });
     if (ruta === '/api/yo') return yo ? json(res, 200, publico(yo)) : json(res, 401, { error: 'Sin sesión.' });
+    if (ruta === '/api/whatsapp') return yo && yo.rol === 'dueno' ? json(res, 200, waPublico(waLeer())) : json(res, 403, { error: 'Solo el dueño.' });
     if (ruta === '/api/usuarios') return puede(yo, 'usuarios') ? json(res, 200, leerUsuarios().map(publico)) : json(res, 403, { error: 'No tienes permiso.' });
     return json(res, 404, { error: 'No encontrado.' });
   }
@@ -136,6 +159,21 @@ async function api(req, res, ruta) {
     if (String(d.clave || '').length < 8) return json(res, 400, { error: 'La clave debe tener al menos 8 caracteres.' });
     const u = lista.find(x => x.id === yo.id); u.sal = crypto.randomBytes(16).toString('hex'); u.hash = cifrar(d.clave, u.sal); guardarUsuarios(lista);
     return json(res, 200, { ok: true }, { 'set-cookie': cookieSesion(u) });
+  }
+  if (ruta === '/api/whatsapp' || ruta === '/api/whatsapp/prueba') {
+    if (yo.rol !== 'dueno') return json(res, 403, { error: 'Solo el dueño.' });
+    if (ruta === '/api/whatsapp') {
+      const c = waLeer(), token = String(d.token || '').trim(), phoneId = String(d.phoneId || '').trim(), ver = String(d.version || '').trim();
+      if (!/^\d{6,25}$/.test(phoneId)) return json(res, 400, { error: 'El identificador del número son solo dígitos (lo da Meta).' });
+      if (token) { if (token.length < 50 || /\s/.test(token)) return json(res, 400, { error: 'La llave no parece completa. Cópiala entera.' }); c.token = token; }
+      if (!c.token) return json(res, 400, { error: 'Falta pegar la llave (token).' });
+      if (ver) { if (!/^v\d{2}\.\d$/.test(ver)) return json(res, 400, { error: 'Versión no válida.' }); c.version = ver; }
+      c.phoneId = phoneId; c.actualizado = new Date().toISOString(); waGuardar(c);
+      return json(res, 200, waPublico(c));
+    }
+    const para = waNumero(d.telefono); if (!para) return json(res, 400, { error: 'Teléfono no válido. Ejemplo: 04141234567.' });
+    const r = await waEnviar(para, { type: 'template', template: { name: 'hello_world', language: { code: 'en_US' } } });
+    return json(res, r.ok ? 200 : 502, r);
   }
   if (!puede(yo, 'usuarios')) return json(res, 403, { error: 'No tienes permiso.' });
   const soyDueno = yo.rol === 'dueno';
@@ -189,7 +227,7 @@ const servidor = http.createServer((req, res) => {
 
   const yo = sesion(req);
   if (!PUBLICAS.has(ruta) && !yo) { res.writeHead(302, { location: '/entrar', 'cache-control': 'no-store' }); return res.end(); }
-  if (SOLO_DUENO.has(ruta) && !(ruta === '/_instalacion.log' ? yo && yo.rol === 'dueno' : puede(yo, 'usuarios'))) { res.writeHead(302, { location: '/', 'cache-control': 'no-store' }); return res.end(); }
+  if ((SOLO_DUENO.has(ruta) && !puede(yo, 'usuarios')) || (SOLO_DUENO_ESTRICTO.has(ruta) && !(yo && yo.rol === 'dueno'))) { res.writeHead(302, { location: '/', 'cache-control': 'no-store' }); return res.end(); }
   if (ruta === '/_instalacion.log') {
     return fs.readFile('/var/log/motolavado-install.log', (err, data) => {
       res.writeHead(err ? 404 : 200, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' });
@@ -197,7 +235,7 @@ const servidor = http.createServer((req, res) => {
     });
   }
   let rel = ruta;
-  if (rel === '/entrar' || rel === '/usuarios') rel += '.html';
+  if (rel === '/entrar' || rel === '/usuarios' || rel === '/whatsapp') rel += '.html';
   if (rel.endsWith('/')) rel += 'index.html';
   const archivo = path.normalize(path.join(WEB, rel));
   if (!archivo.startsWith(WEB + path.sep)) { res.writeHead(403); return res.end('prohibido'); }

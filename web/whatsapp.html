@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Moto Lavado · WhatsApp</title>
+<link rel="icon" href="/icono.png">
+<link rel="stylesheet" href="/base.css">
+<style>.ok{color:var(--pri);font-size:.9rem;min-height:1.2em}</style>
+</head>
+<body>
+<div class="wrap wide" style="display:flex;flex-direction:column;gap:16px">
+  <p style="margin:0"><a href="/">← Volver al sistema</a></p>
+  <form class="card" id="f-wa">
+    <h1>WhatsApp del negocio</h1>
+    <p class="note" id="estado">Cargando…</p>
+    <label>Identificador del número (Phone number ID)<input id="w-id" type="text" inputmode="numeric" autocomplete="off" required></label>
+    <label>Llave de acceso (token permanente)<input id="w-token" type="password" autocomplete="off" placeholder="Pégala aquí. No se vuelve a mostrar."></label>
+    <p class="note">Las dos cosas salen de tu cuenta de Meta. La llave se guarda solo en el servidor; no la mandes por chat ni por WhatsApp.</p>
+    <div class="err" id="w-err"></div>
+    <button class="pri">Guardar</button>
+  </form>
+  <form class="card" id="f-prueba">
+    <h2>Mensaje de prueba</h2>
+    <p class="note">Manda el mensaje de ejemplo de Meta ("Hello World") al número que pongas, para confirmar que la conexión sirve.</p>
+    <label>Teléfono<input id="p-tel" type="tel" inputmode="numeric" placeholder="04141234567" required></label>
+    <div class="err" id="p-err"></div>
+    <button>Enviar prueba</button>
+  </form>
+</div>
+<script>
+(function(){
+  var $=function(i){return document.getElementById(i)};
+  function enviar(ruta,datos){return fetch(ruta,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(datos)}).then(function(r){return r.json().then(function(j){return{ok:r.ok,j:j}})})}
+  function pintar(c){$("estado").textContent=c.configurado?"Conectado. Para cambiar la llave, pega una nueva y guarda.":"Todavía no está conectado.";$("w-id").value=c.phoneId||"";$("w-token").required=!c.configurado}
+  fetch("/api/whatsapp").then(function(r){if(!r.ok){location.replace("/");throw 0}return r.json()}).then(pintar).catch(function(){});
+  $("f-wa").addEventListener("submit",function(ev){
+    ev.preventDefault();var e=$("w-err");e.className="err";e.textContent="";
+    enviar("/api/whatsapp",{phoneId:$("w-id").value,token:$("w-token").value}).then(function(r){
+      if(r.ok){$("w-token").value="";pintar(r.j);e.className="ok";e.textContent="Guardado."}else e.textContent=r.j.error||"No se pudo guardar.";
+    });
+  });
+  $("f-prueba").addEventListener("submit",function(ev){
+    ev.preventDefault();var e=$("p-err");e.className="err";e.textContent="Enviando…";
+    enviar("/api/whatsapp/prueba",{telefono:$("p-tel").value}).then(function(r){
+      if(r.ok){e.className="ok";e.textContent="Enviado. Revisa ese WhatsApp."}else e.textContent=r.j.error||"No se pudo enviar.";
+    }).catch(function(){e.textContent="Sin conexión."});
+  });
+})();
+</script>
+</body>
+</html>

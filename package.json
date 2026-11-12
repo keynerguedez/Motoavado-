@@ -1,0 +1,8 @@
+{
+  "name": "motolavado",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Sistema de facturación y control de Moto Lavado",
+  "scripts": { "start": "node server/index.js" },
+  "engines": { "node": ">=20" }
+}

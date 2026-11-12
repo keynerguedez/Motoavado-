@@ -1,0 +1,816 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Moto Lavado Sistema Demo</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Barlow:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* Layout: barra superior fija con dos vistas (Tablet / Administración).
+   Tablet = formulario rápido a la izquierda + cola de motos a la derecha. Admin = resumen arriba, detalle abajo. */
+:root{
+  --bg:#eef2f4; --surface:#ffffff; --surface2:#e3eaee; --ink:#11202b; --muted:#5a6b78; --line:#cfd9df;
+  --accent:#0a7ea4; --accent-ink:#ffffff;
+  --ok:#1f8a4c; --warn:#b86a00; --bad:#c0392b; --warn-bg:#fff1d6; --ok-bg:#dcf3e5; --bad-bg:#fbe1dd;
+  --display:"Barlow Condensed","Arial Narrow",Arial,sans-serif; --body:"Barlow","Helvetica Neue",Arial,sans-serif;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0c1520; --surface:#14212f; --surface2:#1c2d3f; --ink:#e8f0f5; --muted:#8fa3b3; --line:#2a3e52;
+    --accent:#2cc4e8; --accent-ink:#06202b;
+    --ok:#4fd08a; --warn:#f0b04a; --bad:#ff7b6b; --warn-bg:#3a2c10; --ok-bg:#123524; --bad-bg:#3d1a16;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0c1520; --surface:#14212f; --surface2:#1c2d3f; --ink:#e8f0f5; --muted:#8fa3b3; --line:#2a3e52;
+  --accent:#2cc4e8; --accent-ink:#06202b;
+  --ok:#4fd08a; --warn:#f0b04a; --bad:#ff7b6b; --warn-bg:#3a2c10; --ok-bg:#123524; --bad-bg:#3d1a16;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--ink);font-family:var(--body);font-size:16px;line-height:1.4;display:flex;flex-direction:column}
+h1,h2,h3{font-family:var(--display);margin:0;text-wrap:balance;letter-spacing:.01em}
+h2{font-size:1.5rem} h3{font-size:1.15rem;text-transform:uppercase;color:var(--muted);letter-spacing:.06em}
+button{font:inherit;color:inherit;cursor:pointer}
+button:focus-visible,input:focus-visible,select:focus-visible,label:focus-within{outline:3px solid var(--accent);outline-offset:2px}
+.num{font-variant-numeric:tabular-nums}
+header.top{display:flex;flex-wrap:wrap;gap:10px;align-items:center;padding:10px 16px;background:var(--surface);border-bottom:1px solid var(--line)}
+.brand{font-family:var(--display);font-weight:700;font-size:1.5rem;margin-right:auto}
+.brand small{font-family:var(--body);font-weight:500;font-size:.75rem;color:var(--warn);background:var(--warn-bg);padding:2px 8px;border-radius:99px;margin-left:8px;vertical-align:middle}
+.tabs{display:flex;gap:6px;background:var(--surface2);padding:4px;border-radius:10px}
+.tabs button{border:0;background:transparent;padding:8px 14px;border-radius:7px;font-weight:600}
+.tabs button[aria-selected="true"]{background:var(--accent);color:var(--accent-ink)}
+.badge{display:inline-block;min-width:20px;padding:0 6px;border-radius:99px;background:var(--bad);color:#fff;font-size:.75rem;margin-left:6px}
+main{flex:1;overflow:auto;padding:16px}
+.view{display:none}.view.on{display:block}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px}
+.grid-tablet{display:grid;grid-template-columns:minmax(300px,420px) 1fr;gap:16px;align-items:start}
+@media (max-width:820px){.grid-tablet{grid-template-columns:1fr}}
+.stack{display:flex;flex-direction:column;gap:12px}
+.row{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+label.f{display:flex;flex-direction:column;gap:4px;font-size:.85rem;color:var(--muted);font-weight:500;flex:1;min-width:130px}
+input[type=text],input[type=number],input[type=password],select{font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px 12px;width:100%}
+.photo{display:flex;gap:12px;align-items:center;border:2px dashed var(--line);border-radius:12px;padding:10px;cursor:pointer}
+.photo img,.thumb{width:84px;height:64px;object-fit:cover;border-radius:8px;background:var(--surface2);flex:none}
+.photo input{position:absolute;opacity:0;width:1px;height:1px}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip{border:1.5px solid var(--line);background:var(--bg);border-radius:10px;padding:10px 12px;font-weight:600;display:flex;gap:8px;align-items:baseline}
+.chip span{color:var(--muted);font-weight:500}
+.chip[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.chip[aria-pressed="true"] span{color:inherit}
+.total{display:flex;justify-content:space-between;align-items:baseline;border-top:1px solid var(--line);padding-top:10px}
+.total b{font-family:var(--display);font-size:2.2rem}
+.btn{border:1.5px solid var(--line);background:var(--surface);border-radius:10px;padding:11px 16px;font-weight:600}
+.btn.pri{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.btn.ok{background:var(--ok);border-color:var(--ok);color:#fff}
+.btn.sm{padding:6px 10px;font-size:.9rem}
+.err{color:var(--bad);font-weight:600;font-size:.9rem;min-height:1.2em}
+.order{display:flex;gap:12px;padding:12px 0;border-top:1px solid var(--line);align-items:flex-start}
+.order:first-of-type{border-top:0}
+.order .info{flex:1;min-width:0}
+.order .n{font-family:var(--display);font-size:1.3rem;font-weight:700}
+.order .svc{color:var(--muted);font-size:.9rem;overflow-wrap:anywhere}
+.order .side{text-align:right;display:flex;flex-direction:column;gap:6px;align-items:flex-end}
+.pill{display:inline-block;font-size:.78rem;font-weight:600;padding:2px 9px;border-radius:99px;white-space:nowrap}
+.pill.ok{background:var(--ok-bg);color:var(--ok)}.pill.warn{background:var(--warn-bg);color:var(--warn)}.pill.bad{background:var(--bad-bg);color:var(--bad)}.pill.mut{background:var(--surface2);color:var(--muted)}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
+.kpi b{display:block;font-family:var(--display);font-size:2.2rem;line-height:1.1}
+.kpi span{color:var(--muted);font-size:.85rem}
+.cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px}
+.auth{border-left:5px solid var(--warn);padding:10px 12px;background:var(--warn-bg);border-radius:8px;display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.auth div{flex:1;min-width:200px}
+.tablewrap{overflow-x:auto}
+table{border-collapse:collapse;width:100%;min-width:640px}
+th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);font-size:.92rem;vertical-align:middle}
+th{color:var(--muted);font-weight:600;font-size:.8rem;text-transform:uppercase;letter-spacing:.05em}
+td.r,th.r{text-align:right}
+.bar{display:grid;grid-template-columns:150px 1fr 70px;gap:8px;align-items:center;font-size:.92rem;padding:4px 0}
+.bar i{display:block;height:14px;border-radius:4px;background:var(--accent);min-width:2px}
+.week{display:flex;gap:8px;align-items:flex-end;height:120px;border-bottom:1px solid var(--line)}
+.week div{flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:4px;font-size:.8rem;color:var(--muted);height:100%}
+.week i{display:block;width:100%;background:var(--surface2);border-radius:4px 4px 0 0}
+.week .hoy i{background:var(--accent)}
+.overlay{position:fixed;inset:0;background:rgba(5,12,18,.6);display:none;align-items:center;justify-content:center;padding:16px;z-index:5}
+.overlay.on{display:flex}
+.sheet{background:var(--surface);border-radius:14px;padding:20px;width:100%;max-width:460px;max-height:100%;overflow:auto}
+pre{white-space:pre-wrap;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:12px;font-family:var(--body);font-size:.92rem;margin:0}
+.note{color:var(--muted);font-size:.85rem}
+.ghead{display:flex;width:100%;gap:10px;align-items:center;justify-content:space-between;border:1px solid var(--line);background:var(--bg);border-radius:10px;padding:10px 12px;font-weight:600;margin-top:8px;text-align:left}
+.ghead .car{display:inline-block;width:1em;color:var(--accent)}
+tr.grow td{background:var(--bg);font-weight:600;cursor:pointer}
+.metacard{grid-column:1/-1;border-left:8px solid var(--ok);display:flex;flex-wrap:wrap;gap:16px;align-items:center}
+.metacard.warn{border-left-color:var(--warn)}.metacard.bad{border-left-color:var(--bad)}
+.metacard .big{font-family:var(--display);font-size:2.4rem;font-weight:700;line-height:1}
+.meter{position:relative;height:20px;background:var(--surface2);border-radius:10px;overflow:hidden;margin:6px 0}
+.meter i{display:block;height:100%;background:var(--ok);border-radius:10px}
+.metacard.warn .meter i{background:var(--warn)}.metacard.bad .meter i{background:var(--bad)}
+.meter .mark{position:absolute;top:0;bottom:0;width:3px;background:var(--ink)}
+.grp>.note{margin-bottom:4px}
+details.grp summary{cursor:pointer;font-weight:600;font-size:.9rem;color:var(--muted);padding:6px 0}
+.bridges{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px}
+.bridge{display:flex;flex-direction:column;gap:8px;border-top:6px solid var(--line)}
+.bridge.ok{border-top-color:var(--ok)}.bridge.alerta{border-top-color:var(--bad)}
+.cam{position:relative;aspect-ratio:16/10;background:#0a1118;border-radius:8px;overflow:hidden;display:flex;align-items:center;justify-content:center;color:#9fb0bd;font-size:.85rem}
+.cam img{width:100%;height:100%;object-fit:cover}
+.cam .box{position:absolute;left:8px;bottom:8px;font-size:.78rem;font-weight:600;padding:2px 8px;border-radius:6px;background:#1f8a4c;color:#fff}
+.cam .box.bad{background:#c0392b}
+.cam .live{position:absolute;right:8px;top:8px;font-size:.7rem;color:#fff;background:rgba(0,0,0,.55);padding:1px 6px;border-radius:4px}
+.wa{background:var(--ok-bg);border-radius:12px 12px 12px 2px;padding:12px;max-width:320px;display:flex;flex-direction:column;gap:6px}
+.wa img{width:100%;border-radius:8px}
+.logrow{display:flex;gap:10px;align-items:baseline;font-size:.92rem}
+.price input{width:84px;text-align:right}
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="brand">MOTO LAVADO <small>DEMO · datos de ejemplo</small></div>
+  <div class="tabs" role="tablist">
+    <button role="tab" id="tab-tablet" data-act="go" data-v="tablet">Facturación</button>
+    <button role="tab" id="tab-comisiones" data-act="go" data-v="comisiones">Comisiones</button>
+    <button role="tab" id="tab-gastos" data-act="go" data-v="gastos">Gastos</button>
+    <button role="tab" id="tab-admin" data-act="go" data-v="admin">Administración<span class="badge" id="badge" hidden>0</span></button>
+    <button role="tab" id="tab-vigilante" data-act="go" data-v="vigilante">Vigilante (cámara)<span class="badge" id="badge-v" hidden>0</span></button>
+  </div>
+  <label class="row note" style="gap:6px">Entrar como<select id="role" style="width:auto"><option value="dueno">Dueño (ve todo)</option><option value="enc">Encargado de tienda</option></select></label>
+  <button class="btn sm" data-act="reset">Vaciar el día</button>
+</header>
+<main>
+  <!-- ============ TABLET ============ -->
+  <section class="view" id="v-tablet">
+    <div id="login" class="card stack" style="max-width:360px;margin:40px auto;display:none">
+      <h2>Entrar a la tablet</h2>
+      <label class="f">Usuario<select id="lg-user"><option>Operador 1</option><option>Operador 2</option></select></label>
+      <label class="f">Clave<input id="lg-pin" type="password" inputmode="numeric" placeholder="Clave de 4 dígitos"></label>
+      <div class="err" id="lg-err"></div>
+      <button class="btn pri" data-act="login">Entrar</button>
+      <p class="note">En este demo la clave es 1234.</p>
+    </div>
+    <div id="work" class="grid-tablet">
+      <div class="card metacard" id="t-meta"></div>
+      <div class="card stack">
+        <div class="row"><h2 style="margin-right:auto">Nueva moto</h2><span class="note" id="who"></span><button class="btn sm" data-act="logout">Salir</button></div>
+        <label class="photo" id="ph-label">
+          <img id="ph-prev" alt="" hidden>
+          <span id="ph-txt"><b>1. Tomar foto de atrás, con la placa</b><br><span class="note">Toca aquí. La placa y el modelo se llenan solos. En este demo la foto es opcional.</span></span>
+          <input id="ph-in" type="file" accept="image/*" capture="environment">
+        </label>
+        <div class="note" id="ph-ai"></div>
+        <div class="row">
+          <label class="f">Placa<input id="f-placa" type="text" placeholder="AB1C23D" autocomplete="off" style="text-transform:uppercase"></label>
+          <label class="f">Modelo / color (opcional)<input id="f-modelo" type="text" placeholder="Empire Horse negra" autocomplete="off"></label>
+        </div>
+        <div class="row">
+          <label class="f">Teléfono del cliente (obligatorio)<input id="f-tel" type="tel" inputmode="numeric" placeholder="0414-1234567" autocomplete="off"></label>
+          <label class="f">Nombre del cliente<input id="f-nombre" type="text" placeholder="Nombre y apellido" autocomplete="off"></label>
+        </div>
+        <div class="note" id="f-cli"></div>
+        <div><div class="note" style="margin-bottom:6px;font-weight:600">2. ¿Qué se le va a hacer?</div><div class="stack" style="gap:8px" id="f-chips"></div></div>
+        <div class="row"><label class="f">Lavador que la atiende<select id="f-lav"></select></label></div>
+        <div class="row">
+          <label class="f">Descuento (requiere autorización)
+            <select id="f-desc"><option value="0">Sin descuento</option><option value="10">10%</option><option value="20">20%</option><option value="50">50%</option><option value="100">Cortesía (100%)</option></select></label>
+          <label class="f">Motivo del descuento<input id="f-motivo" type="text" placeholder="Cliente frecuente" autocomplete="off"></label>
+        </div>
+        <div class="total"><span>Total</span><span><b class="num" id="f-total">$0.00</b> <span class="note num" id="f-bs"></span></span></div>
+        <div class="err" id="f-err"></div>
+        <div class="row">
+          <button class="btn pri" data-act="addpay" style="flex:1">Cobrar y registrar</button>
+        </div>
+      </div>
+      <div class="card">
+        <div class="row"><h2 style="margin-right:auto">Motos de hoy</h2><span class="pill mut num" id="t-count"></span></div>
+        <div id="t-list"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ ADMIN ============ -->
+  <!-- ============ COMISIONES ============ -->
+  <section class="view" id="v-comisiones">
+    <div class="cols">
+      <div class="card stack">
+        <h2>Comisión del encargado · <span id="m-user"></span></h2>
+        <div class="kpis" id="m-kpis"></div>
+        <details><summary class="note" style="cursor:pointer">Ver las motos que facturé</summary>
+          <div class="tablewrap"><table style="min-width:420px"><thead><tr><th>N.º</th><th>Hora</th><th>Placa</th><th>Servicios</th><th class="r">Monto</th></tr></thead><tbody id="m-rows"></tbody></table></div></details>
+        <p class="note">En el sistema real se acumula por quincena y por mes.</p>
+      </div>
+      <div class="card stack">
+        <h2>Comisiones de trabajadores</h2>
+        <span class="note">Acumulado del mes. Toca un lavador para ver cuánto lleva.</span>
+        <div id="q-list" class="stack" style="gap:8px"></div>
+        <div id="q-det"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ GASTOS ============ -->
+  <section class="view" id="v-gastos">
+    <div class="grid-tablet">
+      <div class="card stack">
+        <h2>Nuevo gasto o compra</h2>
+        <label class="f">¿Qué se va a comprar o pagar?<input id="g-desc" type="text" placeholder="Champú para motos, 2 galones" autocomplete="off"></label>
+        <div class="row">
+          <label class="f">Monto estimado en $<input id="g-monto" type="number" min="0" step="0.5" placeholder="12"></label>
+          <label class="f">Tipo<select id="g-cat"><option>Productos de limpieza</option><option>Repuestos y herramientas</option><option>Servicios (agua, luz, cisterna)</option><option>Otros</option></select></label>
+        </div>
+        <label class="f">Se paga con<select id="g-pago"><option>Efectivo de la caja</option><option>Pago móvil</option><option>Binance</option></select></label>
+        <label class="photo"><img id="g-prev" alt="" hidden><span id="g-txt"><b>Foto del producto (si ya la tienes)</b><br><span class="note">Si no, se pide al registrar la compra.</span></span><input id="g-ph" type="file" accept="image/*" capture="environment"></label>
+        <div class="err" id="g-err"></div>
+        <button class="btn pri" data-act="gadd">Pedir autorización</button>
+        <p class="note">Primero se autoriza, después se compra. Al comprar se registran la foto del producto, la foto de la factura o ticket y el monto, que debe coincidir con lo autorizado.</p>
+      </div>
+      <div class="card">
+        <div class="row"><h2 style="margin-right:auto">Gastos de hoy</h2><span class="pill mut num" id="g-count"></span></div>
+        <div id="g-list"></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="view" id="v-admin">
+    <div class="stack" style="gap:16px">
+      <div class="row"><h2 style="margin-right:auto">Hoy, <span id="a-date"></span></h2>
+        <span class="pill ok num" id="a-tasa-pill" style="white-space:normal"></span>
+        <label class="row note" style="gap:6px">Meta diaria de motos<input id="a-meta" type="number" min="1" step="1" style="width:80px"></label>
+        <button class="btn pri" data-act="cierre">Hacer cierre del día</button></div>
+      <div class="kpis" id="a-kpis"></div>
+      <div class="card stack"><h3>Autorizaciones pendientes</h3><div class="stack" id="a-auth"></div>
+        <p class="note">En el sistema real esta solicitud te llega al teléfono (WhatsApp o notificación) y apruebas desde ahí.</p></div>
+      <div class="card stack"><h3>Motos de hoy</h3><div class="tablewrap"><table><thead><tr><th>N.º</th><th>Foto</th><th>Hora</th><th>Placa</th><th>Cliente</th><th>Servicios</th><th>Operador</th><th>Pago</th><th class="r">Monto</th></tr></thead><tbody id="a-rows"></tbody></table></div></div>
+      <div class="card stack"><h3>Base de datos de clientes</h3><div class="tablewrap"><table><thead><tr><th>Cliente</th><th>Teléfono</th><th>Motos</th><th class="r">Visitas</th><th class="r">Gastó hoy</th></tr></thead><tbody id="a-cli"></tbody></table></div><p class="note">Se llena sola con cada moto que se registra en la tablet.</p></div>
+      <div class="cols">
+        <div class="card stack"><h3>Cobrado por canal de pago</h3><div id="a-pay"></div></div>
+        <div class="card stack"><h3>Servicios vendidos hoy</h3><div id="a-svc"></div></div>
+        <div class="card stack"><h3>Gastos de hoy</h3><div id="a-gastos" class="stack" style="gap:6px"></div></div>
+        <div class="card stack"><h3>Mensajes a clientes por WhatsApp</h3><div id="a-msg" class="stack"></div><p class="note">En el demo no se envían; muestra a quién le llegaría y cómo se vería.</p></div>
+        <div class="card stack"><h3>Comisiones del encargado y lavadores</h3><div id="a-com" class="stack" style="gap:6px"></div></div>
+        <div class="card stack"><h3>Reglas de pago</h3><div id="a-rules" class="stack" style="gap:6px"></div><p class="note">Los porcentajes son de ejemplo hasta que confirmes los reales.</p></div>
+        <div class="card stack"><h3>Motos por día, últimos 7 días</h3><div class="week" id="a-week"></div></div>
+        <div class="card stack"><h3>Precios (de tu Drive, cuadre de septiembre 2024)</h3><div id="a-prices" class="stack" style="gap:6px"></div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ VIGILANTE ============ -->
+  <section class="view" id="v-vigilante">
+    <div class="stack" style="gap:16px">
+      <div class="row"><h2 style="margin-right:auto">Puentes en vivo</h2><span class="pill warn">Simulación: todavía no hay cámara conectada</span></div>
+      <div class="kpis" id="g-kpis"></div>
+      <div class="bridges" id="g-bridges"></div>
+      <div class="row"><button class="btn" data-act="simok">Simular: sube una moto ya registrada</button><button class="btn" data-act="simbad">Simular: sube una moto sin registrar</button><span class="err" id="g-msg"></span></div>
+      <div class="cols">
+        <div class="card stack"><h3>Alertas de hoy</h3><div id="g-log" class="stack" style="gap:6px"></div></div>
+        <div class="card stack"><h3>Así te llega al teléfono</h3><div id="g-wa"></div></div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<div class="overlay" id="ov-pay"><div class="sheet stack">
+  <h2>Cobrar moto <span id="p-num"></span></h2>
+  <div class="total" style="border:0;padding:0"><span id="p-det" class="note"></span><span><b class="num" id="p-total"></b><br><span class="note num" id="p-bs"></span></span></div>
+  <div class="chips" id="p-methods"></div>
+  <div id="p-conv" class="card" style="text-align:center" hidden></div>
+  <label class="f">Referencia (últimos dígitos)<input id="p-ref" type="text" inputmode="numeric" autocomplete="off" placeholder="004512"></label>
+  <div class="err" id="p-err"></div>
+  <div class="row"><button class="btn" data-act="closepay" style="flex:1">Cancelar</button><button class="btn ok" data-act="confirmpay" style="flex:1">Confirmar cobro</button></div>
+</div></div>
+
+<div class="overlay" id="ov-ticket"><div class="sheet stack">
+  <h2>Ticket enviado al cliente</h2>
+  <span class="note" id="k-to"></span>
+  <div id="k-body"></div>
+  <p class="note">En el demo no se envía de verdad; así le llegaría por WhatsApp.</p>
+  <button class="btn pri" data-act="closeticket">Listo</button>
+</div></div>
+
+<div class="overlay" id="ov-cierre"><div class="sheet stack">
+  <h2>Cierre del día</h2>
+  <pre id="c-text"></pre>
+  <div class="row"><button class="btn" data-act="closecierre" style="flex:1">Cerrar</button><button class="btn pri" data-act="copycierre" style="flex:1" id="c-copy">Copiar para WhatsApp</button></div>
+</div></div>
+
+<script>
+(function(){
+"use strict";
+var $=function(id){return document.getElementById(id)};
+function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]})}
+function usd(n){return "$"+n.toFixed(2)}
+function bs(n){return "Bs "+(n*S.tasa).toLocaleString("es-VE",{minimumFractionDigits:2,maximumFractionDigits:2})}
+function ph(color){return "data:image/svg+xml;utf8,"+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 84 64"><rect width="84" height="64" fill="'+color+'"/><circle cx="22" cy="44" r="10" fill="none" stroke="#fff" stroke-width="3"/><circle cx="62" cy="44" r="10" fill="none" stroke="#fff" stroke-width="3"/><path d="M22 44 L36 28 L54 28 L62 44 M36 28 L44 44 M50 22 L58 22" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round"/></svg>')}
+
+var METHODS=["Pago móvil","Binance","Efectivo $","Efectivo Bs","Zelle"];
+var NEEDREF={"Pago móvil":1,"Binance":1,"Zelle":1};
+var S={
+  user:"Operador 1", tasa:1003.49, recordDias:15, meta:30, encPct:0.5, lavPago:1, prodPct:10, prestamos:{}, abre:8, cierra:18, closed:null,
+  lavadores:["Yonaiker","Keive","Yondri"],
+  services:[
+    {id:"lp",name:"Lavado moto pequeña",price:4,cat:"Lavados"},{id:"la",name:"Lavado alta cilindrada",price:5,cat:"Lavados"},
+    {id:"rp",name:"Ridery promo pequeña",price:3,cat:"Lavados"},{id:"ra",name:"Ridery promo alta cilindrada",price:4,cat:"Lavados"},
+    {id:"pre",name:"Lavado premium",price:12,cat:"Lavados"},{id:"vip",name:"Lavado VIP",price:15,cat:"Lavados"},
+    {id:"pc",name:"Pulitura de casco",price:1,cat:"Pulitura"},{id:"pp",name:"Pulitura moto pequeña",price:5,cat:"Pulitura"},
+    {id:"pg",name:"Pulitura moto grande",price:7,cat:"Pulitura"},{id:"px",name:"Pulitura moto extra grande",price:9,cat:"Pulitura"},
+    {id:"cp",name:"Combo moto pequeña",price:8,cat:"Combos (lavado + pulitura + cadena)"},{id:"cg",name:"Combo moto grande",price:11,cat:"Combos (lavado + pulitura + cadena)"},{id:"cx",name:"Combo moto extra grande",price:15,cat:"Combos (lavado + pulitura + cadena)"},
+    {id:"ca",name:"Cambio de aceite",price:1,cat:"Servicios"},{id:"lc",name:"Lubricación de cadena",price:1,cat:"Servicios"},{id:"kit",name:"Kit R1",price:2,cat:"Servicios"},
+    {id:"am",name:"Aceite Motul",price:12,cat:"Productos"},{id:"as",name:"Aceite Shell",price:12,cat:"Productos"},{id:"ac",name:"Aceite clásico",price:12,cat:"Productos"},
+    {id:"c1",name:"Caucho 2.75-18",price:18,cat:"Productos"},{id:"c2",name:"Caucho 90/90-18",price:20,cat:"Productos"},{id:"c3",name:"Caucho 100/90-18",price:22,cat:"Productos"},{id:"c4",name:"Caucho 90/90-21",price:28,cat:"Productos"},
+    {id:"t1",name:"Tripa 2.75-18",price:5,cat:"Productos"},{id:"t2",name:"Tripa 3.00-18",price:5.5,cat:"Productos"},{id:"t3",name:"Tripa 2.75/3.00-21",price:6,cat:"Productos"},
+    {id:"pa",name:"Pañitos",price:1.5,cat:"Productos"}
+  ],
+  orders:[],
+  week:[["Vie",0],["Sáb",0],["Dom",0],["Lun",0],["Mar",0],["Mié",0]]
+};
+var draft={photo:null,svc:{}}, paying=null, payMethod=null;
+var VIEWS=["tablet","comisiones","gastos","admin","vigilante"], EXPECT={lp:15,la:20,rp:15,ra:20,pre:35,vip:45,pc:10,pp:30,pg:40,px:50,cp:45,cg:55,cx:65,ca:15,lc:5,kit:5}, NOW=Date.now();
+function hhmm(d){return String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0")}
+S.bridges=[{n:1,state:"libre"},{n:2,state:"libre"},{n:3,state:"libre"},{n:4,state:"libre"}];
+S.camCount=0;
+S.clients={};
+function normTel(s){return String(s||"").replace(/\D/g,"")}
+function fmtTel(t){return t?t.slice(0,4)+"-"+t.slice(4):""}
+function cliName(o){var c=S.clients[o.tel];return c?c.nombre:"Sin nombre"}
+function cliVisits(tel){var c=S.clients[tel];return (c?c.prev:0)+S.orders.filter(function(o){return o.tel===tel}).length}
+S.log=[];
+
+function svc(id){for(var i=0;i<S.services.length;i++)if(S.services[i].id===id)return S.services[i]}
+function subtotal(o){return o.svc.reduce(function(a,id){return a+svc(id).price},0)}
+function total(o){var s=subtotal(o);return (o.disc&&o.disc.status==="approved")?s*(1-o.disc.pct/100):s}
+function names(o){return o.svc.map(function(id){return svc(id).name}).join(" + ")}
+function pendingAuth(){return S.orders.filter(function(o){return o.disc&&o.disc.status==="pending"})}
+
+/* ---------- Tablet ---------- */
+function chipHtml(s){return '<button type="button" class="chip" data-act="chip" data-id="'+s.id+'" aria-pressed="'+(!!draft.svc[s.id])+'">'+esc(s.name)+' <span class="num">'+usd(s.price)+'</span></button>'}
+function comm(o){return S.lavPago}
+function renderChips(){
+  var cats=[]; S.services.forEach(function(s){if(cats.indexOf(s.cat)<0)cats.push(s.cat)});
+  $("f-chips").innerHTML=cats.map(function(c){
+    var chips=S.services.filter(function(s){return s.cat===c}).map(chipHtml).join("");
+    return c==="Productos"?'<details class="grp"><summary>Productos (aceites, cauchos, tripas, pañitos)</summary><div class="chips">'+chips+'</div></details>':'<div class="grp"><div class="note">'+esc(c)+'</div><div class="chips">'+chips+'</div></div>';
+  }).join("");
+  if(!$("f-lav").options.length)$("f-lav").innerHTML='<option value="">Elegir…</option>'+S.lavadores.map(function(l){return '<option>'+esc(l)+'</option>'}).join("");
+  draftTotal();
+}
+function draftTotal(){
+  var t=S.services.reduce(function(a,s){return a+(draft.svc[s.id]?s.price:0)},0);
+  $("f-total").textContent=usd(t); $("f-bs").textContent=t?bs(t):"";
+}
+function discPill(o){
+  if(!o.disc)return "";
+  if(o.disc.status==="pending")return '<span class="pill warn">Descuento '+o.disc.pct+'%: esperando autorización</span>';
+  if(o.disc.status==="approved")return '<span class="pill ok">Descuento '+o.disc.pct+'% autorizado</span>';
+  return '<span class="pill bad">Descuento negado, cobra completo</span>';
+}
+var openT={}, openA={};
+function groupOrders(){
+  var gs=[], by={};
+  S.orders.forEach(function(o){
+    var pend=!o.pay, k=pend?"__pend":o.svc[0], name=pend?"Pendientes de cobro o autorización":svc(o.svc[0]).name;
+    if(!by[k]){by[k]={k:k,name:name,os:[],tot:0};gs.push(by[k])}
+    by[k].os.push(o); by[k].tot+=total(o);
+  });
+  gs.sort(function(a,b){return (b.k==="__pend")-(a.k==="__pend")||b.os.length-a.os.length});
+  if(by.__pend&&openT.__pend===undefined)openT.__pend=true;
+  return gs;
+}
+function renderTablet(){
+  $("who").textContent=S.user;
+  $("t-count").textContent=S.orders.length+" motos";
+  if(!S.orders.length){$("t-list").innerHTML='<p class="note">Todavía no hay motos facturadas hoy.</p>';return}
+  var item=function(o){
+    var blocked=o.disc&&o.disc.status==="pending";
+    var side=o.pay?'<span class="pill ok">Cobrada · '+esc(o.pay.method)+'</span>'
+      :(blocked?'<span class="pill warn">No cobrar todavía</span>':'<button class="btn pri sm" data-act="pay" data-n="'+o.num+'">Cobrar</button>');
+    return '<div class="order"><img class="thumb" src="'+o.photo+'" alt="Foto de la moto '+o.num+'"><div class="info"><div class="n">#'+String(o.num).padStart(3,"0")+' · '+esc(o.placa)+'</div><div class="svc">'+esc(o.modelo||"")+(o.modelo?" · ":"")+esc(names(o))+'</div><div class="svc">'+esc(cliName(o))+' · '+fmtTel(o.tel)+'</div><div class="svc">'+o.time+' · Lavador: '+esc(o.lav||"")+'</div>'+discPill(o)+(o.ticket?' <span class="pill mut">Ticket enviado</span>':'')+'</div><div class="side"><b class="num">'+usd(total(o))+'</b>'+side+'</div></div>';
+  };
+  var gs=groupOrders();
+  $("t-list").innerHTML=gs.map(function(g){
+    var op=!!openT[g.k];
+    return '<button type="button" class="ghead" data-act="tglT" data-k="'+esc(g.k)+'" aria-expanded="'+op+'"><span><span class="car">'+(op?"▾":"▸")+'</span> '+esc(g.name)+'</span><span class="num">'+g.os.length+' motos · '+usd(g.tot)+'</span></button>'+(op?g.os.slice().reverse().map(item).join(""):"");
+  }).join("");
+}
+var pendingNew=null;
+function resetForm(){
+  draft={photo:null,svc:{}}; $("f-placa").value="";$("f-modelo").value="";$("f-tel").value="";$("f-nombre").value="";$("f-cli").textContent="";$("f-motivo").value="";$("f-desc").value="0";$("f-lav").value="";$("ph-ai").textContent="";autoPlaca="";autoModelo="";$("ph-in").value="";
+  $("ph-prev").hidden=true; $("ph-txt").innerHTML='<b>1. Tomar foto de atrás, con la placa</b><br><span class="note">Toca aquí. La placa y el modelo se llenan solos. En este demo la foto es opcional.</span>';
+  renderChips();
+}
+function commitOrder(o){
+  var tel=o.tel, nombre=o._nombre; delete o._nombre;
+  if(!S.clients[tel])S.clients[tel]={nombre:nombre||"Sin nombre",prev:0}; else if(nombre)S.clients[tel].nombre=nombre;
+  o.num=S.orders.length+1; S.orders.push(o);
+  S.bridges.forEach(function(b){if(b.state==="alerta"&&b.plate===o.placa){b.state="ok";b.num=o.num;S.log.unshift({time:o.time,txt:"Puente "+b.n+": se registró la moto "+o.placa+" (#"+o.num+").",kind:"ok"})}});
+  resetForm(); renderAll();
+}
+function addOrder(){
+  var placa=$("f-placa").value.trim().toUpperCase(), ids=S.services.filter(function(s){return draft.svc[s.id]}).map(function(s){return s.id});
+  var pct=+$("f-desc").value, motivo=$("f-motivo").value.trim(), e="", tel=normTel($("f-tel").value), nombre=$("f-nombre").value.trim(), lav=$("f-lav").value;
+  if(!placa)e="Escribe la placa.";
+  else if(!/^0[24]\d{9}$/.test(tel))e="Escribe el teléfono del cliente (11 dígitos). Sin teléfono no se puede facturar.";
+  else if(!ids.length)e="Marca al menos un servicio.";
+  else if(!lav)e="Elige el lavador que la atiende.";
+  else if(pct&&!motivo)e="Escribe el motivo del descuento.";
+  $("f-err").textContent=e; if(e)return;
+  var o={num:S.orders.length+1,time:hhmm(new Date()),placa:placa,modelo:$("f-modelo").value.trim(),photo:draft.photo||ph("#55606a"),svc:ids,lav:lav,tel:tel,_nombre:nombre,disc:pct?{pct:pct,motivo:motivo,status:"pending"}:null,pay:null,op:S.user};
+  if(pct){commitOrder(o);$("f-err").textContent="Moto #"+o.num+" en espera: se pidió autorización del descuento. Se cobra cuando respondan, antes de lavar.";return}
+  pendingNew=o; openPayObj(o);
+}
+function openPay(n){openPayObj(S.orders.filter(function(o){return o.num===n})[0])}
+function openPayObj(o){
+  paying=o; payMethod=null;
+  $("p-num").textContent="#"+String(o.num).padStart(3,"0"); $("p-det").textContent=paying.placa+" · "+names(paying);
+  $("p-total").textContent=usd(total(paying)); $("p-bs").textContent=bs(total(paying));
+  $("p-ref").value=""; $("p-err").textContent=""; renderMethods(); $("ov-pay").classList.add("on");
+}
+function fmtN(n){return n.toLocaleString("es-VE",{minimumFractionDigits:2,maximumFractionDigits:2})}
+function payAmt(method,t,rate){
+  if(method==="Pago móvil"||method==="Efectivo Bs")return {cur:"Bs",val:t*rate,txt:"Bs "+fmtN(t*rate)};
+  if(method==="Binance")return {cur:"USDT",val:t,txt:fmtN(t)+" USDT"};
+  return {cur:"$",val:t,txt:usd(t)};
+}
+function paidAmt(o){return payAmt(o.pay.method,total(o),o.pay.tasa||S.tasa)}
+function renderConv(){
+  var el=$("p-conv"); if(!payMethod||!paying){el.hidden=true;return}
+  var a=payAmt(payMethod,total(paying),S.tasa);
+  el.hidden=false;
+  el.innerHTML='<span class="note">El cliente paga</span><b class="num" style="display:block;font-family:var(--display);font-size:2.4rem;line-height:1.1">'+a.txt+'</b><span class="note num">'+(a.cur==="Bs"?"Tasa euro BCV de este momento: Bs "+fmtN(S.tasa):a.cur==="USDT"?"Equivale a "+usd(total(paying))+" (1 USDT = 1 $)":"Pago directo en dólares")+'</span>';
+}
+function ticketHtml(o){
+  var a=paidAmt(o), d=new Date();
+  return '<div class="wa" style="max-width:none"><b>Moto Lavado R1 · Ticket #'+String(o.num).padStart(3,"0")+'</b><span class="num">'+d.toLocaleDateString("es-VE")+' · '+o.time+'</span><span>Hola '+esc(cliName(o))+', este es el ticket de tu lavado.</span><span>Placa: <b>'+esc(o.placa)+'</b>'+(o.modelo?' · '+esc(o.modelo):'')+'</span>'
+    +o.svc.map(function(id){return '<span class="row" style="justify-content:space-between"><span>'+esc(svc(id).name)+'</span><span class="num">'+usd(svc(id).price)+'</span></span>'}).join("")
+    +(o.disc&&o.disc.status==="approved"?'<span>Descuento: '+o.disc.pct+'%</span>':'')
+    +'<b class="row" style="justify-content:space-between"><span>Total</span><span class="num">'+usd(total(o))+'</span></b><span>Pagado: <b class="num">'+a.txt+'</b> por '+esc(o.pay.method)+(o.pay.ref?' (ref. '+esc(o.pay.ref)+')':'')+'</span>'
+    +(a.cur==="Bs"?'<span class="note num">Tasa euro BCV: Bs '+fmtN(o.pay.tasa)+'</span>':'')+'<span>Gracias por tu visita.</span></div>';
+}
+function showTicket(o){$("k-to").textContent="WhatsApp al "+fmtTel(o.tel)+" · "+cliName(o);$("k-body").innerHTML=ticketHtml(o);$("ov-ticket").classList.add("on")}
+function renderMethods(){renderConv();$("p-methods").innerHTML=METHODS.map(function(m){return '<button type="button" class="chip" data-act="method" data-m="'+m+'" aria-pressed="'+(payMethod===m)+'">'+m+'</button>'}).join("")}
+function confirmPay(){
+  var ref=$("p-ref").value.trim();
+  if(!payMethod){$("p-err").textContent="Elige cómo pagó.";return}
+  if(NEEDREF[payMethod]&&!ref){$("p-err").textContent="Escribe la referencia del "+payMethod+".";return}
+  var pa=payAmt(payMethod,total(paying),S.tasa); paying.pay={method:payMethod,ref:ref,tasa:S.tasa,cur:pa.cur,val:pa.val};
+  var po=paying; po.ticket=true; $("ov-pay").classList.remove("on");
+  if(pendingNew===po){pendingNew=null;commitOrder(po);$("f-err").textContent="Moto #"+po.num+" cobrada y registrada. Ya puede pasar al puente."}
+  else renderAll();
+  showTicket(po);
+}
+
+/* ---------- Admin ---------- */
+function renderAdmin(){
+  var paid=S.orders.filter(function(o){return o.pay}), unpaid=S.orders.filter(function(o){return !o.pay});
+  var ing=paid.reduce(function(a,o){return a+total(o)},0), porCobrar=unpaid.reduce(function(a,o){return a+total(o)},0);
+  $("a-tasa-pill").textContent="Tasa euro BCV de hoy: Bs "+fmtN(S.tasa)+" por $ · se actualiza sola";
+  $("a-date").textContent=new Date().toLocaleDateString("es-VE",{weekday:"long",day:"numeric",month:"long"});
+  $("a-kpis").innerHTML=[
+    [S.orders.length,"Motos atendidas"],[usd(ing),"Cobrado · "+bs(ing)],[usd(paid.length?ing/paid.length:0),"Promedio por moto"],[usd(porCobrar),unpaid.length+" por cobrar"]
+  ].map(function(k){return '<div class="card kpi"><b class="num">'+k[0]+'</b><span>'+k[1]+'</span></div>'}).join("");
+  var pa=pendingAuth();
+  $("a-auth").innerHTML=pa.length?pa.map(function(o){
+    var s=subtotal(o);
+    return '<div class="auth"><img class="thumb" src="'+o.photo+'" alt=""><div><b>'+esc(o.op)+' pide '+o.disc.pct+'% de descuento</b><br>Moto #'+o.num+' · '+esc(o.placa)+' · '+esc(names(o))+'<br><span class="num">'+usd(s)+' → '+usd(s*(1-o.disc.pct/100))+'</span> · Motivo: '+esc(o.disc.motivo)+'</div><button class="btn sm" data-act="deny" data-n="'+o.num+'">Negar</button><button class="btn ok sm" data-act="approve" data-n="'+o.num+'">Autorizar</button></div>';
+  }).join(""):'<span class="pill ok">Sin solicitudes pendientes</span>';
+  var arow=function(o){
+    var pago=o.pay?'<span class="pill ok">'+esc(o.pay.method)+(paidAmt(o).cur!=="$"?" · "+paidAmt(o).txt:"")+(o.pay.ref?" · "+esc(o.pay.ref):"")+'</span>':(o.disc&&o.disc.status==="pending"?'<span class="pill warn">Espera autorización</span>':'<span class="pill bad">Por cobrar</span>');
+    var d=o.disc&&o.disc.status==="approved"?' <span class="pill mut">-'+o.disc.pct+'%</span>':"";
+    return '<tr><td class="num">#'+String(o.num).padStart(3,"0")+'</td><td><img class="thumb" style="width:56px;height:42px" src="'+o.photo+'" alt=""></td><td class="num">'+o.time+'</td><td>'+esc(o.placa)+'</td><td>'+esc(cliName(o))+'<br><span class="note num">'+fmtTel(o.tel)+'</span></td><td>'+esc(names(o))+d+'</td><td>'+esc(o.op)+'</td><td>'+pago+'</td><td class="r num"><b>'+usd(total(o))+'</b></td></tr>';
+  };
+  $("a-rows").innerHTML=groupOrders().map(function(g){
+    var op=!!openA[g.k];
+    return '<tr class="grow" data-act="tglA" data-k="'+esc(g.k)+'"><td colspan="7"><span class="car">'+(op?"▾":"▸")+'</span> '+esc(g.name)+' · '+g.os.length+' motos</td><td class="r num" colspan="2">'+usd(g.tot)+'</td></tr>'+(op?g.os.map(arow).join(""):"");
+  }).join("");
+  var byM={},maxM=0; paid.forEach(function(o){byM[o.pay.method]=(byM[o.pay.method]||0)+total(o)});
+  METHODS.forEach(function(m){maxM=Math.max(maxM,byM[m]||0)});
+  $("a-pay").innerHTML=METHODS.map(function(m){var v=byM[m]||0;return '<div class="bar"><span>'+m+'</span><i style="width:'+(maxM?v/maxM*100:0)+'%"></i><span class="num" style="text-align:right">'+usd(v)+'</span></div>'}).join("");
+  var byS={},maxS=0; S.orders.forEach(function(o){o.svc.forEach(function(id){byS[id]=(byS[id]||0)+1})});
+  S.services.forEach(function(s){maxS=Math.max(maxS,byS[s.id]||0)});
+  $("a-svc").innerHTML=S.services.filter(function(s){return byS[s.id]}).map(function(s){var v=byS[s.id];return '<div class="bar"><span>'+esc(s.name)+'</span><i style="width:'+(v/maxS*100)+'%"></i><span class="num" style="text-align:right">'+v+'</span></div>'}).join("");
+  renderAdminCom();
+  var w=S.week.concat([["Hoy",S.orders.length]]),mw=Math.max(1,Math.max.apply(null,w.map(function(x){return x[1]})));
+  $("a-week").innerHTML=w.map(function(x,i){return '<div class="'+(i===w.length-1?"hoy":"")+'"><span class="num">'+x[1]+'</span><i style="height:'+(x[1]/mw*75)+'%"></i><span>'+x[0]+'</span></div>'}).join("");
+  $("a-cli").innerHTML=Object.keys(S.clients).map(function(tel){
+    var os=S.orders.filter(function(o){return o.tel===tel}), pl={}; os.forEach(function(o){pl[o.placa]=1});
+    return {tel:tel,nombre:S.clients[tel].nombre,placas:Object.keys(pl).join(", "),v:cliVisits(tel),g:os.reduce(function(a,o){return a+total(o)},0)};
+  }).sort(function(x,y){return y.v-x.v}).map(function(c){
+    return '<tr><td>'+esc(c.nombre)+(c.v>=5?' <span class="pill ok">Frecuente</span>':c.v===1?' <span class="pill mut">Nuevo</span>':'')+'</td><td class="num">'+fmtTel(c.tel)+'</td><td>'+esc(c.placas)+'</td><td class="r num">'+c.v+'</td><td class="r num">'+usd(c.g)+'</td></tr>';
+  }).join("");
+  var tels=Object.keys(S.clients), ej=tels.length?S.clients[tels[0]].nombre:"Carlos";
+  $("a-msg").innerHTML='<div class="stack" style="gap:6px"><div class="row" style="justify-content:space-between"><b>Promoción</b><span class="pill mut num">'+tels.length+' clientes</span></div><div class="wa">Hola '+esc(ej)+', este fin de semana tu lavado premium tiene 20% de descuento en Moto Lavado R1. Te esperamos.</div></div>'
+    +'<div class="stack" style="gap:6px"><div class="row" style="justify-content:space-between"><b>Recordatorio: te toca lavar la moto</b><span class="pill mut num">0 clientes hoy</span></div><div class="wa">Hola '+esc(ej)+', ya pasaron '+S.recordDias+' días desde tu último lavado. Tu moto te lo va a agradecer. Te esperamos en Moto Lavado R1.</div><span class="note">Sale solo cuando un cliente lleva más de '+S.recordDias+' días sin venir.</span></div>';
+  var b=pa.length; $("badge").hidden=!b; $("badge").textContent=b;
+}
+function renderPrices(){
+  $("a-prices").innerHTML=S.services.map(function(s){return '<label class="row price" style="justify-content:space-between"><span>'+esc(s.name)+'</span><input type="number" min="0" step="0.5" id="pr-'+s.id+'" data-price="'+s.id+'" value="'+s.price+'"></label>'}).join("");
+}
+function cierreText(){
+  var paid=S.orders.filter(function(o){return o.pay}), unpaid=S.orders.filter(function(o){return !o.pay});
+  var ing=paid.reduce(function(a,o){return a+total(o)},0), byM={}, desc=0;
+  paid.forEach(function(o){byM[o.pay.method]=(byM[o.pay.method]||0)+total(o)});
+  S.orders.forEach(function(o){if(o.disc&&o.disc.status==="approved")desc+=subtotal(o)-total(o)});
+  var L=["CIERRE MOTO LAVADO · "+new Date().toLocaleDateString("es-VE"),"Motos atendidas: "+S.orders.length,"Cobrado: "+usd(ing)+" ("+bs(ing)+")",""];
+  METHODS.forEach(function(m){if(byM[m])L.push("  "+m+": "+usd(byM[m]))});
+  var rb=0,ru=0; paid.forEach(function(o){var a=paidAmt(o);if(a.cur==="Bs")rb+=a.val;else if(a.cur==="USDT")ru+=a.val});
+  L.push("","Recibido en bolívares: Bs "+fmtN(rb),"Recibido en USDT: "+fmtN(ru),"Tasa euro BCV del día: Bs "+fmtN(S.tasa));
+  var go_=gastosOk(), gt=go_.reduce(function(a,g){return a+gAmt(g)},0);
+  L.push("","Gastos autorizados: "+usd(gt)+" ("+go_.length+")"); go_.forEach(function(g){L.push("  "+g.desc+": "+usd(gAmt(g))+" · "+g.pago+(g.status==="done"?(g.aceptado?" · diferencia aceptada (autorizado "+usd(g.monto)+")":" · factura coincide"):g.status==="approved"?" · FALTA REGISTRAR LA COMPRA":" · NO COINCIDE (autorizado "+usd(g.monto)+")"))});
+  L.push("Neto del día (cobrado menos gastos): "+usd(ing-gt));
+  L.push("","Descuentos autorizados: "+usd(desc));
+  L.push("Por cobrar: "+unpaid.length+(unpaid.length?" ("+unpaid.map(function(o){return "#"+o.num+" "+o.placa+" "+usd(total(o))}).join(", ")+")":""));
+  var byS={}; S.orders.forEach(function(o){o.svc.forEach(function(id){byS[id]=(byS[id]||0)+1})});
+  L.push("","Meta del día: "+S.orders.length+" de "+S.meta+" motos"+(S.orders.length>=S.meta?" (cumplida)":""));
+  var ops={}; S.orders.forEach(function(o){ops[o.op]=(ops[o.op]||0)+1});
+  L.push("","Encargado ("+S.encPct+"% de lo que factura):"); Object.keys(ops).forEach(function(k){var tv=S.orders.filter(function(o){return o.op===k}).reduce(function(a,o){return a+total(o)},0);L.push("  "+k+": "+ops[k]+" motos, vendió "+usd(tv)+", gana "+usd(tv*S.encPct/100))});
+  L.push("","Lavadores ("+usd(S.lavPago)+" por moto):"); S.lavadores.forEach(function(l){var c=lavCalc(l);if(c.n)L.push("  "+l+": "+c.n+" motos, "+usd(c.bruto)+" - productos "+usd(c.prod)+" - préstamo "+usd(c.pres)+" = "+usd(c.neto))});
+  L.push("","Servicios:"); S.services.forEach(function(s){if(byS[s.id])L.push("  "+s.name+": "+byS[s.id])});
+  return L.join("\n");
+}
+
+/* ---------- Vigilante ---------- */
+function mins(t){return Math.max(0,Math.round((Date.now()-t)/60000))}
+function orderByNum(n){return S.orders.filter(function(o){return o.num===n})[0]}
+function freeBridge(){return S.bridges.filter(function(b){return b.state==="libre"})[0]}
+function randPlate(){var L="ABCDEFGHJKLMNPRSTVWXYZ",r=function(s){return s[Math.floor(Math.random()*s.length)]},D="0123456789";return "A"+r(L)+r(D)+r(L)+r(D)+r(D)+r(L)}
+function renderVigilante(){
+  var occ=S.bridges.filter(function(b){return b.state!=="libre"}).length, diff=S.camCount-S.orders.length;
+  $("g-kpis").innerHTML=[[S.camCount,"Motos que vio la cámara hoy"],[S.orders.length,"Motos registradas en el sistema"],[diff,diff>0?"Motos sin registrar":"Todo cuadra"],[occ+" / "+S.bridges.length,"Puentes ocupados"]]
+    .map(function(k){return '<div class="card kpi"><b class="num">'+k[0]+'</b><span>'+k[1]+'</span></div>'}).join("");
+  $("g-bridges").innerHTML=S.bridges.map(function(b){
+    var head='<div class="row"><h2>Puente '+b.n+'</h2>';
+    if(b.state==="libre")return '<div class="card bridge">'+head+'<span class="pill mut" style="margin-left:auto">Libre</span></div><div class="cam">Sin moto</div></div>';
+    var m=mins(b.t);
+    if(b.state==="alerta")return '<div class="card bridge alerta">'+head+'<span class="pill bad" style="margin-left:auto">Sin factura</span></div><div class="cam"><img src="'+b.photo+'" alt="Moto en el puente '+b.n+'"><span class="live">EN VIVO</span><span class="box bad">Placa '+esc(b.plate)+'</span></div><b>Moto sin registro en el sistema</b><span class="note">Lleva '+m+' min montada. Ninguna factura abierta tiene esa placa.</span><div class="row"><button class="btn pri sm" data-act="regnow" data-b="'+b.n+'">Registrar ahora</button><button class="btn sm" data-act="down" data-b="'+b.n+'">La moto bajó</button></div></div>';
+    var o=orderByNum(b.num), exp=Math.max(10,o.svc.reduce(function(a,id){return a+(EXPECT[id]||0)},0)), over=m>exp*1.5;
+    return '<div class="card bridge ok">'+head+'<span class="pill ok" style="margin-left:auto">Coincide con #'+String(o.num).padStart(3,"0")+'</span></div><div class="cam"><img src="'+o.photo+'" alt="Moto en el puente '+b.n+'"><span class="live">EN VIVO</span><span class="box">Placa '+esc(b.plate)+'</span></div><b>'+esc(names(o))+'</b>'+(over?'<span class="pill warn" style="align-self:flex-start;white-space:normal">Lleva '+m+' min; lo facturado toma unos '+exp+'</span>':'<span class="note">Lleva '+m+' min de unos '+exp+' · '+esc(o.op)+'</span>')+'<div class="row"><button class="btn sm" data-act="down" data-b="'+b.n+'">La moto bajó</button></div></div>';
+  }).join("");
+  $("g-log").innerHTML=S.log.length?S.log.map(function(l){return '<div class="logrow"><span class="num note">'+l.time+'</span><span class="pill '+l.kind+'">'+(l.kind==="bad"?"Alerta":l.kind==="ok"?"Resuelta":"Aviso")+'</span><span>'+esc(l.txt)+'</span></div>'}).join(""):'<span class="pill ok">Sin alertas hoy</span>';
+  var al=S.bridges.filter(function(b){return b.state==="alerta"});
+  $("g-wa").innerHTML=al.length?'<div class="wa"><b>Moto Lavado · Puente '+al[0].n+'</b><img src="'+al[0].photo+'" alt=""><span>Hay una moto montada hace '+mins(al[0].t)+' min y no está facturada.</span><span>Placa leída: <b>'+esc(al[0].plate)+'</b></span></div>':'<span class="pill ok">Sin alertas activas</span>';
+  $("badge-v").hidden=!al.length; $("badge-v").textContent=al.length;
+}
+
+function mine(){return S.orders.filter(function(o){return o.op===S.user})}
+function encGain(){return mine().reduce(function(a,o){return a+total(o)},0)*S.encPct/100}
+function lavCalc(l){
+  var n=S.orders.filter(function(o){return o.lav===l}).length, bruto=n*S.lavPago, prod=bruto*S.prodPct/100;
+  var pres=Math.min(S.prestamos[l]||0,Math.max(0,bruto-prod));
+  return {n:n,bruto:bruto,prod:prod,pres:pres,debe:S.prestamos[l]||0,neto:bruto-prod-pres};
+}
+var comSel=null;
+function renderCom(){
+  var eo=mine(), et=eo.reduce(function(a,o){return a+total(o)},0), rw=function(a,b,strong){return '<div class="row" style="justify-content:space-between"><span>'+a+'</span><'+(strong?'b':'span')+' class="num">'+b+'</'+(strong?'b':'span')+'></div>'};
+  $("q-list").innerHTML='<button class="btn'+(comSel==="__enc"?' pri':'')+'" data-act="lavdet" data-l="__enc" style="display:flex;justify-content:space-between;gap:12px"><span>'+esc(S.user)+' (encargado)</span><span class="num">'+eo.length+' motos facturadas</span></button>'+S.lavadores.map(function(l){var c=lavCalc(l);return '<button class="btn'+(comSel===l?' pri':'')+'" data-act="lavdet" data-l="'+esc(l)+'" style="display:flex;justify-content:space-between;gap:12px"><span>'+esc(l)+'</span><span class="num">'+c.n+' motos</span></button>'}).join("");
+  if(!comSel){$("q-det").innerHTML="";return}
+  if(comSel==="__enc"){$("q-det").innerHTML='<div class="card stack" style="gap:6px"><h3>'+esc(S.user)+' (encargado)</h3>'+rw("Motos facturadas",eo.length)+rw("Total vendido",usd(et))+rw("Porcentaje sobre las ventas",S.encPct+"%")+'<div style="border-top:1px solid var(--line);padding-top:6px">'+rw("Le toca cobrar",usd(encGain()),true)+'</div><span class="note">Se calcula sobre todo lo que facturó.</span></div>';return}
+  var c=lavCalc(comSel), row=function(a,b,strong){return '<div class="row" style="justify-content:space-between"><span>'+a+'</span><'+(strong?'b':'span')+' class="num">'+b+'</'+(strong?'b':'span')+'></div>'};
+  $("q-det").innerHTML='<div class="card stack" style="gap:6px"><h3>'+esc(comSel)+'</h3>'+row("Motos atendidas",c.n)+row("Comisión ("+usd(S.lavPago)+" por moto)",usd(c.bruto))+row("Menos productos ("+S.prodPct+"%)","- "+usd(c.prod))+row("Menos préstamo","- "+usd(c.pres))+'<div style="border-top:1px solid var(--line);padding-top:6px">'+row("Le toca cobrar",usd(c.neto),true)+'</div>'+(c.debe>c.pres?'<span class="note">Le quedan '+usd(c.debe-c.pres)+' de préstamo por descontar.</span>':'')+'<span class="note">Sin sueldo fijo. Sale de las motos facturadas a su nombre.</span></div>';
+}
+function renderAdminCom(){
+  var eo=mine(), et=eo.reduce(function(a,o){return a+total(o)},0);
+  $("a-com").innerHTML='<div class="row" style="justify-content:space-between"><span>'+esc(S.user)+' (encargado) <span class="note">· '+eo.length+' motos · vendió '+usd(et)+' · '+S.encPct+'%</span></span><b class="num">'+usd(encGain())+'</b></div>'+S.lavadores.map(function(l){var c=lavCalc(l);return '<div class="row" style="justify-content:space-between"><span>'+esc(l)+' <span class="note">· '+c.n+' motos · bruto '+usd(c.bruto)+'</span></span><b class="num">'+usd(c.neto)+'</b></div>'}).join("");
+}
+function renderRules(){
+  var f=function(label,attr,val,step){return '<label class="row price" style="justify-content:space-between"><span>'+label+'</span><input type="number" min="0" step="'+step+'" '+attr+' value="'+val+'"></label>'};
+  $("a-rules").innerHTML=f("Encargado: % de lo que factura",'id="r-enc"',S.encPct,"0.1")+f("Lavador: $ por moto",'id="r-lav"',S.lavPago,"0.25")+f("Lavador: % que paga por productos",'id="r-prod"',S.prodPct,"1")
+    +S.lavadores.map(function(l,i){return f("Préstamo a descontar: "+esc(l),'id="r-pres-'+i+'" data-pres="'+esc(l)+'"',S.prestamos[l]||0,"1")}).join("");
+}
+function renderMeta(){
+  var n=S.orders.length, d=new Date(), h=d.getHours()+d.getMinutes()/60;
+  var frac=Math.min(1,Math.max(0,(h-S.abre)/(S.cierra-S.abre))), esp=Math.round(S.meta*frac), falta=Math.max(0,S.meta-n);
+  var st="ok", msg;
+  if(n>=S.meta)msg="Meta del día cumplida";
+  else if(n>=esp)msg=n>esp+2?"Vas adelantado":"Vas al día";
+  else if(n>=esp*0.8){st="warn";msg="Un poco atrasado: a esta hora deberías llevar "+esp}
+  else{st="bad";msg="Atrasado: a esta hora deberías llevar "+esp}
+  var el=$("t-meta"), mm=mine().length; el.className="card metacard"+(st==="ok"?"":" "+st);
+  el.innerHTML='<div><span class="note">Meta del día</span><div class="big num">'+n+' <span style="font-size:1.2rem;color:var(--muted)">de '+S.meta+' motos</span></div></div>'
+    +'<div style="flex:1;min-width:220px"><span class="pill '+st+'">'+msg+'</span><div class="meter" title="La raya marca dónde deberías ir a esta hora"><i style="width:'+Math.min(100,n/S.meta*100)+'%"></i><span class="mark" style="left:'+Math.min(99,esp/S.meta*100)+'%"></span></div><span class="note">'+(falta?"Faltan "+falta+" motos. La raya marca dónde deberías ir a esta hora.":"Todo lo que entre ahora es extra.")+'</span></div>'
+    +'<div style="text-align:right"><span class="note">Mis ventas hoy</span><div class="big num">'+usd(encGain())+'</div><span class="note">'+mm+' motos facturadas</span><br><button class="btn sm" data-act="mis" style="margin-top:6px">Ver comisiones</button></div>';
+}
+function renderMis(){
+  var os=mine(), tot=os.reduce(function(a,o){return a+total(o)},0);
+  $("m-user").textContent=S.user;
+  $("m-kpis").innerHTML=[[os.length,"Motos facturadas"],[usd(tot),"Total vendido"],[S.encPct+"%","Porcentaje sobre las ventas"],[usd(encGain()),"Comisión ganada"]].map(function(k){return '<div class="card kpi"><b class="num">'+k[0]+'</b><span>'+k[1]+'</span></div>'}).join("");
+  $("m-rows").innerHTML=os.length?os.slice().reverse().map(function(o){return '<tr><td class="num">#'+String(o.num).padStart(3,"0")+'</td><td class="num">'+o.time+'</td><td>'+esc(o.placa)+'</td><td>'+esc(names(o))+'</td><td class="r num">'+usd(total(o))+'</td></tr>'}).join(""):'<tr><td colspan="5" class="note">Todavía no has facturado motos hoy.</td></tr>';
+}
+S.gastos=[]; var gDraft=null;
+function readImg(file,max,cb){var r=new FileReader();r.onload=function(){var img=new Image();img.onload=function(){var c=document.createElement("canvas"),k=Math.min(1,max/img.width);c.width=img.width*k;c.height=img.height*k;c.getContext("2d").drawImage(img,0,0,c.width,c.height);cb(c.toDataURL("image/jpeg",.7))};img.src=r.result};r.readAsDataURL(file)}
+function addGasto(){
+  var desc=$("g-desc").value.trim(), monto=parseFloat($("g-monto").value), e="";
+  if(!desc)e="Escribe qué se va a comprar o pagar."; else if(!(monto>0))e="Escribe el monto estimado.";
+  $("g-err").textContent=e; if(e)return;
+  S.gastos.push({id:S.gastos.length+1,time:hhmm(new Date()),desc:desc,monto:monto,cat:$("g-cat").value,pago:$("g-pago").value,foto:gDraft,factura:null,status:"pending",op:S.user});
+  gDraft=null; $("g-desc").value="";$("g-monto").value="";$("g-ph").value="";$("g-prev").hidden=true;
+  $("g-txt").innerHTML='<b>Foto del producto (si ya la tienes)</b><br><span class="note">Si no, se pide al registrar la compra.</span>';
+  renderAll(); $("g-err").textContent="Solicitud enviada. No compres hasta que la autoricen.";
+}
+function gAmt(g){return g.real!=null&&g.status!=="approved"?g.real:g.monto}
+function gPill(g){
+  if(g.status==="pending")return '<span class="pill warn">Esperando autorización</span>';
+  if(g.status==="rejected")return '<span class="pill bad">Negado: no comprar</span>';
+  if(g.status==="approved")return '<span class="pill ok">Autorizado por '+usd(g.monto)+': ya puedes comprar</span>';
+  if(g.status==="mismatch")return '<span class="pill bad" style="white-space:normal">No coincide: autorizado '+usd(g.monto)+', factura '+usd(g.real)+'. En revisión</span>';
+  if(g.status==="observed")return '<span class="pill bad" style="white-space:normal">Diferencia no aceptada: autorizado '+usd(g.monto)+', factura '+usd(g.real)+'</span>';
+  return '<span class="pill ok" style="white-space:normal">Comprado · '+(g.aceptado?'diferencia aceptada ('+usd(g.monto)+' → '+usd(g.real)+')':'la factura coincide con lo autorizado')+'</span>';
+}
+function gAi(g){
+  if(!g.ai)return "";
+  if(g.ai.wait)return '<div class="note">Leyendo el total de la factura…</div>';
+  if(g.ai.total==null)return '<div class="note">Lectura automática: no se pudo leer el total en la foto.</div>';
+  var enUsd=g.ai.moneda==="Bs"?g.ai.total/S.tasa:g.ai.total, dif=g.real!=null&&Math.abs(enUsd-g.real)>Math.max(0.5,g.real*0.05);
+  return '<div class="note"'+(dif?' style="color:var(--bad);font-weight:600"':'')+'>Lectura automática de la factura: total '+(g.ai.moneda==="Bs"?"Bs "+fmtN(g.ai.total)+" (unos "+usd(enUsd)+")":usd(g.ai.total))+(dif?'. No cuadra con el monto escrito; revisar.':'')+'</div>';
+}
+function gThumbs(g){return (g.foto?'<img class="thumb" src="'+g.foto+'" alt="Foto del producto" title="Producto">':'')+(g.factura?'<img class="thumb" src="'+g.factura+'" alt="Foto de la factura" title="Factura">':'')}
+function gFile(label,attr,ok){return '<label class="btn sm" style="display:inline-block;cursor:pointer'+(ok?';border-color:var(--ok);color:var(--ok)':'')+'">'+(ok?'✓ ':'')+label+'<input type="file" accept="image/*" capture="environment" '+attr+' style="position:absolute;opacity:0;width:1px;height:1px"></label>'}
+function gClose(g){
+  return '<div class="stack" style="gap:6px;margin-top:8px;padding:10px;background:var(--bg);border-radius:8px"><b>Registrar la compra</b><div class="row">'
+    +gFile("Foto del producto",'data-gprod="'+g.id+'" id="g-prod-'+g.id+'"',!!g.foto)+gFile("Foto de la factura o ticket",'data-ginv="'+g.id+'" id="g-inv-'+g.id+'"',!!g.factura)+'</div>'
+    +'<label class="f" style="max-width:220px">Monto que dice la factura, en $<input type="number" min="0" step="0.01" data-greal="'+g.id+'" id="g-real-'+g.id+'" value="'+(g.real!=null?g.real:"")+'"></label>'+gAi(g)
+    +'<div class="err">'+esc(g.err||"")+'</div><button class="btn pri sm" data-act="gclose" data-g="'+g.id+'" style="align-self:flex-start">Cerrar compra</button></div>';
+}
+function closeGasto(g){
+  g.err=!g.foto?"Falta la foto del producto.":!g.factura?"Falta la foto de la factura o ticket.":!(g.real>0)?"Escribe el monto que dice la factura.":"";
+  if(!g.err)g.status=Math.abs(g.real-g.monto)<=0.05?"done":"mismatch";
+  renderAll();
+}
+function renderGastos(){
+  $("g-count").textContent=S.gastos.length+" gastos";
+  $("g-list").innerHTML=S.gastos.length?S.gastos.slice().reverse().map(function(g){
+    return '<div class="order">'+(g.status==="approved"?'':gThumbs(g))+'<div class="info"><div class="n">'+esc(g.desc)+'</div><div class="svc">'+esc(g.cat)+' · '+esc(g.pago)+'</div><div class="svc">'+g.time+' · '+esc(g.op)+'</div>'+gPill(g)
+      +(g.status==="approved"?gClose(g):(g.status==="done"||g.status==="mismatch"||g.status==="observed"?gAi(g):''))
+      +'</div><div class="side"><b class="num">'+usd(gAmt(g))+'</b></div></div>';
+  }).join(""):'<p class="note">Todavía no hay gastos registrados hoy.</p>';
+  var gp=S.gastos.filter(function(g){return g.status==="pending"}), gm=S.gastos.filter(function(g){return g.status==="mismatch"});
+  if(gp.length||gm.length){
+    var h=gp.map(function(g){return '<div class="auth">'+(g.foto?'<img class="thumb" src="'+g.foto+'" alt="">':'')+'<div><b>'+esc(g.op)+' pide autorización para un gasto</b><br>'+esc(g.desc)+' · '+esc(g.cat)+'<br><span class="num">'+usd(g.monto)+'</span> · se paga con '+esc(g.pago)+'</div><button class="btn sm" data-act="gdeny" data-g="'+g.id+'">Negar</button><button class="btn ok sm" data-act="gapprove" data-g="'+g.id+'">Autorizar</button></div>'}).join("")
+      +gm.map(function(g){return '<div class="auth" style="border-left-color:var(--bad);background:var(--bad-bg)">'+gThumbs(g)+'<div><b>La factura no coincide con lo autorizado</b><br>'+esc(g.desc)+' · '+esc(g.op)+'<br><span class="num">Autorizado '+usd(g.monto)+' · factura '+usd(g.real)+' · diferencia '+usd(g.real-g.monto)+'</span>'+gAi(g)+'</div><button class="btn sm" data-act="gobs" data-g="'+g.id+'">No aceptar</button><button class="btn ok sm" data-act="gacc" data-g="'+g.id+'">Aceptar diferencia</button></div>'}).join("");
+    var au=$("a-auth"); if(au.querySelector(".auth"))au.insertAdjacentHTML("beforeend",h); else au.innerHTML=h;
+  }
+  var nb=pendingAuth().length+gp.length+gm.length; $("badge").hidden=!nb; $("badge").textContent=nb;
+  $("a-gastos").innerHTML=S.gastos.length?S.gastos.map(function(g){return '<div class="row" style="justify-content:space-between;align-items:flex-start"><span class="row" style="gap:8px;flex:1">'+gThumbs(g)+'<span>'+esc(g.desc)+'<br><span class="note">'+esc(g.cat)+' · '+esc(g.op)+' · autorizado '+usd(g.monto)+'</span><br>'+gPill(g)+gAi(g)+'</span></span><b class="num">'+usd(gAmt(g))+'</b></div>'}).join(""):'<span class="note">Sin gastos hoy.</span>';
+}
+function gastosOk(){return S.gastos.filter(function(g){return g.status!=="pending"&&g.status!=="rejected"})}
+function dataBlob(u){var p=u.split(","),b=atob(p[1]),a=new Uint8Array(b.length);for(var i=0;i<b.length;i++)a[i]=b.charCodeAt(i);return new Blob([a],{type:"image/jpeg"})}
+function readInvoice(g,u){
+  g.ai={wait:true};
+  try{ if(!sampleP)sampleP=(window.claude&&window.claude.use)?window.claude.use("sample"):Promise.resolve(null); }catch(e){sampleP=Promise.resolve(null)}
+  sampleP.then(function(sample){
+    if(!sample){g.ai=null;renderAll();return}
+    var prompt='Mira la foto de una factura, nota de entrega o ticket de compra de Venezuela y responde SOLO con JSON, sin texto adicional: {"total": número o null, "moneda": "Bs" o "USD" o null}. "total" es el monto total a pagar que aparece en el documento, como número con punto decimal y sin separador de miles. "moneda" es Bs si está en bolívares y USD si está en dólares. Si no se lee con seguridad, usa null. No inventes.';
+    var opts={images:[dataBlob(u)],cache:false};
+    var run=sample.json?sample.json(prompt,opts):sample(prompt,opts).then(function(r){return JSON.parse(String(r.text).replace(/^[^{]*/,"").replace(/[^}]*$/,""))});
+    return run.then(function(v){v=v||{};var t=parseFloat(v.total);g.ai={total:isFinite(t)?t:null,moneda:v.moneda==="Bs"?"Bs":"USD"};renderAll()});
+  }).catch(function(){g.ai={total:null};renderAll()});
+}
+function renderAll(){
+  renderMeta();renderTablet();renderAdmin();renderGastos();renderMis();renderCom();renderVigilante();
+  if(!S.orders.length){$("a-rows").innerHTML='<tr><td colspan="9" class="note">Sin motos facturadas todavía.</td></tr>';$("a-svc").innerHTML='<span class="note">Sin ventas todavía.</span>'}
+  if(!Object.keys(S.clients).length)$("a-cli").innerHTML='<tr><td colspan="5" class="note">Se llena sola con cada moto que factures.</td></tr>';
+}
+function isEnc(){return $("role").value==="enc"}
+function applyRole(){
+  var e=isEnc(); $("tab-admin").hidden=e; $("tab-vigilante").hidden=e;
+  var cur=VIEWS.filter(function(x){return $("v-"+x).classList.contains("on")})[0]||"tablet"; go(cur);
+}
+function go(v){
+  if(VIEWS.indexOf(v)<0)v="tablet";
+  if(isEnc()&&(v==="admin"||v==="vigilante"))v="tablet";
+  VIEWS.forEach(function(x){$("v-"+x).classList.toggle("on",x===v);$("tab-"+x).setAttribute("aria-selected",x===v)});
+  try{if(location.hash!=="#"+v)location.hash=v}catch(e){}
+}
+
+document.addEventListener("click",function(ev){
+  var t=ev.target.closest("[data-act]"); if(!t)return; var a=t.dataset.act, n=+t.dataset.n;
+  var o=n?S.orders.filter(function(x){return x.num===n})[0]:null;
+  if(a==="go")go(t.dataset.v);
+  else if(a==="chip"){draft.svc[t.dataset.id]=!draft.svc[t.dataset.id];t.setAttribute("aria-pressed",!!draft.svc[t.dataset.id]);draftTotal()}
+  else if(a==="addpay")addOrder();
+  else if(a==="pay")openPay(n);
+  else if(a==="method"){payMethod=t.dataset.m;renderMethods()}
+  else if(a==="confirmpay")confirmPay();
+  else if(a==="closepay"){pendingNew=null;$("ov-pay").classList.remove("on")}
+  else if(a==="approve"){o.disc.status="approved";renderAll()}
+  else if(a==="deny"){o.disc.status="rejected";renderAll()}
+  else if(a==="cierre"){$("c-text").textContent=cierreText();$("c-copy").textContent="Copiar para WhatsApp";$("ov-cierre").classList.add("on")}
+  else if(a==="closecierre")$("ov-cierre").classList.remove("on");
+  else if(a==="copycierre"){try{navigator.clipboard.writeText($("c-text").textContent).then(function(){$("c-copy").textContent="Copiado"},function(){$("c-copy").textContent="No se pudo copiar"})}catch(e){$("c-copy").textContent="No se pudo copiar"}}
+  else if(a==="simok"||a==="simbad"){
+    var fb=freeBridge(), now=new Date(); $("g-msg").textContent="";
+    if(!fb){$("g-msg").textContent="No hay puente libre. Baja una moto primero.";return}
+    var pl=randPlate(); S.camCount++; fb.plate=pl; fb.t=Date.now();
+    if(a==="simok"){
+      var no={num:S.orders.length+1,time:hhmm(now),placa:pl,modelo:"Moto de ejemplo",photo:ph("#35506b"),svc:["lp"],lav:S.lavadores[0],tel:"04125550199",disc:null,pay:{method:"Efectivo $",ref:"",tasa:S.tasa},op:S.user};
+      S.clients["04125550199"]=S.clients["04125550199"]||{nombre:"Cliente de ejemplo",prev:0};
+      S.orders.push(no); fb.state="ok"; fb.num=no.num;
+    }else{
+      fb.state="alerta"; fb.num=null; fb.photo=ph("#7a2d2d");
+      S.log.unshift({time:hhmm(now),txt:"Puente "+fb.n+": moto sin factura. Placa leída "+pl+".",kind:"bad"});
+    }
+    renderAll();
+  }
+  else if(a==="down"||a==="regnow"){
+    var br=S.bridges.filter(function(x){return x.n===+t.dataset.b})[0];
+    if(a==="regnow"){go("tablet");$("f-placa").value=br.plate;$("f-err").textContent="Placa "+br.plate+" tomada de la cámara. Toma la foto y marca los servicios.";return}
+    if(br.state==="alerta")S.log.unshift({time:hhmm(new Date()),txt:"Puente "+br.n+": la moto "+br.plate+" bajó sin registrarse.",kind:"bad"});
+    br.state="libre"; renderAll();
+  }
+  else if(a==="mis")go("comisiones");
+  else if(a==="closeticket")$("ov-ticket").classList.remove("on");
+  else if(a==="lavdet"){comSel=t.dataset.l;renderCom()}
+  else if(a==="reset"){S.orders=[];S.clients={};S.gastos=[];S.log=[];S.camCount=0;S.bridges.forEach(function(b){b.state="libre"});comSel=null;renderAll()}
+  else if(a==="tglT"){openT[t.dataset.k]=!openT[t.dataset.k];renderTablet()}
+  else if(a==="tglA"){openA[t.dataset.k]=!openA[t.dataset.k];renderAll()}
+  else if(a==="gadd")addGasto();
+  else if(a==="gclose"||a==="gacc"||a==="gobs"){
+    var gx=S.gastos.filter(function(x){return x.id===+t.dataset.g})[0];
+    if(a==="gclose")closeGasto(gx); else{ if(a==="gacc"){gx.status="done";gx.aceptado=true}else gx.status="observed"; renderAll() }
+  }
+  else if(a==="gapprove"||a==="gdeny"){var gg=S.gastos.filter(function(x){return x.id===+t.dataset.g})[0];gg.status=a==="gapprove"?"approved":"rejected";renderAll()}
+  else if(a==="logout"){$("work").style.display="none";$("login").style.display="flex";$("lg-pin").value="";$("lg-err").textContent=""}
+  else if(a==="login"){
+    if($("lg-pin").value!=="1234"){$("lg-err").textContent="Clave incorrecta.";return}
+    S.user=$("lg-user").value;$("login").style.display="none";$("work").style.display="";renderAll();
+  }
+});
+$("ph-in").addEventListener("change",function(){
+  var f=this.files&&this.files[0]; if(!f)return;
+  var r=new FileReader(); r.onload=function(){
+    var img=new Image(); img.onload=function(){
+      var c=document.createElement("canvas"),k=Math.min(1,480/img.width);c.width=img.width*k;c.height=img.height*k;
+      c.getContext("2d").drawImage(img,0,0,c.width,c.height); draft.photo=c.toDataURL("image/jpeg",.7);
+      var c2=document.createElement("canvas"),k2=Math.min(1,1280/img.width);c2.width=img.width*k2;c2.height=img.height*k2;
+      c2.getContext("2d").drawImage(img,0,0,c2.width,c2.height); c2.toBlob(function(b){if(b)readPhoto(b)},"image/jpeg",.85);
+      $("ph-prev").src=draft.photo;$("ph-prev").hidden=false;$("ph-txt").innerHTML="<b>Foto lista</b><br><span class=\"note\">Toca para cambiarla.</span>";$("f-err").textContent="";
+    }; img.src=r.result;
+  }; r.readAsDataURL(f);
+});
+var autoPlaca="", autoModelo="", sampleP=null;
+function readPhoto(blob){
+  var st=$("ph-ai"); st.textContent="Leyendo la placa y el modelo de la foto…";
+  var fail=function(m){st.textContent=m||"No se pudo leer la foto. Escribe la placa a mano."};
+  try{ if(!sampleP)sampleP=(window.claude&&window.claude.use)?window.claude.use("sample"):Promise.resolve(null); }catch(e){sampleP=Promise.resolve(null)}
+  sampleP.then(function(sample){
+    if(!sample){fail("La lectura automática no está disponible en esta vista. Escribe la placa a mano.");return}
+    var prompt='Eres un lector de placas para un lavado de motos en Venezuela. Mira la foto y responde SOLO con JSON, sin texto adicional, con esta forma exacta: {"placa": string o null, "modelo": string o null, "color": string o null}. "placa": los caracteres de la placa de la moto, en mayúsculas, sin espacios ni guiones; null si no se ve o no se lee con seguridad. "modelo": marca y modelo de la moto si se reconoce; null si no. "color": color principal de la moto en una palabra en español; null si no se distingue. No inventes nada.';
+    var opts={images:[blob],cache:false};
+    var run=sample.json?sample.json(prompt,opts):sample(prompt,opts).then(function(r){return JSON.parse(String(r.text).replace(/^[^{]*/,"").replace(/[^}]*$/,""))});
+    return run.then(function(v){
+      v=v||{}; var pl=v.placa?String(v.placa).toUpperCase().replace(/[^A-Z0-9]/g,""):"", mo=[v.modelo,v.color].filter(Boolean).join(" ");
+      var fp=$("f-placa"), fm=$("f-modelo");
+      if(pl&&(!fp.value||fp.value===autoPlaca)){fp.value=pl;autoPlaca=pl;fp.dispatchEvent(new Event("input",{bubbles:true}))}
+      if(mo&&(!fm.value||fm.value===autoModelo)){fm.value=mo;autoModelo=mo}
+      st.textContent=pl?"Placa leída de la foto: "+pl+(mo?" · "+mo:"")+". Revísala antes de registrar.":(mo?"Se reconoció "+mo+", pero la placa no se lee. Escríbela a mano.":"No se lee la placa en esta foto. Escríbela a mano o toma otra foto.");
+    });
+  }).catch(function(e){fail(e&&e.code==="not_granted"?"Lectura automática no autorizada. Escribe la placa a mano.":e&&e.code==="rate_limited"?"Lectura automática ocupada. Escribe la placa a mano.":"")});
+}
+document.addEventListener("change",function(ev){
+  var t=ev.target, f=t.files&&t.files[0]; if(!f)return;
+  if(t.id==="g-ph")readImg(f,480,function(u){gDraft=u;$("g-prev").src=u;$("g-prev").hidden=false;$("g-txt").innerHTML="<b>Foto lista</b><br><span class=\"note\">Toca para cambiarla.</span>"});
+  else if(t.dataset&&t.dataset.ginv){var g=S.gastos.filter(function(x){return x.id===+t.dataset.ginv})[0];readImg(f,1280,function(u){g.factura=u;g.err="";readInvoice(g,u);renderAll()})}
+  else if(t.dataset&&t.dataset.gprod){var g2=S.gastos.filter(function(x){return x.id===+t.dataset.gprod})[0];readImg(f,480,function(u){g2.foto=u;g2.err="";renderAll()})}
+});
+$("role").addEventListener("change",applyRole);
+document.addEventListener("input",function(ev){
+  var t=ev.target;
+  if(t.dataset&&t.dataset.price){var v=parseFloat(t.value);if(v>=0){svc(t.dataset.price).price=v;renderChips();renderAll()}}
+  else if(t.id==="f-tel"){
+    var tl=normTel(t.value), c=S.clients[tl];
+    if(c){if(!$("f-nombre").value)$("f-nombre").value=c.nombre;$("f-cli").textContent="Cliente registrado: "+c.nombre+", "+cliVisits(tl)+" visitas."}
+    else $("f-cli").textContent=tl.length===11?"Cliente nuevo: se guarda en la base de datos al registrar.":"";
+  }
+  else if(t.id==="f-placa"){
+    var pv=t.value.trim().toUpperCase(), prev=S.orders.filter(function(o){return o.placa===pv}).pop();
+    if(prev&&!$("f-tel").value){$("f-tel").value=fmtTel(prev.tel);$("f-nombre").value=cliName(prev);$("f-cli").textContent="Esta placa ya vino antes: "+cliName(prev)+", "+cliVisits(prev.tel)+" visitas."}
+  }
+  else if(t.id==="r-enc"||t.id==="r-lav"||t.id==="r-prod"||(t.dataset&&t.dataset.pres)){
+    var rv=parseFloat(t.value); if(!(rv>=0))return;
+    if(t.id==="r-enc")S.encPct=rv; else if(t.id==="r-lav")S.lavPago=rv; else if(t.id==="r-prod")S.prodPct=rv; else S.prestamos[t.dataset.pres]=rv;
+    renderAdminCom();renderMeta();
+  }
+  else if(t.dataset&&t.dataset.greal){var gr=S.gastos.filter(function(x){return x.id===+t.dataset.greal})[0], rr=parseFloat(t.value);gr.real=rr>=0?rr:null}
+  else if(t.id==="a-meta"){var mv=parseInt(t.value,10);if(mv>0){S.meta=mv;renderMeta()}}
+  else if(t.id==="a-tasa"){var x=parseFloat(t.value);if(x>0){S.tasa=x;draftTotal();renderAll()}}
+});
+window.addEventListener("hashchange",function(){go(location.hash.slice(1))});
+
+(function seedDay(){
+  var nom=["Carlos Pérez","Luis Rojas","María Gómez","José Medina","Pedro Salas","Ana Torres","Miguel Díaz","Rosa Blanco","Juan Castillo","Elena Rivas","Andrés Mora","Carmen León","Rafael Soto","Daniel Peña","Yuleisy Marín","Óscar Vera","Gabriel Lugo","Sofía Rangel","Héctor Bravo","Wilmer Ortiz","Jesús Navas","Karla Mejías"];
+  var mod=["Empire Horse negra","Bera SBR roja","Empire Owen azul","Bera BR200 blanca","Yamaha DT azul","Suzuki GN gris","Kawasaki KLR verde","Empire Arsen roja"];
+  var col=["#2f3b46","#a8443c","#2b5f9e","#8a9aa5","#2b5f9e","#6b7780","#3f7a52","#a8443c"];
+  var met=["Pago móvil","Efectivo $","Pago móvil","Binance","Efectivo Bs","Pago móvil","Zelle","Efectivo $"], L="ABCDEFGHJKLMNPRSTVWXYZ";
+  for(var i=0;i<22;i++){
+    var min=8*60+10+i*20, m=met[i%met.length], id=i<15?"lp":"la", t=svc(id).price;
+    var pl="A"+L[(i*7)%L.length]+(i%10)+L[(i*3+5)%L.length]+((i*3)%10)+((i*7+2)%10)+L[(i*11+1)%L.length], tel="0414555"+String(100+i).padStart(4,"0");
+    var pa=payAmt(m,t,S.tasa);
+    S.clients[tel]={nombre:nom[i],prev:(i*5)%9};
+    S.orders.push({num:i+1,time:String(Math.floor(min/60)).padStart(2,"0")+":"+String(min%60).padStart(2,"0"),placa:pl,modelo:mod[i%mod.length],photo:ph(col[i%col.length]),svc:[id],lav:S.lavadores[i%3],tel:tel,disc:null,pay:{method:m,ref:NEEDREF[m]?String(4100+i*37):"",tasa:S.tasa,cur:pa.cur,val:pa.val},op:S.user,ticket:true});
+  }
+  S.camCount=22; var now=Date.now();
+  [[1,20,25],[2,21,14],[3,22,6]].forEach(function(x){var b=S.bridges[x[0]-1];b.state="ok";b.num=x[1];b.plate=S.orders[x[1]-1].placa;b.t=now-x[2]*60000});
+})();
+renderChips(); renderPrices(); renderAll(); go(location.hash.slice(1)||"tablet"); $("a-meta").value=S.meta; renderRules(); setInterval(function(){renderVigilante();renderMeta()},30000);
+})();
+</script>
+</body>
+</html>

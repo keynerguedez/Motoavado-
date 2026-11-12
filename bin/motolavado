@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# CLI de Moto Lavado: motolavado status | logs | restart | update | autoupdate
+DIR=/opt/motolavado
+case "${1:-}" in
+  status)  systemctl status motolavado --no-pager | head -12; curl -s http://127.0.0.1:3000/health; echo ;;
+  logs)    journalctl -u motolavado -n "${2:-80}" --no-pager ;;
+  restart) systemctl restart motolavado && echo "Moto Lavado reiniciado" ;;
+  update)  git -C "$DIR" fetch -q origin main && git -C "$DIR" reset -q --hard origin/main && systemctl restart motolavado && echo "Moto Lavado actualizado" ;;
+  autoupdate)
+    # Lo ejecuta el temporizador cada 2 minutos: si hay código nuevo en GitHub, lo trae y reinicia.
+    git -C "$DIR" fetch -q origin main || exit 0
+    [ "$(git -C "$DIR" rev-parse HEAD)" = "$(git -C "$DIR" rev-parse origin/main)" ] && exit 0
+    git -C "$DIR" reset -q --hard origin/main
+    [ -f "$DIR/package-lock.json" ] && (cd "$DIR" && npm install --omit=dev --no-audit --no-fund -q)
+    systemctl restart motolavado
+    echo "$(date '+%F %T') actualizado a $(git -C "$DIR" rev-parse --short HEAD)" ;;
+  *) echo "uso: motolavado status | logs | restart | update" ;;
+esac

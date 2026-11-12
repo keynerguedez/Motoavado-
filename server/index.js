@@ -86,7 +86,7 @@ function fechaCaracas(d) { return new Intl.DateTimeFormat('en-CA', { timeZone: '
 function registrarVenta(d, yo) {
   const tel = String(d.telefono || '').replace(/\D/g, '');
   if (!/^0[24]\d{9}$/.test(tel)) return { error: 'Teléfono no válido.' };
-  const placa = limpio(d.placa, 12).toUpperCase(); if (!placa) return { error: 'Falta la placa.' };
+  const placa = limpio(d.placa, 14).toUpperCase().replace(/[^A-Z0-9]/g, ''); if (!placa) return { error: 'Falta la placa.' };
   const servicios = (Array.isArray(d.servicios) ? d.servicios : []).slice(0, 12).map(x => ({ id: limpio(x.id, 10), nombre: limpio(x.nombre, 60), precio: dinero(x.precio) })).filter(x => x.nombre && x.precio != null);
   const total = dinero(d.total);
   if (!servicios.length || total == null) return { error: 'Venta incompleta.' };
@@ -97,11 +97,23 @@ function registrarVenta(d, yo) {
   fs.appendFileSync(archivo, JSON.stringify(v) + '\n', { mode: 0o600 });
   const cs = leerClientes(), c = cs[tel] || { telefono: tel, nombre: '', motos: [], visitas: 0, gastado: 0, primera: v.fecha };
   if (v.cliente && v.cliente !== 'Sin nombre') c.nombre = v.cliente;
-  const m = c.motos.find(x => x.placa === placa);
+  const m = c.motos.find(x => String(x.placa).replace(/[^A-Z0-9]/g, '') === placa); if (m) m.placa = placa;
   if (m) { m.ultima = v.fecha; m.visitas = (m.visitas || 1) + 1; if (v.modelo) m.modelo = v.modelo; } else c.motos.push({ placa, modelo: v.modelo, ultima: v.fecha, visitas: 1 });
   c.visitas++; c.gastado = Math.round((c.gastado + total) * 100) / 100; c.ultima = v.fecha; c.ultimoServicio = servicios.map(x => x.nombre).join(' + ');
   cs[tel] = c; guardarClientes(cs);
   return { ok: true, id: v.id, num: v.num };
+}
+// Cliente frecuente: ya vino más de 3 veces.
+const FRECUENTE_DESDE = 3;
+function esFrecuente(c) { return (c.visitas || 0) > FRECUENTE_DESDE; }
+function buscarCliente(placa, tel) {
+  const cs = leerClientes(); let c = null, m = null;
+  if (placa) for (const x of Object.values(cs)) { const mm = x.motos.find(y => String(y.placa).replace(/[^A-Z0-9]/g, '') === placa); if (mm && (!m || String(mm.ultima) > String(m.ultima))) { c = x; m = mm; } }
+  if (!c && tel) c = cs[tel] || null;
+  if (!c) return { encontrado: false };
+  if (!m) m = c.motos.slice().sort((a, b) => String(b.ultima).localeCompare(String(a.ultima)))[0] || {};
+  // Con esta visita serían visitas+1: frecuente si ya pasó de 3.
+  return { encontrado: true, nombre: c.nombre, telefono: c.telefono, placa: m.placa || '', modelo: m.modelo || '', visitas: c.visitas, visitasMoto: m.visitas || 0, frecuente: c.visitas >= FRECUENTE_DESDE, ultima: c.ultima, ultimoServicio: c.ultimoServicio || '' };
 }
 function csv(v) { v = String(v == null ? '' : v); if (/^[=+\-@]/.test(v)) v = "'" + v; return '"' + v.replace(/"/g, '""') + '"'; }
 
@@ -176,11 +188,18 @@ async function api(req, res, ruta) {
   if (req.method === 'GET') {
     if (ruta === '/api/estado') return json(res, 200, { hayUsuarios: leerUsuarios().length > 0, yo: yo ? publico(yo) : null });
     if (ruta === '/api/yo') return yo ? json(res, 200, publico(yo)) : json(res, 401, { error: 'Sin sesión.' });
+    if (ruta === '/api/cliente') {
+      if (!puede(yo, 'tablet')) return json(res, 403, { error: 'No tienes permiso.' });
+      const q = new URL(req.url, 'http://localhost').searchParams;
+      const placa = limpio(q.get('placa'), 12).toUpperCase().replace(/[^A-Z0-9]/g, ''), tel = String(q.get('telefono') || '').replace(/\D/g, '');
+      if (placa.length < 5 && tel.length !== 11) return json(res, 200, { encontrado: false });
+      return json(res, 200, buscarCliente(placa.length >= 5 ? placa : '', tel.length === 11 ? tel : ''));
+    }
     if (ruta === '/api/clientes' || ruta === '/api/clientes.csv') {
       if (!puede(yo, 'clientes')) return json(res, 403, { error: 'No tienes permiso.' });
       const lista = Object.values(leerClientes()).sort((a, b) => String(b.ultima).localeCompare(String(a.ultima)));
-      if (ruta === '/api/clientes') return json(res, 200, lista);
-      const filas = [['Nombre', 'Teléfono', 'Motos', 'Visitas', 'Gastado', 'Primera visita', 'Última visita', 'Último servicio']].concat(lista.map(c => [c.nombre, c.telefono, c.motos.map(m => m.placa + (m.modelo ? ' ' + m.modelo : '')).join(' / '), c.visitas, c.gastado, fechaCaracas(new Date(c.primera)), fechaCaracas(new Date(c.ultima)), c.ultimoServicio]));
+      if (ruta === '/api/clientes') return json(res, 200, lista.map(c => Object.assign({}, c, { frecuente: esFrecuente(c) })));
+      const filas = [['Nombre', 'Teléfono', 'Motos', 'Visitas', 'Frecuente', 'Gastado', 'Primera visita', 'Última visita', 'Último servicio']].concat(lista.map(c => [c.nombre, c.telefono, c.motos.map(m => m.placa + (m.modelo ? ' ' + m.modelo : '')).join(' / '), c.visitas, esFrecuente(c) ? 'Sí' : 'No', c.gastado, fechaCaracas(new Date(c.primera)), fechaCaracas(new Date(c.ultima)), c.ultimoServicio]));
       res.writeHead(200, { 'content-type': 'text/csv; charset=utf-8', 'content-disposition': 'attachment; filename="clientes-motolavado.csv"', 'cache-control': 'no-store' });
       return res.end('\ufeff' + filas.map(f => f.map(csv).join(',')).join('\r\n'));
     }

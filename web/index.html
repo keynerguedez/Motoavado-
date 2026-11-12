@@ -463,12 +463,27 @@ function loadClientes(){
 function renderClientes(){
   var q=$("c-buscar").value.trim().toLowerCase(), l=CLI.filter(function(c){return !q||(c.nombre+" "+c.telefono+" "+c.motos.map(function(m){return m.placa+" "+(m.modelo||"")}).join(" ")).toLowerCase().indexOf(q)>=0});
   $("c-cuenta").textContent=CLI.length+(CLI.length===1?" cliente":" clientes");
-  $("c-rows").innerHTML=l.length?l.map(function(c){return '<tr><td>'+esc(c.nombre||"Sin nombre")+'</td><td class="num">'+esc(fmtTel(c.telefono))+'</td><td>'+c.motos.map(function(m){return '<b>'+esc(m.placa)+'</b>'+(m.modelo?' · '+esc(m.modelo):'')}).join("<br>")+'</td><td class="r num">'+c.visitas+'</td><td>'+(c.ultima?new Date(c.ultima).toLocaleDateString("es-VE"):"hoy")+'</td><td>'+esc(c.ultimoServicio||"")+'</td><td class="r num">'+usd(c.gastado)+'</td></tr>'}).join(""):'<tr><td colspan="7" class="note">'+(CLI.length?"Nadie coincide con la búsqueda.":"Todavía no hay clientes. Aparecen aquí al cobrar la primera moto.")+'</td></tr>';
+  $("c-rows").innerHTML=l.length?l.map(function(c){return '<tr><td>'+esc(c.nombre||"Sin nombre")+(c.frecuente?' <b style="color:var(--ok,#0a6b3d)">★ Frecuente</b>':'')+'</td><td class="num">'+esc(fmtTel(c.telefono))+'</td><td>'+c.motos.map(function(m){return '<b>'+esc(m.placa)+'</b>'+(m.modelo?' · '+esc(m.modelo):'')}).join("<br>")+'</td><td class="r num">'+c.visitas+'</td><td>'+(c.ultima?new Date(c.ultima).toLocaleDateString("es-VE"):"hoy")+'</td><td>'+esc(c.ultimoServicio||"")+'</td><td class="r num">'+usd(c.gastado)+'</td></tr>'}).join(""):'<tr><td colspan="7" class="note">'+(CLI.length?"Nadie coincide con la búsqueda.":"Todavía no hay clientes. Aparecen aquí al cobrar la primera moto.")+'</td></tr>';
 }
 function saveSale(o,sigue){
   if(!window.__yo){sigue();return} var a=paidAmt(o);
   fetch("/api/ventas",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({telefono:o.tel,cliente:cliName(o),placa:o.placa,modelo:o.modelo,servicios:o.svc.map(function(id){return{id:id,nombre:svc(id).name,precio:svc(id).price}}),total:total(o),descuento:o.disc&&o.disc.status==="approved"?o.disc.pct+"%":"",lavador:o.lav,metodo:o.pay.method,ref:o.pay.ref,moneda:a.cur,monto:a.val,tasa:o.pay.tasa})})
   .then(function(r){return r.json().then(function(j){if(!r.ok)$("f-err").textContent="Ojo: la moto #"+o.num+" no se guardó en el servidor. Avisa al dueño.";sigue(r.ok?j.num:null)})}).catch(function(){$("f-err").textContent="Ojo: sin conexión, la moto #"+o.num+" no se guardó en el servidor.";sigue(null)});
+}
+var buscaT=null, buscaN=0;
+function buscarCli(q){
+  if(!window.__yo)return; clearTimeout(buscaT);
+  buscaT=setTimeout(function(){var n=++buscaN;
+    fetch("/api/cliente?"+q).then(function(r){return r.ok?r.json():null}).then(function(c){
+      if(n!==buscaN||!c||!c.encontrado)return;
+      if(!$("f-tel").value)$("f-tel").value=fmtTel(c.telefono);
+      if(!$("f-nombre").value&&c.nombre)$("f-nombre").value=c.nombre;
+      if(!$("f-modelo").value&&c.modelo)$("f-modelo").value=c.modelo;
+      if(!$("f-placa").value&&c.placa)$("f-placa").value=c.placa;
+      var u=c.ultima?new Date(c.ultima).toLocaleDateString("es-VE"):"";
+      $("f-cli").innerHTML=(c.frecuente?'<b style="display:inline-block;background:var(--ok-bg,#d7f5e3);color:var(--ok,#0a6b3d);padding:4px 10px;border-radius:99px;margin-right:6px">★ CLIENTE FRECUENTE</b>':'')+'<b>'+esc(c.nombre||"Cliente registrado")+'</b> · '+c.visitas+(c.visitas===1?" visita":" visitas")+(u?" · última: "+u:"")+(c.ultimoServicio?" · "+esc(c.ultimoServicio):"");
+    }).catch(function(){});
+  },350);
 }
 function sendTicket(o,numSrv){
   var k=$("k-estado"); if(!window.__yo){k.textContent="Así le llega por WhatsApp.";return}
@@ -812,10 +827,12 @@ document.addEventListener("input",function(ev){
     var tl=normTel(t.value), c=S.clients[tl];
     if(c){if(!$("f-nombre").value)$("f-nombre").value=c.nombre;$("f-cli").textContent="Cliente registrado: "+c.nombre+", "+cliVisits(tl)+" visitas."}
     else $("f-cli").textContent=tl.length===11?"Cliente nuevo: se guarda en la base de datos al registrar.":"";
+    if(tl.length===11)buscarCli("telefono="+tl);
   }
   else if(t.id==="f-placa"){
     var pv=t.value.trim().toUpperCase(), prev=S.orders.filter(function(o){return o.placa===pv}).pop();
     if(prev&&!$("f-tel").value){$("f-tel").value=fmtTel(prev.tel);$("f-nombre").value=cliName(prev);$("f-cli").textContent="Esta placa ya vino antes: "+cliName(prev)+", "+cliVisits(prev.tel)+" visitas."}
+    var pq=pv.replace(/[^A-Z0-9]/g,""); if(pq.length>=5)buscarCli("placa="+encodeURIComponent(pq));
   }
   else if(t.id==="r-enc"||t.id==="r-lav"||t.id==="r-prod"||(t.dataset&&t.dataset.pres)){
     var rv=parseFloat(t.value); if(!(rv>=0))return;

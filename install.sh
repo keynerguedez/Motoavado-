@@ -6,7 +6,7 @@
 # No pide nada y no contiene claves.
 set -uo pipefail
 exec > >(tee -a /var/log/motolavado-install.log) 2>&1
-REPO="https://github.com/keynerguedez/motolavado.git"
+REPO="https://github.com/keynerguedez/Motoavado-.git"
 DIR=/opt/motolavado
 export DEBIAN_FRONTEND=noninteractive
 echo "== Moto Lavado · instalación · $(date) =="

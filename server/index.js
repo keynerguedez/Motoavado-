@@ -253,8 +253,8 @@ async function api(req, res, ruta) {
       png = require('./nota').notaPng({ num: d.num, fecha: new Date().toLocaleString('es-VE', { timeZone: 'America/Caracas', dateStyle: 'short', timeStyle: 'short' }), cliente: d.cliente && d.cliente !== 'Sin nombre' ? d.cliente : '', modelo: d.modelo, placa: d.placa,
         servicios: (Array.isArray(d.servicios) ? d.servicios : []).map(x => ({ nombre: x && x.nombre, precio: x && x.precio })), pagado: d.pagado, metodo: txt(d.metodo, 20) + (d.ref ? ' · ref. ' + txt(d.ref, 20) : '') }, 'claro');
     } catch (e) { console.error('nota:', e.message); }
-    const hola = d.cliente && d.cliente !== 'Sin nombre' ? 'Hola ' + txt(d.cliente, 40).split(' ')[0] + ', aquí' : 'Aquí';
-    const r = png ? await waqr.enviarImagen(para, png, hola + ' tienes tu nota de entrega de *Motolavado R1*. ¡Gracias por tu visita!') : await waqr.enviarTexto(para, texto);
+    const hola = d.cliente && d.cliente !== 'Sin nombre' ? 'Hola ' + txt(d.cliente, 40).split(' ')[0] : 'Hola';
+    const r = png ? await waqr.enviarImagen(para, png, hola + ', aquí tienes una imagen de referencia de tu servicio.') : await waqr.enviarTexto(para, texto);
     return json(res, r.ok ? 200 : 502, r);
   }
   if (ruta.startsWith('/api/waqr/')) {

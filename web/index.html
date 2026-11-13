@@ -287,7 +287,7 @@ details.grp summary{cursor:pointer;font-weight:600;font-size:.9rem;color:var(--m
 
 <div class="overlay" id="ov-pay"><div class="sheet stack">
   <h2>Cobrar moto <span id="p-num"></span></h2>
-  <div class="total" style="border:0;padding:0"><span id="p-det" class="note"></span><span><b class="num" id="p-total"></b><br><span class="note num" id="p-bs"></span></span></div>
+  <div class="total" style="border:0;padding:0"><span id="p-det" class="note"></span><span style="text-align:right"><b class="num" id="p-total"></b><br><b class="num" id="p-bs" style="font-size:1.35rem"></b></span></div>
   <div class="chips" id="p-methods"></div>
   <div id="p-conv" class="card" style="text-align:center" hidden></div>
   <label class="f">Referencia (últimos dígitos)<input id="p-ref" type="text" inputmode="numeric" autocomplete="off" placeholder="004512"></label>
@@ -446,7 +446,7 @@ function renderConv(){
   var el=$("p-conv"); if(!payMethod||!paying){el.hidden=true;return}
   var a=payAmt(payMethod,total(paying),S.tasa);
   el.hidden=false;
-  el.innerHTML='<span class="note">El cliente paga</span><b class="num" style="display:block;font-family:var(--display);font-size:2.4rem;line-height:1.1">'+a.txt+'</b><span class="note num">'+(a.cur==="Bs"?"Tasa euro BCV de este momento: Bs "+fmtN(S.tasa):a.cur==="USDT"?"Equivale a "+usd(total(paying))+" (1 USDT = 1 $)":"Pago directo en dólares")+'</span>';
+  el.innerHTML='<span class="note">El cliente paga</span><b class="num" style="display:block;font-family:var(--display);font-size:2.4rem;line-height:1.1">'+a.txt+'</b><span class="note num">'+(a.cur==="Bs"?"Tasa euro BCV de este momento: Bs "+fmtN(S.tasa):a.cur==="USDT"?"Equivale a "+usd(total(paying))+" (1 USDT = 1 $) · en bolívares: "+bs(total(paying)):"Pago directo en dólares · en bolívares: "+bs(total(paying)))+'</span>';
 }
 function ticketHtml(o){
   var a=paidAmt(o), d=new Date();
@@ -470,6 +470,13 @@ function saveSale(o,sigue){
   if(!window.__yo){sigue();return} var a=paidAmt(o);
   fetch("/api/ventas",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({telefono:o.tel,cliente:cliName(o),placa:o.placa,modelo:o.modelo,servicios:o.svc.map(function(id){return{id:id,nombre:svc(id).name,precio:svc(id).price}}),total:total(o),descuento:o.disc&&o.disc.status==="approved"?o.disc.pct+"%":"",lavador:o.lav,metodo:o.pay.method,ref:o.pay.ref,moneda:a.cur,monto:a.val,tasa:o.pay.tasa})})
   .then(function(r){return r.json().then(function(j){if(!r.ok)$("f-err").textContent="Ojo: la moto #"+o.num+" no se guardó en el servidor. Avisa al dueño.";sigue(r.ok?j.num:null)})}).catch(function(){$("f-err").textContent="Ojo: sin conexión, la moto #"+o.num+" no se guardó en el servidor.";sigue(null)});
+}
+var TASA_INFO=null;
+function loadTasa(){
+  return fetch("/api/tasa").then(function(r){return r.ok?r.json():null}).then(function(t){
+    if(!t||!(t.valor>0))return; TASA_INFO=t; S.tasa=t.valor; draftTotal(); renderAll();
+    if(paying&&$("ov-pay").classList.contains("on")){$("p-bs").textContent=bs(total(paying));renderConv()}
+  }).catch(function(){});
 }
 function loadDia(){
   return fetch("/api/dia").then(function(r){return r.ok?r.json():null}).then(function(d){
@@ -902,6 +909,7 @@ if(location.protocol!=="file:"&&window.fetch){fetch("/api/yo").then(function(r){
   $("btn-salir").hidden=false;
   if(u.permisos.indexOf("usuarios")>=0)$("lnk-usuarios").hidden=false; if(u.rol==="dueno")$("lnk-wa").hidden=false; if(u.rol!=="dueno"){$("role").value="enc";$("role-lbl").style.display="none"}
   $("btn-reset").hidden=true; applyRole(); renderAll();
+  loadTasa(); setInterval(loadTasa,30*60*1000);
   loadDia().then(ejemploDesdeEnlace);
 }).catch(function(){})}
  $("a-meta").value=S.meta; renderRules(); setInterval(function(){renderVigilante();renderMeta()},30000);

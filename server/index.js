@@ -171,6 +171,25 @@ function borrarEjemplo() {
 }
 function csv(v) { v = String(v == null ? '' : v); if (/^[=+\-@]/.test(v)) v = "'" + v; return '"' + v.replace(/"/g, '""') + '"'; }
 
+// ---------- tasa euro BCV: se busca sola cada hora y se guarda la última buena ----------
+const TASA_ARCHIVO = path.join(DATA, 'tasa.json');
+const TASA_URL = process.env.TASA_URL || 'https://ve.dolarapi.com/v1/euros/oficial';
+let tasa = { valor: null, fecha: null, consultada: null, error: null };
+try { tasa = Object.assign(tasa, JSON.parse(fs.readFileSync(TASA_ARCHIVO, 'utf8'))); } catch (e) {}
+async function actualizarTasa() {
+  try {
+    const r = await fetch(TASA_URL, { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(15000) });
+    if (!r.ok) throw new Error('respondió ' + r.status);
+    const j = await r.json(), v = Number(j.promedio || j.venta || j.compra);
+    if (!(v > 1 && v < 1e7)) throw new Error('valor no válido');
+    // Un salto de más de 30% contra la última tasa buena se ignora: casi seguro es un error de la fuente.
+    if (tasa.valor && Math.abs(v - tasa.valor) / tasa.valor > 0.3) throw new Error('salto sospechoso: ' + v);
+    tasa = { valor: Math.round(v * 10000) / 10000, fecha: j.fechaActualizacion || null, consultada: new Date().toISOString(), error: null };
+    fs.writeFileSync(TASA_ARCHIVO, JSON.stringify(tasa), { mode: 0o600 });
+  } catch (e) { tasa.error = String(e.message || e).slice(0, 120); tasa.intento = new Date().toISOString(); }
+}
+actualizarTasa(); setInterval(actualizarTasa, 60 * 60 * 1000).unref();
+
 // ---------- WhatsApp oficial (Meta Cloud API). La llave la pega el dueño en pantalla y queda en data/, nunca en el repositorio ----------
 const WA_ARCHIVO = path.join(DATA, 'whatsapp.json');
 const WA_BASE = process.env.WA_BASE || 'https://graph.facebook.com';
@@ -242,6 +261,7 @@ async function api(req, res, ruta) {
   if (req.method === 'GET') {
     if (ruta === '/api/estado') return json(res, 200, { hayUsuarios: leerUsuarios().length > 0, yo: yo ? publico(yo) : null });
     if (ruta === '/api/yo') return yo ? json(res, 200, publico(yo)) : json(res, 401, { error: 'Sin sesión.' });
+    if (ruta === '/api/tasa') return yo ? json(res, 200, tasa) : json(res, 401, { error: 'Sin sesión.' });
     if (ruta === '/api/dia') return puede(yo, 'tablet') ? json(res, 200, diaDeHoy()) : json(res, 403, { error: 'No tienes permiso.' });
     if (ruta === '/api/cliente') {
       if (!puede(yo, 'tablet')) return json(res, 403, { error: 'No tienes permiso.' });
@@ -391,7 +411,7 @@ async function api(req, res, ruta) {
 const servidor = http.createServer((req, res) => {
   const url = new URL(req.url, 'http://localhost');
   let ruta; try { ruta = decodeURIComponent(url.pathname); } catch (e) { res.writeHead(400); return res.end(); }
-  if (ruta === '/health') return json(res, 200, { ok: true, sistema: 'motolavado', version: version(), waqr: waqr ? waqr.publico().estado : 'no-disponible', libs: fs.existsSync(path.join(ROOT, 'node_modules', 'baileys')), nota: (() => { try { require.resolve('@resvg/resvg-js'); return true; } catch (e) { return false; } })(), encendido: INICIO.toISOString(), hora: new Date().toISOString() });
+  if (ruta === '/health') return json(res, 200, { ok: true, sistema: 'motolavado', version: version(), tasa: tasa.valor, tasaConsultada: tasa.consultada, tasaError: tasa.error, waqr: waqr ? waqr.publico().estado : 'no-disponible', libs: fs.existsSync(path.join(ROOT, 'node_modules', 'baileys')), nota: (() => { try { require.resolve('@resvg/resvg-js'); return true; } catch (e) { return false; } })(), encendido: INICIO.toISOString(), hora: new Date().toISOString() });
   if (ruta.startsWith('/api/')) return api(req, res, ruta).catch(() => json(res, 500, { error: 'Error del servidor.' }));
 
   const yo = sesion(req);

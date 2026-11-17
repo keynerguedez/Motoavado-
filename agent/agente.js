@@ -20,7 +20,9 @@ const E = process.env;
 const log = (...a) => console.log(new Date().toLocaleString('es-VE', { timeZone: 'America/Caracas' }), ...a);
 function salir(msg) { console.error('Error: ' + msg); process.exit(1); }
 
-if (spawnSync('ffmpeg', ['-version']).error) salir('no encuentro ffmpeg. Instálalo (Mac: brew install ffmpeg · Ubuntu/Raspberry: sudo apt install ffmpeg).');
+// Usa FFMPEG del .env, o agent/herramientas/ffmpeg si existe, o el ffmpeg del sistema.
+const FFMPEG = process.env.FFMPEG || (fs.existsSync(path.join(DIR, 'herramientas', 'ffmpeg')) ? path.join(DIR, 'herramientas', 'ffmpeg') : 'ffmpeg');
+if (spawnSync(FFMPEG, ['-version']).error) salir('no encuentro ffmpeg. Instálalo (Mac: brew install ffmpeg · Ubuntu/Raspberry: sudo apt install ffmpeg).');
 const cfg = JSON.parse(fs.readFileSync(path.join(DIR, 'zonas.json'), 'utf8'));
 
 // La clave de la cámara se queda en este equipo; nunca se escribe en el registro.
@@ -36,7 +38,7 @@ const entrada = src => (/^rtsp:/.test(src) ? ['-rtsp_transport', 'tcp', '-timeou
 function capturar(filtro, tiempoMs) {
   return new Promise(ok => {
     const args = ['-loglevel', 'error'].concat(entrada(PRINCIPAL()), ['-frames:v', '1'], filtro ? ['-vf', filtro] : [], ['-q:v', '3', '-f', 'image2pipe', '-vcodec', 'mjpeg', 'pipe:1']);
-    const p = spawn('ffmpeg', args); const partes = [];
+    const p = spawn(FFMPEG, args); const partes = [];
     const t = setTimeout(() => p.kill('SIGKILL'), tiempoMs || 20000);
     p.stdout.on('data', c => partes.push(c));
     p.on('close', () => { clearTimeout(t); const b = Buffer.concat(partes); ok(b.length > 1000 ? b : null); });
@@ -50,7 +52,7 @@ function flujo(alFotograma) {
   let parar = false, proc = null;
   (function conectar() {
     if (parar) return;
-    const p = proc = spawn('ffmpeg', ['-loglevel', 'error'].concat(entrada(SUB()), ['-vf', 'fps=1,scale=' + W + ':' + H + ',format=gray', '-f', 'rawvideo', 'pipe:1']));
+    const p = proc = spawn(FFMPEG, ['-loglevel', 'error'].concat(entrada(SUB()), ['-vf', 'fps=1,scale=' + W + ':' + H + ',format=gray', '-f', 'rawvideo', 'pipe:1']));
     let buf = Buffer.alloc(0), recibio = false;
     p.stdout.on('data', c => {
       buf = Buffer.concat([buf, c]);

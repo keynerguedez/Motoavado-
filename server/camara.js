@@ -46,16 +46,18 @@ function crear(ctx) {
     });
   }
 
-  // ---------- lectura de la placa ----------
+  // ---------- lectura de la imagen: ¿hay moto? ¿qué placa? ----------
+  // moto: true/false lo dice el modelo; null = no se pudo saber (sin clave o error), y entonces se confía en el agente.
+  const leer = jpeg => (ctx.leerPlaca || leerPlaca)(jpeg);
   function limpiarPlaca(v) { return String(v || '').toUpperCase().replace(/[^A-Z0-9]/g, ''); }
   function leerPlaca(jpeg) {
     const clave = process.env.ANTHROPIC_API_KEY;
-    if (!clave) return Promise.resolve({ placa: '', motivo: 'sin-lector' });
+    if (!clave) return Promise.resolve({ moto: null, placa: '', motivo: 'sin-lector' });
     const cuerpo = JSON.stringify({
       model: process.env.CAMARA_MODELO || 'claude-haiku-5-5', max_tokens: 100,
       messages: [{ role: 'user', content: [
         { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: jpeg.toString('base64') } },
-        { type: 'text', text: 'Es la foto de una moto en un puente de lavado. Lee la placa venezolana (6 a 8 letras y números). Responde solo JSON: {"placa":"ABC123","segura":true}. Si no se ve completa o no estás seguro de cada carácter, {"placa":"","segura":false}. No adivines.' }] }],
+        { type: 'text', text: 'Es una foto de una rampa de un lavadero de motos. Responde solo JSON: {"moto":true,"placa":"ABC123","segura":true}. "moto" es true solo si ves una moto sobre la rampa (aunque esté a medias, mojada o sin placa visible); es false si solo hay personas, cubetas, mangueras, herramientas, el piso o la rampa vacía. "placa" es la placa venezolana (6 a 8 letras y números); si no se ve completa o no estás seguro de cada carácter, {"moto":true,"placa":"","segura":false}. No adivines.' }] }],
     });
     return new Promise(ok => {
       const r = https.request({ hostname: 'api.anthropic.com', path: '/v1/messages', method: 'POST', timeout: 20000,
@@ -65,12 +67,13 @@ function crear(ctx) {
           try {
             const txt = (JSON.parse(t).content || []).map(x => x.text || '').join('');
             const j = JSON.parse(/\{[\s\S]*\}/.exec(txt)[0]);
-            const placa = limpiarPlaca(j.placa);
-            ok(j.segura === true && /^[A-Z0-9]{5,8}$/.test(placa) ? { placa } : { placa: '', motivo: 'ilegible' });
-          } catch (e) { ok({ placa: '', motivo: 'error' }); }
+            const placa = limpiarPlaca(j.placa), moto = j.moto === true ? true : j.moto === false ? false : null;
+            if (moto === false) return ok({ moto: false, placa: '', motivo: 'no-hay-moto' });
+            ok(j.segura === true && /^[A-Z0-9]{5,8}$/.test(placa) ? { moto, placa } : { moto, placa: '', motivo: 'ilegible' });
+          } catch (e) { ok({ moto: null, placa: '', motivo: 'error' }); }
         });
       });
-      r.on('error', () => ok({ placa: '', motivo: 'error' })); r.on('timeout', () => { r.destroy(); ok({ placa: '', motivo: 'error' }); });
+      r.on('error', () => ok({ moto: null, placa: '', motivo: 'error' })); r.on('timeout', () => { r.destroy(); ok({ moto: null, placa: '', motivo: 'error' }); });
       r.end(cuerpo);
     });
   }
@@ -107,13 +110,24 @@ function crear(ctx) {
       }
       guardar(); return ctx.json(res, 200, { ok: true });
     }
-    if (p.estado === 'libre') { Object.assign(p, { estado: 'esperando', desde: ahora, placa: '', intentos: 0 }); delete p.num; delete p.alertado; S.vistas++; avisar('info', 'Puente ' + n + ': llegó una moto.'); }
-    p.visto = ahora;
-    try { fs.writeFileSync(path.join(FOTOS, 'camara-puente-' + n + '.jpg'), jpeg, { mode: 0o600 }); } catch (e) {}
-    if (!p.placa && p.intentos < MAX_REINTENTOS_LECTURA) {
-      p.intentos++;
-      const r = await leerPlaca(jpeg);
+    const guardarFoto = () => { p.visto = ahora; try { fs.writeFileSync(path.join(FOTOS, 'camara-puente-' + n + '.jpg'), jpeg, { mode: 0o600 }); } catch (e) {} };
+    if (p.estado === 'libre') {
+      const r = await leer(jpeg);
+      if (r.moto === false) { guardar(); return ctx.json(res, 200, { ok: true, estado: 'libre', motivo: 'no-hay-moto' }); } // persona, cubeta, manguera…
+      Object.assign(p, { estado: 'esperando', desde: ahora, placa: '', intentos: 1, sinMoto: 0 }); delete p.num; delete p.alertado; delete p.motivo;
+      S.vistas++; avisar('info', 'Puente ' + n + ': llegó una moto.');
       if (r.placa) { p.placa = r.placa; avisar('info', 'Puente ' + n + ': placa leída ' + r.placa + '.'); } else p.motivo = r.motivo;
+      guardarFoto();
+    } else {
+      guardarFoto();
+      if (!p.placa && p.intentos < MAX_REINTENTOS_LECTURA) {
+        p.intentos++;
+        const r = await leer(jpeg);
+        if (r.moto === false) {
+          // Dos veces seguidas sin moto: lo que se había tomado por moto ya no está.
+          if (++p.sinMoto >= 2) { avisar('info', 'Puente ' + n + ': ya no se ve la moto.'); S.puentes[n - 1] = { n, estado: 'libre' }; S.vistas = Math.max(0, S.vistas - 1); guardar(); return ctx.json(res, 200, { ok: true, estado: 'libre' }); }
+        } else { p.sinMoto = 0; if (r.placa) { p.placa = r.placa; avisar('info', 'Puente ' + n + ': placa leída ' + r.placa + '.'); } else p.motivo = r.motivo; }
+      }
     }
     evaluar(p); guardar();
     return ctx.json(res, 200, { ok: true, estado: p.estado, placa: p.placa || null });

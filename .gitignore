@@ -5,3 +5,4 @@ data/
 *.log
 agent/fondo.gray
 agent/prueba/
+agent/herramientas/

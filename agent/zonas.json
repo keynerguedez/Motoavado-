@@ -1,0 +1,10 @@
+{
+  "_ayuda": "Cada zona es el rectángulo donde está la moto de ese puente, en fracciones de la imagen (0 a 1): x,y = esquina de arriba a la izquierda; w,h = ancho y alto. Estos valores son un punto de partida: ajústalos viendo la captura que deja 'node agente.js probar'.",
+  "zonas": [
+    { "puente": 1, "x": 0.02, "y": 0.2, "w": 0.22, "h": 0.65 },
+    { "puente": 2, "x": 0.27, "y": 0.2, "w": 0.22, "h": 0.65 },
+    { "puente": 3, "x": 0.52, "y": 0.2, "w": 0.22, "h": 0.65 },
+    { "puente": 4, "x": 0.77, "y": 0.2, "w": 0.21, "h": 0.65 }
+  ],
+  "umbral": 0.18
+}

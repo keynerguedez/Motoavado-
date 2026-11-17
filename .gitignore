@@ -3,3 +3,5 @@ node_modules/
 vault/
 data/
 *.log
+agent/fondo.gray
+agent/prueba/

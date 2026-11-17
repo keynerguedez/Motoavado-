@@ -273,13 +273,13 @@ details.grp summary{cursor:pointer;font-weight:600;font-size:.9rem;color:var(--m
   <!-- ============ VIGILANTE ============ -->
   <section class="view" id="v-vigilante">
     <div class="stack" style="gap:16px">
-      <div class="row"><h2 style="margin-right:auto">Puentes en vivo</h2><span class="pill warn">Simulación: todavía no hay cámara conectada</span></div>
+      <div class="row"><h2 style="margin-right:auto">Puentes en vivo</h2><span class="pill warn" id="g-pill">Simulación: todavía no hay cámara conectada</span></div>
       <div class="kpis" id="g-kpis"></div>
       <div class="bridges" id="g-bridges"></div>
-      <div class="row"><button class="btn" data-act="simok">Simular: sube una moto ya registrada</button><button class="btn" data-act="simbad">Simular: sube una moto sin registrar</button><span class="err" id="g-msg"></span></div>
+      <div class="row" id="g-sim"><button class="btn" data-act="simok">Simular: sube una moto ya registrada</button><button class="btn" data-act="simbad">Simular: sube una moto sin registrar</button><span class="err" id="g-msg"></span></div>
       <div class="cols">
         <div class="card stack"><h3>Alertas de hoy</h3><div id="g-log" class="stack" style="gap:6px"></div></div>
-        <div class="card stack"><h3>Así te llega al teléfono</h3><div id="g-wa"></div></div>
+        <div class="card stack"><h3 id="g-wa-t">Así te llega al teléfono</h3><div id="g-wa"></div></div>
       </div>
     </div>
   </section>
@@ -619,7 +619,41 @@ function mins(t){return Math.max(0,Math.round((Date.now()-t)/60000))}
 function orderByNum(n){return S.orders.filter(function(o){return o.num===n})[0]}
 function freeBridge(){return S.bridges.filter(function(b){return b.state==="libre"})[0]}
 function randPlate(){var L="ABCDEFGHJKLMNPRSTVWXYZ",r=function(s){return s[Math.floor(Math.random()*s.length)]},D="0123456789";return "A"+r(L)+r(D)+r(L)+r(D)+r(D)+r(L)}
+/* Con sesión real, Puentes se alimenta de la cámara (servidor); sin sesión (demo) queda la simulación. */
+var CAM=null;
+function loadCam(){
+  fetch("/api/camara").then(function(r){return r.ok?r.json():null}).then(function(d){if(d){CAM=d;renderVigilante()}}).catch(function(){});
+}
+function hace(iso){var s=Math.max(0,Math.round((Date.now()-new Date(iso).getTime())/1000));return s<90?s+" s":s<5400?Math.round(s/60)+" min":Math.round(s/3600)+" h"}
+function renderVigilanteReal(){
+  $("g-sim").style.display="none";
+  var señal=CAM&&CAM.contacto?(Date.now()-new Date(CAM.contacto).getTime())/60000:null, p=$("g-pill");
+  if(!CAM)p.className="pill mut",p.textContent="Cargando…";
+  else if(señal==null)p.className="pill warn",p.textContent="Todavía no ha llegado nada de la cámara";
+  else if(señal>8)p.className="pill bad",p.textContent="Sin señal de la cámara desde hace "+hace(CAM.contacto);
+  else p.className="pill ok",p.textContent="Cámara conectada";
+  var P=CAM?CAM.puentes:[1,2,3,4].map(function(n){return{n:n,estado:"libre"}});
+  var occ=P.filter(function(b){return b.estado!=="libre"}).length, vistas=CAM?CAM.vistas:0, diff=vistas-S.orders.length;
+  $("g-kpis").innerHTML=[[vistas,"Motos que vio la cámara hoy"],[S.orders.length,"Motos cobradas hoy"],[Math.max(0,diff),diff>0?"Vistas sin cobrar aún":"Todo cuadra"],[occ+" / "+P.length,"Puentes ocupados"]]
+    .map(function(k){return '<div class="card kpi"><b class="num">'+k[0]+'</b><span>'+k[1]+'</span></div>'}).join("");
+  $("g-bridges").innerHTML=P.map(function(b){
+    var head='<div class="row"><h2>Puente '+b.n+'</h2>';
+    if(b.estado==="libre")return '<div class="card bridge">'+head+'<span class="pill mut" style="margin-left:auto">Libre</span></div><div class="cam">Sin moto</div></div>';
+    var m=mins(new Date(b.desde).getTime()), pl=b.placa?'Placa '+esc(b.placa):'Placa no legible';
+    var pill=b.estado==="alerta"?'<span class="pill bad" style="margin-left:auto">Sin factura</span>':b.estado==="ok"?'<span class="pill ok" style="margin-left:auto">Coincide con #'+String(b.num).padStart(3,"0")+'</span>':'<span class="pill warn" style="margin-left:auto">Esperando registro</span>';
+    var img=b.foto?'<img src="/api/camara/foto/'+b.n+'?v='+encodeURIComponent(b.visto||"")+'" alt="Moto en el puente '+b.n+'"><span class="live">Hace '+hace(b.visto)+'</span><span class="box'+(b.estado==="alerta"?' bad':'')+'">'+pl+'</span>':'Sin imagen';
+    var txt=b.estado==="alerta"?'<b>Moto sin registro en el sistema</b><span class="note">Lleva '+m+' min montada y ninguna venta de hoy tiene esa placa.</span><div class="row"><button class="btn pri sm" data-act="regnow" data-b="'+b.n+'">Registrar ahora</button></div>'
+      :b.estado==="ok"?'<b>Moto registrada</b><span class="note">Lleva '+m+' min montada.</span>'
+      :'<b>Moto recién llegada</b><span class="note">Lleva '+m+' min. Si no se registra pronto, salta la alerta.</span>';
+    return '<div class="card bridge'+(b.estado==="alerta"?' alerta':b.estado==="ok"?' ok':'')+'">'+head+pill+'</div><div class="cam">'+img+'</div>'+txt+'</div>';
+  }).join("");
+  var L=CAM?CAM.log:[];
+  $("g-log").innerHTML=L.length?L.map(function(l){return '<div class="logrow"><span class="num note">'+hhmm(new Date(l.t))+'</span><span class="pill '+(l.kind==="info"?"mut":l.kind)+'">'+(l.kind==="bad"?"Alerta":l.kind==="ok"?"Resuelta":"Aviso")+'</span><span>'+esc(l.txt)+'</span></div>'}).join(""):'<span class="pill ok">Sin avisos hoy</span>';
+  $("g-wa-t").textContent="Aviso al teléfono"; $("g-wa").innerHTML='<span class="note">Todavía no está conectado: las alertas se ven aquí en la pantalla.</span>';
+  var al=P.filter(function(b){return b.estado==="alerta"}).length; $("badge-v").hidden=!al; $("badge-v").textContent=al;
+}
 function renderVigilante(){
+  if(window.__yo)return renderVigilanteReal();
   var occ=S.bridges.filter(function(b){return b.state!=="libre"}).length, diff=S.camCount-S.orders.length;
   $("g-kpis").innerHTML=[[S.camCount,"Motos que vio la cámara hoy"],[S.orders.length,"Motos registradas en el sistema"],[diff,diff>0?"Motos sin registrar":"Todo cuadra"],[occ+" / "+S.bridges.length,"Puentes ocupados"]]
     .map(function(k){return '<div class="card kpi"><b class="num">'+k[0]+'</b><span>'+k[1]+'</span></div>'}).join("");
@@ -800,7 +834,7 @@ document.addEventListener("click",function(ev){
   }
   else if(a==="down"||a==="regnow"){
     var br=S.bridges.filter(function(x){return x.n===+t.dataset.b})[0];
-    if(a==="regnow"){go("tablet");$("f-placa").value=br.plate;$("f-err").textContent="Placa "+br.plate+" tomada de la cámara. Toma la foto y marca los servicios.";return}
+    if(a==="regnow"){var pl2=window.__yo?((CAM&&CAM.puentes[+t.dataset.b-1].placa)||""):br.plate;go("tablet");$("f-placa").value=pl2;$("f-err").textContent=pl2?"Placa "+pl2+" tomada de la cámara. Toma la foto y marca los servicios.":"La cámara no pudo leer la placa. Escríbela y marca los servicios.";return}
     if(br.state==="alerta")S.log.unshift({time:hhmm(new Date()),txt:"Puente "+br.n+": la moto "+br.plate+" bajó sin registrarse.",kind:"bad"});
     br.state="libre"; renderAll();
   }
@@ -911,6 +945,7 @@ if(location.protocol!=="file:"&&window.fetch){fetch("/api/yo").then(function(r){
   $("btn-reset").hidden=true; applyRole(); renderAll();
   loadTasa(); setInterval(loadTasa,30*60*1000);
   loadDia().then(ejemploDesdeEnlace);
+  if(u.permisos.indexOf("vigilante")>=0){loadCam();setInterval(loadCam,8000)}
 }).catch(function(){})}
  $("a-meta").value=S.meta; renderRules(); setInterval(function(){renderVigilante();renderMeta()},30000);
 })();

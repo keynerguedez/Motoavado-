@@ -13,7 +13,9 @@ const crypto = require('crypto');
 const PUENTES = 4;
 const MIN_GRACIA = 5;           // minutos que se le da a una moto montada para que la registren antes de alertar
 const MAX_FOTO = 3 * 1024 * 1024;
-const MAX_REINTENTOS_LECTURA = 3;
+const MAX_REINTENTOS_LECTURA = 3;   // lecturas seguidas al llegar la moto (el agente reenvía a los 8 y 20 s)
+const MAX_LECTURAS_LENTAS = 30;     // tope de lecturas por moto, contando las lentas
+const CADA_LECTURA_LENTA = 55000;   // ms: mientras siga sin placa completa, se reintenta una vez por minuto
 const MAX_LOG = 100;
 
 function crear(ctx) {
@@ -143,14 +145,15 @@ function crear(ctx) {
     if (p.estado === 'libre') {
       const r = await leer(jpeg);
       if (r.moto === false) { guardar(); return ctx.json(res, 200, { ok: true, estado: 'libre', motivo: 'no-hay-moto' }); } // persona, cubeta, manguera…
-      Object.assign(p, { estado: 'esperando', desde: ahora, placa: '', parcial: '', intentos: 1, sinMoto: 0 }); delete p.num; delete p.alertado; delete p.motivo; delete p.aprox;
+      Object.assign(p, { estado: 'esperando', desde: ahora, placa: '', parcial: '', intentos: 1, leidoT: Date.now(), sinMoto: 0 }); delete p.num; delete p.alertado; delete p.motivo; delete p.aprox;
       S.vistas++; avisar('info', 'Puente ' + n + ': llegó una moto.');
       guardarLectura(p, r);
       guardarFoto();
     } else {
       guardarFoto();
-      if (!p.placa && p.intentos < MAX_REINTENTOS_LECTURA) {
-        p.intentos++;
+      const toca = p.intentos < MAX_REINTENTOS_LECTURA || (p.intentos < MAX_LECTURAS_LENTAS && Date.now() - (p.leidoT || 0) >= CADA_LECTURA_LENTA);
+      if (!p.placa && toca) {
+        p.intentos++; p.leidoT = Date.now();
         const r = await leer(jpeg);
         if (r.moto === false) {
           // Dos veces seguidas sin moto: lo que se había tomado por moto ya no está.

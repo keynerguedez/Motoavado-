@@ -956,7 +956,7 @@ if(location.protocol!=="file:"&&window.fetch){fetch("/api/yo").then(function(r){
   $("btn-reset").hidden=true; applyRole(); renderAll();
   loadTasa(); setInterval(loadTasa,30*60*1000);
   loadDia().then(ejemploDesdeEnlace);
-  if(u.permisos.indexOf("vigilante")>=0){loadCam();setInterval(loadCam,8000)}
+  if(u.permisos.indexOf("vigilante")>=0){loadCam();setInterval(loadCam,4000)}
 }).catch(function(){})}
  $("a-meta").value=S.meta; renderRules(); setInterval(function(){renderVigilante();renderMeta()},30000);
 })();

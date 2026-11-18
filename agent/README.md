@@ -1,5 +1,7 @@
 # Agente de la cámara
 
+> **Este agente es para pruebas.** El requisito del dueño es no tener ninguna PC en el local: el modo de producción es la cámara directa (aviso HTTPS + fotos 4K por FTP), descrito en [`../CAMARA.md`](../CAMARA.md).
+
 Corre en un equipo del local (no en el servidor). Lee el video de la cámara Hikvision, detecta moto en cada uno de los 4 puentes y manda al servidor un fotograma recortado de esa zona. El servidor lee la placa y avisa si una moto lleva más de 5 minutos sin factura.
 
 ## Requisitos

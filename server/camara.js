@@ -4,6 +4,7 @@
 // Sin dependencias externas. Claves en el entorno (vault/.env), nunca en el repositorio:
 //   CAMARA_TOKEN       clave que usa el agente para enviar eventos (obligatoria)
 //   ANTHROPIC_API_KEY  para leer la placa en la imagen (si falta, se detecta la moto pero la placa queda "sin lector")
+//   CAMARA_MODELO_REVISION  modelo barato para las revisiones de zonas quietas (por defecto claude-haiku-5-5; solo dice si hay moto)
 //   CAMARA_MODELO      modelo de visión (por defecto claude-sonnet-5-5; Haiku es más barato pero leyó peor las placas en las pruebas)
 const fs = require('fs');
 const path = require('path');
@@ -50,7 +51,7 @@ function crear(ctx) {
 
   // ---------- lectura de la imagen: ¿hay moto? ¿qué placa? ----------
   // moto: true/false lo dice el modelo; null = no se pudo saber (sin clave o error), y entonces se confía en el agente.
-  const leer = jpeg => (ctx.leerPlaca || leerPlaca)(jpeg);
+  const leer = (jpeg, modelo) => (ctx.leerPlaca || leerPlaca)(jpeg, modelo);
   function limpiarPlaca(v) { return String(v || '').toUpperCase().replace(/[^A-Z0-9]/g, ''); }
   // Lectura parcial: lo que el modelo sí ve, con "?" en cada carácter que no distingue (p. ej. "AB1C??").
   // Solo se acepta con 5 a 8 caracteres y al menos 4 conocidos; si no, no sirve para identificar nada.
@@ -59,17 +60,17 @@ function crear(ctx) {
     const s = String(v || '').toUpperCase().replace(/[^A-Z0-9?]/g, '');
     return /^[A-Z0-9?]{5,8}$/.test(s) && conocidos(s) >= 4 && conocidos(s) < s.length ? s : '';
   }
-  function leerPlaca(jpeg) {
+  function leerPlaca(jpeg, modeloForzado) {
     const clave = process.env.ANTHROPIC_API_KEY;
     if (!clave) return Promise.resolve({ moto: null, placa: '', motivo: 'sin-lector' });
-    const modelo = process.env.CAMARA_MODELO || 'claude-sonnet-5-5';
+    const modelo = modeloForzado || process.env.CAMARA_MODELO || 'claude-sonnet-5-5';
     // max_tokens holgado: si el modelo piensa antes de responder, esos tokens salen del mismo cupo y con uno corto el texto llega vacío.
     // Haiku piensa por defecto y admite apagarlo; los demás modelos rechazan ese parámetro, así que solo se manda a Haiku.
     const cuerpo = JSON.stringify(Object.assign({
       model: modelo, max_tokens: 1500,
       messages: [{ role: 'user', content: [
         { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: jpeg.toString('base64') } },
-        { type: 'text', text: 'Es una foto de una rampa de un lavadero de motos. Responde solo JSON: {"moto":true,"placa":"ABC123","segura":true}. "moto" es true solo si ves una moto sobre la rampa (aunque esté a medias, mojada o sin placa visible); es false si solo hay personas, cubetas, mangueras, herramientas, el piso o la rampa vacía. "placa" es la placa venezolana (6 a 8 letras y números); si no se ve completa o no estás seguro de cada carácter, deja "placa":"" y "segura":false, y en "parcial" escribe los caracteres que sí distingues, en su posición, con "?" en cada uno que no ves o no estás seguro (ejemplo: {"moto":true,"placa":"","segura":false,"parcial":"AB1C??"}). Nunca inventes un carácter que no se vea.' }] }],
+        { type: 'text', text: (process.env.CAMARA_PRUEBA === '1' ? 'MODO DE PRUEBA: un cartón o papel con una placa escrita cuenta como la moto (moto:true). ' : '') + 'Es una foto de una rampa de un lavadero de motos. Responde solo JSON: {"moto":true,"placa":"ABC123","segura":true}. "moto" es true solo si ves una moto sobre la rampa (aunque esté a medias, mojada o sin placa visible); es false si solo hay personas, cubetas, mangueras, herramientas, el piso o la rampa vacía. "placa" es la placa venezolana (6 a 8 letras y números); si no se ve completa o no estás seguro de cada carácter, deja "placa":"" y "segura":false, y en "parcial" escribe los caracteres que sí distingues, en su posición, con "?" en cada uno que no ves o no estás seguro (ejemplo: {"moto":true,"placa":"","segura":false,"parcial":"AB1C??"}). Nunca inventes un carácter que no se vea.' }] }],
     }, /haiku/.test(modelo) ? { thinking: { type: 'disabled' } } : {}));
     return new Promise(ok => {
       const r = https.request({ hostname: 'api.anthropic.com', path: '/v1/messages', method: 'POST', timeout: 20000,
@@ -100,7 +101,9 @@ function crear(ctx) {
   // Con una lectura parcial solo se da por registrada si UNA sola placa de hoy encaja (cada "?" vale cualquier carácter).
   function registradaParcial(parcial) {
     if (!parcial) return null;
-    const encaja = v => { const pl = limpiarPlaca(v.placa); return pl.length === parcial.length && [...parcial].every((c, i) => c === '?' || c === pl[i]); };
+    // Los "?" del final no fijan el largo (el modelo no sabe cuántos caracteres tiene la placa); los del medio sí valen un carácter.
+    const nucleo = parcial.replace(/\?+$/, ''), abierta = nucleo.length < parcial.length;
+    const encaja = v => { const pl = limpiarPlaca(v.placa); return (abierta ? pl.length >= nucleo.length : pl.length === nucleo.length) && [...nucleo].every((c, i) => c === '?' || c === pl[i]); };
     const hoy = ctx.ventasDeHoy().filter(encaja);
     return hoy.length && new Set(hoy.map(v => limpiarPlaca(v.placa))).size === 1 ? hoy[0] : null;
   }
@@ -122,33 +125,54 @@ function crear(ctx) {
     if (r.parcial && conocidos(r.parcial) >= conocidos(p.parcial)) { if (r.parcial !== p.parcial) avisar('info', 'Puente ' + p.n + ': placa leída en parte: ' + r.parcial + '.'); p.parcial = r.parcial; }
   }
 
-  // ---------- eventos que manda el agente ----------
-  async function evento(req, res) {
-    if (!tokenValido(req)) return ctx.json(res, 401, { error: 'Clave de cámara incorrecta.' });
-    const q = new URL(req.url, 'http://localhost').searchParams;
-    const n = Number(q.get('puente')), presente = q.get('presente') === '1';
-    if (!Number.isInteger(n) || n < 1 || n > PUENTES) return ctx.json(res, 400, { error: 'Puente no válido.' });
-    let jpeg = null;
-    if (presente) { try { jpeg = await leerFoto(req); } catch (e) { return ctx.json(res, 400, { error: 'Falta el fotograma (image/jpeg, máx. 3 MB).' }); } if (jpeg.length < 1000) return ctx.json(res, 400, { error: 'Fotograma vacío.' }); }
-    else req.resume();
+  // ---------- núcleo: una imagen de un puente, venga del agente o de la cámara directa ----------
+  // opc: { revision: es una revisión de zona quieta, previo: pregunta primero al modelo barato si hay moto, origen: de dónde vino }
+  // Devuelve el cuerpo de la respuesta.
+  async function procesar(n, presente, jpeg, opc) {
+    opc = opc || {};
     cambioDeDia();
     const p = S.puentes[n - 1], ahora = new Date().toISOString();
-    S.contacto = ahora; // última vez que el agente habló: la pantalla avisa si se queda sin señal
+    S.contacto = ahora; // última vez que llegó algo de la cámara: la pantalla avisa si se queda sin señal
     if (!presente) {
       if (p.estado !== 'libre') {
         avisar(p.estado === 'alerta' ? 'bad' : 'info', 'Puente ' + n + ': la moto ' + (p.placa || 'sin placa leída') + ' bajó' + (p.estado === 'alerta' ? ' sin registrarse.' : '.'));
         S.puentes[n - 1] = { n, estado: 'libre' };
       }
-      guardar(); return ctx.json(res, 200, { ok: true });
+      guardar(); return { ok: true };
     }
     const guardarFoto = () => { p.visto = ahora; try { fs.writeFileSync(path.join(FOTOS, 'camara-puente-' + n + '.jpg'), jpeg, { mode: 0o600 }); } catch (e) {} };
-    if (p.estado === 'libre') {
-      const r = await leer(jpeg);
-      if (r.moto === false) { guardar(); return ctx.json(res, 200, { ok: true, estado: 'libre', motivo: 'no-hay-moto' }); } // persona, cubeta, manguera…
-      Object.assign(p, { estado: 'esperando', desde: ahora, placa: '', parcial: '', intentos: 1, leidoT: Date.now(), sinMoto: 0 }); delete p.num; delete p.alertado; delete p.motivo; delete p.aprox;
-      S.vistas++; avisar('info', 'Puente ' + n + ': llegó una moto.');
+    const llegada = (r, origen) => {
+      Object.assign(p, { estado: 'esperando', desde: ahora, placa: '', parcial: '', intentos: 1, leidoT: Date.now(), sinMoto: 0, origen }); delete p.num; delete p.alertado; delete p.motivo; delete p.aprox;
+      S.vistas++; avisar('info', 'Puente ' + n + (origen === 'revision' ? ': se encontró una moto ya montada.' : ': llegó una moto.'));
       guardarLectura(p, r);
       guardarFoto();
+    };
+    const libera = () => { avisar('info', 'Puente ' + n + ': ya no se ve la moto.'); S.puentes[n - 1] = { n, estado: 'libre' }; S.vistas = Math.max(0, S.vistas - 1); guardar(); return { ok: true, estado: 'libre' }; };
+    const modeloBarato = process.env.CAMARA_MODELO_REVISION || 'claude-haiku-5-5';
+    // Revisión de zona quieta: cada cierto tiempo se mira la zona igual, por si hay una moto que ya estaba montada
+    // o que el detector de movimiento no notó, y para saber si la moto que estaba ya se fue.
+    if (opc.revision) {
+      if (p.estado !== 'libre' && p.origen !== 'revision' && p.origen !== 'alarma') { guardar(); return { ok: true, estado: p.estado, revision: 'ignorada' }; } // llegó con movimiento del agente: su bajada la avisa el agente
+      const rapida = await leer(jpeg, modeloBarato); // primero el modelo barato: ¿hay moto?
+      if (p.estado === 'libre') {
+        if (rapida.moto !== true) { guardar(); return { ok: true, estado: 'libre', revision: 'sin-moto' }; }
+        const r = await leer(jpeg); // hay moto: la placa se lee con el modelo bueno
+        if (r.moto !== true) { guardar(); return { ok: true, estado: 'libre', revision: 'sin-moto' }; }
+        llegada(r, 'revision'); evaluar(p); guardar();
+        return { ok: true, estado: p.estado, placa: p.placa || null, revision: 'moto-encontrada' };
+      }
+      // Ya marcada por una revisión anterior: si deja de verse dos veces seguidas, se libera.
+      if (rapida.moto === false) { if (++p.sinMoto >= 2) return libera(); } else p.sinMoto = 0;
+      // Mientras siga sin placa completa, la revisión también sirve de intento de lectura.
+      if (!p.placa && p.intentos < MAX_LECTURAS_LENTAS && rapida.moto !== false) { p.intentos++; p.leidoT = Date.now(); guardarLectura(p, await leer(jpeg)); guardarFoto(); }
+      evaluar(p); guardar();
+      return { ok: true, estado: p.estado, placa: p.placa || null, revision: 'vigente' };
+    }
+    if (p.estado === 'libre') {
+      if (opc.previo) { const rapida = await leer(jpeg, modeloBarato); if (rapida.moto !== true) { guardar(); return { ok: true, estado: 'libre', motivo: 'no-hay-moto' }; } }
+      const r = await leer(jpeg);
+      if (r.moto === false) { guardar(); return { ok: true, estado: 'libre', motivo: 'no-hay-moto' }; } // persona, cubeta, manguera…
+      llegada(r, opc.origen || 'movimiento');
     } else {
       guardarFoto();
       const toca = p.intentos < MAX_REINTENTOS_LECTURA || (p.intentos < MAX_LECTURAS_LENTAS && Date.now() - (p.leidoT || 0) >= CADA_LECTURA_LENTA);
@@ -157,13 +181,158 @@ function crear(ctx) {
         const r = await leer(jpeg);
         if (r.moto === false) {
           // Dos veces seguidas sin moto: lo que se había tomado por moto ya no está.
-          if (++p.sinMoto >= 2) { avisar('info', 'Puente ' + n + ': ya no se ve la moto.'); S.puentes[n - 1] = { n, estado: 'libre' }; S.vistas = Math.max(0, S.vistas - 1); guardar(); return ctx.json(res, 200, { ok: true, estado: 'libre' }); }
+          if (++p.sinMoto >= 2) return libera();
         } else { p.sinMoto = 0; guardarLectura(p, r); }
       }
     }
     evaluar(p); guardar();
-    return ctx.json(res, 200, { ok: true, estado: p.estado, placa: p.placa || null });
+    return { ok: true, estado: p.estado, placa: p.placa || null };
   }
+
+  // ---------- eventos que manda el agente (RTSP desde un equipo del local) ----------
+  async function evento(req, res) {
+    if (!tokenValido(req)) return ctx.json(res, 401, { error: 'Clave de cámara incorrecta.' });
+    const q = new URL(req.url, 'http://localhost').searchParams;
+    const n = Number(q.get('puente')), presente = q.get('presente') === '1';
+    if (!Number.isInteger(n) || n < 1 || n > PUENTES) return ctx.json(res, 400, { error: 'Puente no válido.' });
+    let jpeg = null;
+    if (presente) { try { jpeg = await leerFoto(req); } catch (e) { return ctx.json(res, 400, { error: 'Falta el fotograma (image/jpeg, máx. 3 MB).' }); } if (jpeg.length < 1000) return ctx.json(res, 400, { error: 'Fotograma vacío.' }); }
+    else req.resume();
+    return ctx.json(res, 200, await procesar(n, presente, jpeg, { revision: q.get('revision') === '1', origen: 'movimiento' }));
+  }
+
+  // ---------- la cámara directa: aviso HTTP del evento + foto 4K por FTP ----------
+  // Sin agente ni PC en el local: la cámara manda sola (1) un aviso con el tipo y la posición del objetivo y (2) fotos 4K por FTP.
+  // El aviso dice "hay algo moviéndose en tal puente"; la foto grande (la primera que llega después) es la que se recorta y se lee.
+  const FOTOS4K = path.join(ctx.DATA, 'fotos-4k');
+  const ZONAS_ARCHIVO = path.join(ctx.DATA, 'camara-zonas.json');
+  const VIDA_FOTO_4K = 3 * 60 * 1000;     // las fotos 4K se borran a los 3 minutos
+  const ESPERA_FOTO = 16000;              // máximo que se espera una foto 4K después de un aviso
+  const ENFRIAR_LIBRE = 25000;            // si en un puente libre no había moto, no se vuelve a mirar por avisos durante este tiempo
+  const MAX_AVISO = 2 * 1024 * 1024;
+  fs.mkdirSync(FOTOS4K, { recursive: true });
+  const ffmpeg = process.env.FFMPEG || 'ffmpeg';
+  const fotos4k = [];                     // más recientes: { t, nombre, ruta }
+  const enCurso = {}, enfriar = {}, ultimaFoto = {}; // por puente
+  let vistaT = 0;
+
+  // Zonas de los puentes (fracciones de la imagen). Por defecto 4 tiras verticales; se ajustan en data/camara-zonas.json.
+  function zonas() {
+    try { const z = JSON.parse(fs.readFileSync(ZONAS_ARCHIVO, 'utf8')); const ok = (Array.isArray(z) ? z : []).filter(x => Number.isInteger(x.puente) && x.puente >= 1 && x.puente <= PUENTES && [x.x, x.y, x.w, x.h].every(v => typeof v === 'number' && v >= 0 && v <= 1 && isFinite(v))); if (ok.length) return ok; } catch (e) {}
+    return Array.from({ length: PUENTES }, (_, i) => ({ puente: i + 1, x: i / PUENTES, y: 0.15, w: 1 / PUENTES, h: 0.8 }));
+  }
+  function puenteDe(cx, cy) {
+    const zs = zonas(); let mejor = null, dist = Infinity;
+    for (const z of zs) {
+      if (cx >= z.x && cx <= z.x + z.w && cy >= z.y && cy <= z.y + z.h) return z.puente;
+      const d = Math.hypot(cx - (z.x + z.w / 2), cy - (z.y + z.h / 2)); if (d < dist) { dist = d; mejor = z.puente; }
+    }
+    return dist < 0.2 ? mejor : null; // fuera de toda zona y lejos: se ignora
+  }
+  // Pasa la imagen por ffmpeg (recorte de una zona o reducción para la vista); sin ffmpeg devuelve null.
+  function ffmpegJpeg(entrada, filtro) {
+    return new Promise(ok => {
+      let p; try { p = require('child_process').spawn(ffmpeg, ['-loglevel', 'error', '-i', 'pipe:0', '-vf', filtro, '-q:v', '3', '-f', 'image2pipe', '-vcodec', 'mjpeg', 'pipe:1']); } catch (e) { return ok(null); }
+      const partes = []; const t = setTimeout(() => p.kill('SIGKILL'), 15000);
+      p.stdout.on('data', c => partes.push(c)); p.stdin.on('error', () => {}); p.on('error', () => { clearTimeout(t); ok(null); });
+      p.on('close', () => { clearTimeout(t); const b = Buffer.concat(partes); ok(b.length > 1000 ? b : null); });
+      p.stdin.end(entrada);
+    });
+  }
+  const cortarZona = (jpeg, z) => ffmpegJpeg(jpeg, 'crop=trunc(iw*' + z.w + '/2)*2:trunc(ih*' + z.h + '/2)*2:trunc(iw*' + z.x + '/2)*2:trunc(ih*' + z.y + '/2)*2');
+
+  // Una foto 4K llegó por FTP.
+  function fotoRecibida(nombre, ruta) {
+    cambioDeDia(); S.contacto = new Date().toISOString();
+    fotos4k.push({ t: Date.now(), nombre, ruta }); while (fotos4k.length > 12) fotos4k.shift();
+    // La pantalla de Puentes usa la misma foto, reducida, como vista en vivo (como mucho una cada 8 s).
+    if (Date.now() - vistaT >= 8000) {
+      vistaT = Date.now();
+      fs.readFile(ruta, (e, b) => { if (e) return; ffmpegJpeg(b, 'scale=1280:-2').then(j => { if (!j) return; try { fs.writeFileSync(path.join(FOTOS, 'camara-vista.jpg'), j, { mode: 0o600 }); } catch (x) {} S.vistaT = new Date().toISOString(); S.zonas = zonas(); guardar(); }); });
+    }
+  }
+  // Borra las fotos 4K viejas (la carpeta no crece).
+  function limpiar() {
+    fs.readdir(FOTOS4K, (e, l) => { if (e) return; for (const f of l) { const r = path.join(FOTOS4K, f); fs.stat(r, (e2, s) => { if (!e2 && Date.now() - s.mtimeMs > VIDA_FOTO_4K) fs.unlink(r, () => {}); }); } });
+  }
+  const espera = ms => new Promise(r => setTimeout(r, ms));
+  // La primera foto 4K llegada desde `desde` (ms), esperando hasta ESPERA_FOTO.
+  async function fotoDespuesDe(desde) {
+    for (let i = 0; i < ESPERA_FOTO / 500; i++) { const f = fotos4k.find(x => x.t >= desde); if (f) return f; await espera(500); }
+    return null;
+  }
+  // Mira un puente con una foto 4K: recorta su zona y la pasa por el mismo flujo que el agente.
+  async function mirarPuente(n, f, opc) {
+    let jpeg; try { jpeg = fs.readFileSync(f.ruta); } catch (e) { return null; }
+    const z = zonas().find(x => x.puente === n);
+    const recorte = z && await cortarZona(jpeg, z);
+    return procesar(n, true, recorte || jpeg, opc); // sin ffmpeg se manda el cuadro completo (se lee peor)
+  }
+
+  function ficha(xml) { const g = t => { const m = new RegExp('<' + t + '>([^<]*)</' + t + '>', 'i').exec(xml); return m ? m[1].trim() : ''; }; return { tipo: g('eventType'), estado: g('eventState'), objetivo: g('targetType'), x: Number(g('X')), y: Number(g('Y')), w: Number(g('width')), h: Number(g('height')) }; }
+  // Separa las partes de un multipart/form-data y devuelve el XML del evento.
+  function xmlDelAviso(cuerpo, tipo) {
+    const m = /boundary=("?)([^";]+)\1/i.exec(tipo || ''); if (!m) return /xml/i.test(tipo || '') ? cuerpo.toString('utf8') : '';
+    const sep = Buffer.from('--' + m[2]); let pos = cuerpo.indexOf(sep);
+    while (pos >= 0) {
+      const sig = cuerpo.indexOf(sep, pos + sep.length); if (sig < 0) break;
+      const trozo = cuerpo.subarray(pos + sep.length, sig), fin = trozo.indexOf('\r\n\r\n');
+      if (fin >= 0 && /xml/i.test(trozo.subarray(0, fin).toString('latin1'))) return trozo.subarray(fin + 4).toString('utf8');
+      pos = sig;
+    }
+    return '';
+  }
+  function avisoValido(req) {
+    const t = process.env.CAMARA_TOKEN || '', q = new URL(req.url, 'http://localhost').searchParams.get('t') || '';
+    if (t.length < 24 || q.length !== t.length) return false;
+    return crypto.timingSafeEqual(Buffer.from(q), Buffer.from(t));
+  }
+  // POST /api/camara/alarma?t=CAMARA_TOKEN : el "servidor de alarma" de la cámara.
+  const dep = (...a) => { if (process.env.CAMARA_DEPURAR) console.log('camara:', ...a); };
+  async function alarma(req, res) {
+    if (!avisoValido(req)) { req.resume(); return ctx.json(res, 401, { error: 'Clave de cámara incorrecta.' }); }
+    const partes = []; let n = 0, grande = false;
+    await new Promise(ok => { req.on('data', c => { n += c.length; if (n > MAX_AVISO) grande = true; else partes.push(c); }); req.on('end', ok); req.on('error', ok); });
+    if (grande) return ctx.json(res, 413, { error: 'Aviso demasiado grande.' });
+    ctx.json(res, 200, { ok: true }); // la cámara no espera: el trabajo sigue aparte
+    const llego = Date.now();
+    try {
+      const e = ficha(xmlDelAviso(Buffer.concat(partes), req.headers['content-type']));
+      cambioDeDia(); S.contacto = new Date().toISOString();
+      dep('aviso', JSON.stringify(e));
+      if (e.tipo && !/VMD|linedetection|fielddetection|regionEntrance|ANPR|vehicle/i.test(e.tipo)) return; // solo eventos de movimiento/inteligentes
+      if (e.estado && !/active/i.test(e.estado)) return;
+      if (![e.x, e.y, e.w, e.h].every(isFinite) || e.w <= 0) return;
+      const pn = puenteDe(e.x + e.w / 2, e.y + e.h / 2); dep('puente', pn); if (!pn) return;
+      if (enCurso[pn] || Date.now() < (enfriar[pn] || 0)) { dep('puente', pn, 'ocupado o en enfriamiento'); return; } // ya se está atendiendo este puente, o hace poco no había moto
+      enCurso[pn] = true;
+      try {
+        const f = await fotoDespuesDe(llego - 1000);
+        if (!f) { avisar('info', 'Puente ' + pn + ': hubo movimiento pero no llegó la foto 4K.'); guardar(); return; }
+        dep('foto', f.nombre, 'tras', Date.now() - llego, 'ms');
+        if (ultimaFoto[pn] === f.nombre) return; // ya se miró esta misma foto
+        ultimaFoto[pn] = f.nombre;
+        const r = await mirarPuente(pn, f, { previo: true, origen: 'alarma' });
+        dep('resultado', JSON.stringify(r));
+        if (r && r.motivo === 'no-hay-moto') enfriar[pn] = Date.now() + ENFRIAR_LIBRE;
+      } finally { enCurso[pn] = false; }
+    } catch (e) { console.error('camara alarma:', e.message); }
+  }
+
+  // Revisión periódica con la última foto 4K: encuentra motos que ya estaban montadas (puentes libres, cada CAMARA_REVISION_SEG, 300 por defecto)
+  // y libera los puentes cuando la moto se va (puentes ocupados, cada CAMARA_REVISION_OCUPADOS_SEG, 60 por defecto; con el modelo barato).
+  async function revisar(ocupados) {
+    const f = fotos4k[fotos4k.length - 1]; if (!f || Date.now() - f.t > 60000) return; // sin foto reciente no hay nada que mirar
+    for (let n = 1; n <= PUENTES; n++) {
+      if (enCurso[n] || (S.puentes[n - 1].estado !== 'libre') !== ocupados) continue; enCurso[n] = true;
+      try { await mirarPuente(n, f, { revision: true, origen: 'alarma' }); } catch (e) { console.error('camara revision:', e.message); } finally { enCurso[n] = false; }
+    }
+  }
+  const segundos = (v, def) => v === undefined ? def : Number(v);
+  const revLibres = segundos(process.env.CAMARA_REVISION_SEG, 300), revOcupados = segundos(process.env.CAMARA_REVISION_OCUPADOS_SEG, 60);
+  setInterval(limpiar, 60000).unref();
+  if (revLibres > 0) setInterval(() => revisar(false).catch(() => {}), revLibres * 1000).unref();
+  if (revOcupados > 0) setInterval(() => revisar(true).catch(() => {}), revOcupados * 1000).unref();
 
   // ---------- vista de la cámara (fotograma liviano + zonas) para la pantalla ----------
   async function vista(req, res) {
@@ -189,7 +358,7 @@ function crear(ctx) {
   }
   function foto(n) { try { return fs.readFileSync(path.join(FOTOS, 'camara-puente-' + Number(n) + '.jpg')); } catch (e) { return null; } }
 
-  return { evento, vista, fotoVista, publico, foto, PUENTES };
+  return { evento, vista, fotoVista, publico, foto, alarma, fotoRecibida, FOTOS4K, PUENTES };
 }
 
 module.exports = { crear };

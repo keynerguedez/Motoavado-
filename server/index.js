@@ -421,6 +421,17 @@ async function api(req, res, ruta) {
 }
 
 const camara = require('./camara').crear({ DATA, json, fechaCaracas, ventasDeHoy: () => diaDeHoy().ventas });
+// FTP para las fotos 4K de la cámara. Solo arranca si hay clave en vault/.env (CAMARA_FTP_CLAVE); no lleva nada más: la carpeta es propia y solo acepta subir .jpg.
+// CAMARA_FTP_USUARIO (por defecto "camara"), CAMARA_FTP_PUERTO (2121), CAMARA_FTP_PASIVO ("30000-30009"), CAMARA_FTP_IP (IP pública del servidor; si falta se usa la de la conexión).
+// Solo para pruebas locales: con CAMARA_PRUEBA=1 y sin clave acepta usuario anónimo.
+if (process.env.CAMARA_FTP_CLAVE || (process.env.CAMARA_PRUEBA === '1' && process.env.CAMARA_FTP_PUERTO)) {
+  const pas = /^(\d{4,5})-(\d{4,5})$/.exec(process.env.CAMARA_FTP_PASIVO || '30000-30009');
+  require('./ftp').crear({
+    dir: camara.FOTOS4K, usuario: process.env.CAMARA_FTP_USUARIO || 'camara', clave: process.env.CAMARA_FTP_CLAVE || '', anonimo: !process.env.CAMARA_FTP_CLAVE,
+    puerto: Number(process.env.CAMARA_FTP_PUERTO || 2121), rango: pas ? [Number(pas[1]), Number(pas[2])] : [30000, 30009], ipPublica: process.env.CAMARA_FTP_IP || '',
+    alRecibir: camara.fotoRecibida, log: m => console.log(m),
+  });
+}
 
 const servidor = http.createServer((req, res) => {
   const url = new URL(req.url, 'http://localhost');
@@ -428,6 +439,8 @@ const servidor = http.createServer((req, res) => {
   // El agente de la cámara no usa sesión ni cookies: entra con su propia clave (CAMARA_TOKEN).
   if (ruta === '/api/camara/evento' && req.method === 'POST') return camara.evento(req, res).catch(() => json(res, 500, { error: 'Error del servidor.' }));
   if (ruta === '/api/camara/vista' && req.method === 'POST') return camara.vista(req, res).catch(() => json(res, 500, { error: 'Error del servidor.' }));
+  // La cámara directa (sin agente): su "servidor de alarma" avisa aquí, con la clave en la URL (?t=CAMARA_TOKEN). Las fotos 4K llegan por FTP.
+  if (ruta === '/api/camara/alarma' && req.method === 'POST') return camara.alarma(req, res).catch(() => json(res, 500, { error: 'Error del servidor.' }));
   if (ruta === '/health') return json(res, 200, { ok: true, sistema: 'motolavado', version: version(), tasa: tasa.valor, tasaConsultada: tasa.consultada, tasaError: tasa.error, waqr: waqr ? waqr.publico().estado : 'no-disponible', libs: fs.existsSync(path.join(ROOT, 'node_modules', 'baileys')), nota: (() => { try { require.resolve('@resvg/resvg-js'); return true; } catch (e) { return false; } })(), encendido: INICIO.toISOString(), hora: new Date().toISOString() });
   if (ruta.startsWith('/api/')) return api(req, res, ruta).catch(() => json(res, 500, { error: 'Error del servidor.' }));
 

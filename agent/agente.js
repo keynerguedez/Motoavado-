@@ -123,8 +123,17 @@ function vigilar() {
   const d = crearDetector(cfg.zonas, { umbral: cfg.umbral }, ev => encolar(() => reportar(ev)));
   if (fs.existsSync(FONDO)) { d.fijarFondo(fs.readFileSync(FONDO)); log('Fondo cargado de agent/fondo.gray.'); }
   else log('AVISO: no hay fondo calibrado. Tomo como "vacío" lo primero que vea. Mejor ejecuta: node agente.js calibrar');
-  let n = 0;
-  flujo(f => { const r = d.procesar(f, Date.now()); if (++n % 60 === 1 && E.CAMARA_DEPURAR) log('zonas:', JSON.stringify(r)); });
+  let n = 0, ultimo = [];
+  flujo(f => { const r = ultimo = d.procesar(f, Date.now()); if (++n % 60 === 1 && E.CAMARA_DEPURAR) log('zonas:', JSON.stringify(r)); });
+  // Revisión de zonas quietas: cada CAMARA_REVISION_SEG segundos (por defecto 300; 0 = apagada) manda el recorte de cada zona
+  // que el detector ve sin cambio. El servidor decide si hay una moto que ya estaba montada (con un modelo barato).
+  const rseg = E.CAMARA_REVISION_SEG === undefined ? 300 : Number(E.CAMARA_REVISION_SEG);
+  if (rseg > 0) setInterval(() => ultimo.filter(x => !x.presente).forEach(x => encolar(async () => {
+    const z = cfg.zonas.find(c => c.puente === x.puente), jpeg = z && await capturar(cortar(z)); if (!jpeg) return;
+    const r = await publicar('/api/camara/evento?puente=' + x.puente + '&presente=1&revision=1', jpeg);
+    if (r.error || r.codigo !== 200) log('Puente ' + x.puente + ' (revisión): el servidor no aceptó. ' + (r.error || r.codigo + ' ' + r.cuerpo));
+    else if (/moto-encontrada/.test(r.cuerpo)) log('Puente ' + x.puente + ': revisión encontró una moto ya montada → ' + r.cuerpo);
+  })), rseg * 1000);
   const vseg = E.CAMARA_VISTA_SEG === undefined ? 10 : Number(E.CAMARA_VISTA_SEG);
   if (vseg > 0) { enviarVista(); setInterval(() => encolar(enviarVista), vseg * 1000); }
   log('Vigilando ' + cfg.zonas.length + ' puentes. Ctrl+C para parar.');

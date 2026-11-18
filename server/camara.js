@@ -170,7 +170,10 @@ function crear(ctx) {
         return { ok: true, estado: p.estado, placa: p.placa || null, revision: 'moto-encontrada' };
       }
       // Ya marcada por una revisión anterior: si deja de verse dos veces seguidas, se libera.
-      if (rapida.moto === false) { if (++p.sinMoto >= 2) return libera(); } else p.sinMoto = 0;
+      // El modelo barato se equivoca a veces con una moto que sí está: antes de contar un "no hay moto" se confirma con el modelo bueno.
+      let sinMoto = rapida.moto === false;
+      if (sinMoto) { const conf = await leer(jpeg); if (conf.moto !== false) { sinMoto = false; if (!p.placa) guardarLectura(p, conf); } }
+      if (sinMoto) { if (++p.sinMoto >= 2) return libera(); } else p.sinMoto = 0;
       // Mientras siga sin placa completa, la revisión también sirve de intento de lectura.
       if (!p.placa && p.intentos < MAX_LECTURAS_LENTAS && rapida.moto !== false) { p.intentos++; p.leidoT = Date.now(); guardarLectura(p, await leer(jpeg)); guardarFoto(); }
       evaluar(p); guardar();

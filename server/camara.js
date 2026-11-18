@@ -58,7 +58,9 @@ function crear(ctx) {
   const conocidos = s => String(s || '').replace(/\?/g, '').length;
   function limpiarParcial(v) {
     const s = String(v || '').toUpperCase().replace(/[^A-Z0-9?]/g, '');
-    return /^[A-Z0-9?]{5,8}$/.test(s) && conocidos(s) >= 4 && conocidos(s) < s.length ? s : '';
+    // Si el modelo dio todos los caracteres pero sin marcarla como segura, es una lectura probable, no una certeza: se guarda con '?' final (largo abierto).
+    const t = !s.includes('?') && s.length >= 5 && s.length <= 7 ? s + '?' : s;
+    return /^[A-Z0-9?]{5,8}$/.test(t) && conocidos(t) >= 4 && conocidos(t) < t.length ? t : '';
   }
   function leerPlaca(jpeg, modeloForzado) {
     const clave = process.env.ANTHROPIC_API_KEY;
@@ -115,6 +117,12 @@ function crear(ctx) {
       if (p.estado !== 'ok') avisar('ok', 'Puente ' + p.n + ': ' + (aprox ? 'la lectura parcial ' + p.parcial + ' coincide con la moto ' + limpiarPlaca(v.placa) : 'se registró la moto ' + p.placa) + ' (#' + v.num + ').');
       p.estado = 'ok'; p.num = v.num; if (aprox) p.aprox = limpiarPlaca(v.placa); else delete p.aprox; return;
     }
+    // Moto sin placa legible: si hoy hay una factura marcada "sin placa" que ningún otro puente tiene asignada, se da por registrada.
+    if (!p.placa && !p.parcial) {
+      const tomadas = new Set(S.puentes.filter(x => x !== p && x.sinPlacaId).map(x => x.sinPlacaId));
+      const sp = ctx.ventasDeHoy().find(x => x.sinPlaca && !tomadas.has(x.id) && (p.sinPlacaId ? x.id === p.sinPlacaId : true));
+      if (sp) { if (p.estado !== 'ok') avisar('ok', 'Puente ' + p.n + ': moto sin placa legible, coincide con la factura sin placa #' + sp.num + '.'); p.estado = 'ok'; p.num = sp.num; p.sinPlacaId = sp.id; return; }
+    }
     const min = (Date.now() - new Date(p.desde).getTime()) / 60000;
     if (min >= MIN_GRACIA && p.estado !== 'alerta') { p.estado = 'alerta'; p.alertado = true; avisar('bad', 'Puente ' + p.n + ': moto sin factura' + (p.placa ? '. Placa leída ' + p.placa + '.' : p.parcial ? '. Placa leída en parte: ' + p.parcial + '.' : '. Placa no legible.')); }
   }
@@ -142,7 +150,7 @@ function crear(ctx) {
     }
     const guardarFoto = () => { p.visto = ahora; try { fs.writeFileSync(path.join(FOTOS, 'camara-puente-' + n + '.jpg'), jpeg, { mode: 0o600 }); } catch (e) {} };
     const llegada = (r, origen) => {
-      Object.assign(p, { estado: 'esperando', desde: ahora, placa: '', parcial: '', intentos: 1, leidoT: Date.now(), sinMoto: 0, origen }); delete p.num; delete p.alertado; delete p.motivo; delete p.aprox;
+      Object.assign(p, { estado: 'esperando', desde: ahora, placa: '', parcial: '', intentos: 1, leidoT: Date.now(), sinMoto: 0, origen }); delete p.num; delete p.alertado; delete p.motivo; delete p.aprox; delete p.sinPlacaId;
       S.vistas++; avisar('info', 'Puente ' + n + (origen === 'revision' ? ': se encontró una moto ya montada.' : ': llegó una moto.'));
       guardarLectura(p, r);
       guardarFoto();
@@ -358,7 +366,7 @@ function crear(ctx) {
   }
   function foto(n) { try { return fs.readFileSync(path.join(FOTOS, 'camara-puente-' + Number(n) + '.jpg')); } catch (e) { return null; } }
 
-  return { evento, vista, fotoVista, publico, foto, alarma, fotoRecibida, FOTOS4K, PUENTES };
+  return { evento, vista, fotoVista, publico, foto, alarma, fotoRecibida, leerPlaca, FOTOS4K, PUENTES };
 }
 
 module.exports = { crear };

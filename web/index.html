@@ -275,6 +275,7 @@ details.grp summary{cursor:pointer;font-weight:600;font-size:.9rem;color:var(--m
     <div class="stack" style="gap:16px">
       <div class="row"><h2 style="margin-right:auto">Puentes en vivo</h2><span class="pill warn" id="g-pill">Simulación: todavía no hay cámara conectada</span></div>
       <div class="kpis" id="g-kpis"></div>
+      <div class="card stack" id="g-vista" style="display:none"></div>
       <div class="bridges" id="g-bridges"></div>
       <div class="row" id="g-sim"><button class="btn" data-act="simok">Simular: sube una moto ya registrada</button><button class="btn" data-act="simbad">Simular: sube una moto sin registrar</button><span class="err" id="g-msg"></span></div>
       <div class="cols">
@@ -632,6 +633,16 @@ function renderVigilanteReal(){
   else if(señal==null)p.className="pill warn",p.textContent="Todavía no ha llegado nada de la cámara";
   else if(señal>8)p.className="pill bad",p.textContent="Sin señal de la cámara desde hace "+hace(CAM.contacto);
   else p.className="pill ok",p.textContent="Cámara conectada";
+  var gv=$("g-vista");
+  if(CAM&&CAM.vista){
+    gv.style.display="";
+    if(gv.dataset.t!==CAM.vista.t){
+      gv.dataset.t=CAM.vista.t;
+      var zs=(CAM.vista.zonas||[]).map(function(z){return '<div style="position:absolute;left:'+z.x*100+'%;top:'+z.y*100+'%;width:'+z.w*100+'%;height:'+z.h*100+'%;border:2px solid #22c55e;border-radius:6px;pointer-events:none"><span style="position:absolute;top:2px;left:4px;background:#22c55e;color:#000;font-weight:700;font-size:.8rem;line-height:1.3;padding:0 6px;border-radius:4px">Puente '+z.puente+'</span></div>'}).join("");
+      gv.innerHTML='<div class="row"><h3 style="margin-right:auto">Vista de la cámara</h3><span class="note">Actualizada hace <b id="g-vista-t"></b> · los recuadros verdes son la zona de cada puente</span></div><div style="position:relative;line-height:0"><img src="/api/camara/vista?v='+encodeURIComponent(CAM.vista.t)+'" alt="Vista de la cámara" style="width:100%;border-radius:10px">'+zs+'</div>';
+    }
+    var gt=$("g-vista-t"); if(gt)gt.textContent=hace(CAM.vista.t);
+  }else gv.style.display="none";
   var P=CAM?CAM.puentes:[1,2,3,4].map(function(n){return{n:n,estado:"libre"}});
   var occ=P.filter(function(b){return b.estado!=="libre"}).length, vistas=CAM?CAM.vistas:0, diff=vistas-S.orders.length;
   $("g-kpis").innerHTML=[[vistas,"Motos que vio la cámara hoy"],[S.orders.length,"Motos cobradas hoy"],[Math.max(0,diff),diff>0?"Vistas sin cobrar aún":"Todo cuadra"],[occ+" / "+P.length,"Puentes ocupados"]]
@@ -639,11 +650,11 @@ function renderVigilanteReal(){
   $("g-bridges").innerHTML=P.map(function(b){
     var head='<div class="row"><h2>Puente '+b.n+'</h2>';
     if(b.estado==="libre")return '<div class="card bridge">'+head+'<span class="pill mut" style="margin-left:auto">Libre</span></div><div class="cam">Sin moto</div></div>';
-    var m=mins(new Date(b.desde).getTime()), pl=b.placa?'Placa '+esc(b.placa):'Placa no legible';
+    var m=mins(new Date(b.desde).getTime()), pl=b.placa?'Placa '+esc(b.placa):b.parcial?'Placa parcial '+esc(b.parcial):'Placa no legible';
     var pill=b.estado==="alerta"?'<span class="pill bad" style="margin-left:auto">Sin factura</span>':b.estado==="ok"?'<span class="pill ok" style="margin-left:auto">Coincide con #'+String(b.num).padStart(3,"0")+'</span>':'<span class="pill warn" style="margin-left:auto">Esperando registro</span>';
     var img=b.foto?'<img src="/api/camara/foto/'+b.n+'?v='+encodeURIComponent(b.visto||"")+'" alt="Moto en el puente '+b.n+'"><span class="live">Hace '+hace(b.visto)+'</span><span class="box'+(b.estado==="alerta"?' bad':'')+'">'+pl+'</span>':'Sin imagen';
     var txt=b.estado==="alerta"?'<b>Moto sin registro en el sistema</b><span class="note">Lleva '+m+' min montada y ninguna venta de hoy tiene esa placa.</span><div class="row"><button class="btn pri sm" data-act="regnow" data-b="'+b.n+'">Registrar ahora</button></div>'
-      :b.estado==="ok"?'<b>Moto registrada</b><span class="note">Lleva '+m+' min montada.</span>'
+      :b.estado==="ok"?'<b>Moto registrada</b><span class="note">Lleva '+m+' min montada.'+(b.aprox?' Coincidencia por lectura parcial ('+esc(b.parcial)+' → '+esc(b.aprox)+'): confírmala a ojo.':'')+'</span>'
       :'<b>Moto recién llegada</b><span class="note">Lleva '+m+' min. Si no se registra pronto, salta la alerta.</span>';
     return '<div class="card bridge'+(b.estado==="alerta"?' alerta':b.estado==="ok"?' ok':'')+'">'+head+pill+'</div><div class="cam">'+img+'</div>'+txt+'</div>';
   }).join("");

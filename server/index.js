@@ -282,6 +282,11 @@ async function api(req, res, ruta) {
     if (ruta === '/api/whatsapp') return yo && yo.rol === 'dueno' ? json(res, 200, waPublico(waLeer())) : json(res, 403, { error: 'Solo el dueño.' });
     if (ruta === '/api/usuarios') return puede(yo, 'usuarios') ? json(res, 200, leerUsuarios().map(publico)) : json(res, 403, { error: 'No tienes permiso.' });
     if (ruta === '/api/camara') return puede(yo, 'vigilante') ? json(res, 200, camara.publico()) : json(res, 403, { error: 'No tienes permiso.' });
+    if (ruta === '/api/camara/vista') {
+      if (!puede(yo, 'vigilante')) return json(res, 403, { error: 'No tienes permiso.' });
+      const f = camara.fotoVista(); if (!f) return json(res, 404, { error: 'Sin imagen.' });
+      res.writeHead(200, { 'content-type': 'image/jpeg', 'cache-control': 'no-store' }); return res.end(f);
+    }
     const fm = /^\/api\/camara\/foto\/(\d)$/.exec(ruta);
     if (fm) {
       if (!puede(yo, 'vigilante')) return json(res, 403, { error: 'No tienes permiso.' });
@@ -422,6 +427,7 @@ const servidor = http.createServer((req, res) => {
   let ruta; try { ruta = decodeURIComponent(url.pathname); } catch (e) { res.writeHead(400); return res.end(); }
   // El agente de la cámara no usa sesión ni cookies: entra con su propia clave (CAMARA_TOKEN).
   if (ruta === '/api/camara/evento' && req.method === 'POST') return camara.evento(req, res).catch(() => json(res, 500, { error: 'Error del servidor.' }));
+  if (ruta === '/api/camara/vista' && req.method === 'POST') return camara.vista(req, res).catch(() => json(res, 500, { error: 'Error del servidor.' }));
   if (ruta === '/health') return json(res, 200, { ok: true, sistema: 'motolavado', version: version(), tasa: tasa.valor, tasaConsultada: tasa.consultada, tasaError: tasa.error, waqr: waqr ? waqr.publico().estado : 'no-disponible', libs: fs.existsSync(path.join(ROOT, 'node_modules', 'baileys')), nota: (() => { try { require.resolve('@resvg/resvg-js'); return true; } catch (e) { return false; } })(), encendido: INICIO.toISOString(), hora: new Date().toISOString() });
   if (ruta.startsWith('/api/')) return api(req, res, ruta).catch(() => json(res, 500, { error: 'Error del servidor.' }));
 

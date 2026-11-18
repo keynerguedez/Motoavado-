@@ -66,8 +66,9 @@ function flujo(alFotograma) {
 }
 
 // ---------- envío al servidor ----------
-function enviar(puente, jpeg) {
-  const u = new URL(E.SERVIDOR_URL.replace(/\/$/, '') + '/api/camara/evento?puente=' + puente + '&presente=' + (jpeg ? 1 : 0));
+function enviar(puente, jpeg) { return publicar('/api/camara/evento?puente=' + puente + '&presente=' + (jpeg ? 1 : 0), jpeg); }
+function publicar(ruta, jpeg) {
+  const u = new URL(E.SERVIDOR_URL.replace(/\/$/, '') + ruta);
   const lib = u.protocol === 'https:' ? https : http;
   return new Promise(ok => {
     const r = lib.request(u, { method: 'POST', timeout: 30000, headers: { authorization: 'Bearer ' + E.CAMARA_TOKEN, 'content-type': jpeg ? 'image/jpeg' : 'application/octet-stream', 'content-length': jpeg ? jpeg.length : 0 } }, res => {
@@ -91,6 +92,18 @@ async function reportar(ev) {
   else if (ev.tipo !== 'libre') log('Puente ' + ev.puente + ': ' + ev.tipo + (jpeg ? ' (' + Math.round(jpeg.length / 1024) + ' KB)' : '') + ' → ' + r.cuerpo);
 }
 
+// Vista de la cámara para la pantalla: un fotograma liviano cada CAMARA_VISTA_SEG segundos (0 = no mandar), con las zonas dibujadas encima.
+let vistaOcupada = false;
+async function enviarVista() {
+  if (vistaOcupada) return; vistaOcupada = true;
+  try {
+    const j = await capturar('scale=1280:-2', 20000); if (!j) return;
+    const zonas = encodeURIComponent(JSON.stringify(cfg.zonas.map(z => ({ puente: z.puente, x: z.x, y: z.y, w: z.w, h: z.h }))));
+    const r = await publicar('/api/camara/vista?zonas=' + zonas, j);
+    if (r.error || r.codigo !== 200) log('vista: el servidor no aceptó. ' + (r.error || r.codigo + ' ' + r.cuerpo));
+  } finally { vistaOcupada = false; }
+}
+
 // ---------- comandos ----------
 async function probar() {
   fs.mkdirSync(path.join(DIR, 'prueba'), { recursive: true });
@@ -112,6 +125,8 @@ function vigilar() {
   else log('AVISO: no hay fondo calibrado. Tomo como "vacío" lo primero que vea. Mejor ejecuta: node agente.js calibrar');
   let n = 0;
   flujo(f => { const r = d.procesar(f, Date.now()); if (++n % 60 === 1 && E.CAMARA_DEPURAR) log('zonas:', JSON.stringify(r)); });
+  const vseg = E.CAMARA_VISTA_SEG === undefined ? 10 : Number(E.CAMARA_VISTA_SEG);
+  if (vseg > 0) { enviarVista(); setInterval(() => encolar(enviarVista), vseg * 1000); }
   log('Vigilando ' + cfg.zonas.length + ' puentes. Ctrl+C para parar.');
 }
 

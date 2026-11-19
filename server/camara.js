@@ -43,6 +43,11 @@ function crear(ctx) {
   function hFoto(p, jpeg) { if (p.hid && jpeg) try { fs.writeFileSync(path.join(HFOTOS, p.hid + '.jpg'), jpeg, { mode: 0o600 }); } catch (e) {} }
   function hSync() {
     S.puentes.forEach(p => {
+      // Una moto que ya estaba en el puente antes de existir el historial también se anota, con la última foto de ese puente.
+      if (!p.hid && p.estado !== 'libre') {
+        let f = null; try { f = fs.readFileSync(path.join(FOTOS, 'camara-puente-' + p.n + '.jpg')); } catch (e) {}
+        hNuevo(p, f); const e0 = H[H.length - 1]; if (p.desde) { e0.llegada = p.desde; e0.dia = ctx.fechaCaracas(new Date(p.desde)); }
+      }
       if (!p.hid) return; const e = H.find(x => x.id === p.hid); if (!e) return;
       const nuevo = { placa: p.placa || '', parcial: p.parcial || '', motivo: p.motivo || '', estado: p.estado === 'libre' ? e.estado : p.estado, num: p.num == null ? null : p.num, aprox: p.aprox || '', sinPlaca: !!p.sinPlacaId };
       if (Object.keys(nuevo).some(k => (e[k] == null ? '' : e[k]) !== (nuevo[k] == null ? '' : nuevo[k]))) { Object.assign(e, nuevo); hSucio = true; }

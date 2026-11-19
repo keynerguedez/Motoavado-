@@ -310,6 +310,8 @@ details.grp summary{cursor:pointer;font-weight:600;font-size:.9rem;color:var(--m
   <div class="total" style="border:0;padding:0"><span id="p-det" class="note"></span><span style="text-align:right"><b class="num" id="p-total"></b><br><b class="num" id="p-bs" style="font-size:1.35rem"></b></span></div>
   <div class="chips" id="p-methods"></div>
   <div id="p-conv" class="card" style="text-align:center" hidden></div>
+  <label class="f" id="p-monto-f" hidden><span id="p-monto-l">Monto cobrado</span><input id="p-monto" type="text" inputmode="decimal" autocomplete="off"></label>
+  <div class="note num" id="p-dif" hidden></div>
   <label class="f">Referencia (últimos dígitos)<input id="p-ref" type="text" inputmode="numeric" autocomplete="off" placeholder="004512"></label>
   <div class="err" id="p-err"></div>
   <div class="row"><button class="btn" data-act="closepay" style="flex:1">Cancelar</button><button class="btn ok" data-act="confirmpay" style="flex:1">Confirmar cobro</button></div>
@@ -471,7 +473,7 @@ function openPayObj(o){
   paying=o; payMethod=null;
   $("p-num").textContent="#"+String(o.num).padStart(3,"0"); $("p-det").textContent=paying.placa+" · "+names(paying);
   $("p-total").textContent=usd(total(paying)); $("p-bs").textContent=bs(total(paying));
-  $("p-ref").value=""; $("p-err").textContent=""; renderMethods(); $("ov-pay").classList.add("on");
+  $("p-ref").value=""; $("p-err").textContent=""; setMonto(); renderMethods(); $("ov-pay").classList.add("on");
 }
 function fmtN(n){return n.toLocaleString("es-VE",{minimumFractionDigits:2,maximumFractionDigits:2})}
 function payAmt(method,t,rate){
@@ -479,7 +481,29 @@ function payAmt(method,t,rate){
   if(method==="Binance")return {cur:"USDT",val:t,txt:fmtN(t)+" USDT"};
   return {cur:"$",val:t,txt:usd(t)};
 }
-function paidAmt(o){return payAmt(o.pay.method,total(o),o.pay.tasa||S.tasa)}
+function paidAmt(o){
+  var a=payAmt(o.pay.method,total(o),o.pay.tasa||S.tasa);
+  // Si el encargado escribió el monto realmente cobrado (p. ej. redondeado), ese es el que vale.
+  if(o.pay.val>0&&o.pay.cur===a.cur){a.val=o.pay.val;a.txt=a.cur==="Bs"?"Bs "+fmtN(a.val):a.cur==="USDT"?fmtN(a.val)+" USDT":usd(a.val)}
+  return a;
+}
+function parseMonto(v){
+  v=String(v||"").replace(/[^0-9.,]/g,"");
+  if(v.indexOf(",")>=0)v=v.replace(/\./g,"").replace(",","."); else if((v.match(/\./g)||[]).length>1||/^\d{1,3}\.\d{3}$/.test(v))v=v.replace(/\./g,"");
+  var n=parseFloat(v); return n>0?Math.round(n*100)/100:null;
+}
+function setMonto(){
+  var f=$("p-monto-f"); if(!payMethod||!paying){f.hidden=true;$("p-dif").hidden=true;return}
+  var a=payAmt(payMethod,total(paying),S.tasa);
+  f.hidden=false; $("p-monto-l").textContent="Monto cobrado ("+(a.cur==="Bs"?"Bs":a.cur==="USDT"?"USDT":"$")+")";
+  $("p-monto").value=String(Math.round(a.val*100)/100).replace(".",","); montoDif();
+}
+function montoDif(){
+  var d=$("p-dif"); if(!payMethod||!paying){d.hidden=true;return}
+  var a=payAmt(payMethod,total(paying),S.tasa), m=parseMonto($("p-monto").value);
+  if(m==null||Math.abs(m-a.val)<0.005){d.hidden=true;return}
+  d.hidden=false; d.textContent="Diferencia sobre el monto calculado: "+(m>a.val?"+":"-")+fmtN(Math.abs(m-a.val));
+}
 function renderConv(){
   var el=$("p-conv"); if(!payMethod||!paying){el.hidden=true;return}
   var a=payAmt(payMethod,total(paying),S.tasa);
@@ -506,8 +530,8 @@ function renderClientes(){
 }
 function saveSale(o,sigue){
   if(!window.__yo){sigue();return} var a=paidAmt(o);
-  if(o.srvId){jpost("/api/ventas/cobrar",{id:o.srvId,metodo:o.pay.method,ref:o.pay.ref,moneda:a.cur,monto:a.val,tasa:o.pay.tasa}).then(function(r){if(!r.ok)$("f-err").textContent="Ojo: el cobro de la moto #"+o.num+" no se guardó en el servidor ("+(r.j.error||"error")+"). Avisa al dueño.";sigue(r.ok?o.num:null)}).catch(function(){$("f-err").textContent="Ojo: sin conexión, el cobro de la moto #"+o.num+" no se guardó.";sigue(null)});return}
-  fetch("/api/ventas",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({telefono:o.tel,cliente:cliName(o),placa:o.sin?"":o.placa,sinPlaca:!!o.sin,modelo:o.modelo,servicios:o.svc.map(function(id){return{id:id,nombre:svc(id).name,precio:svc(id).price}}),total:total(o),descuento:o.disc&&o.disc.status==="approved"?o.disc.pct+"%":"",lavador:o.lav,metodo:o.pay.method,ref:o.pay.ref,moneda:a.cur,monto:a.val,tasa:o.pay.tasa})})
+  if(o.srvId){jpost("/api/ventas/cobrar",{id:o.srvId,metodo:o.pay.method,ref:o.pay.ref,moneda:a.cur,monto:a.val,esperado:o.pay.esp,tasa:o.pay.tasa}).then(function(r){if(!r.ok)$("f-err").textContent="Ojo: el cobro de la moto #"+o.num+" no se guardó en el servidor ("+(r.j.error||"error")+"). Avisa al dueño.";sigue(r.ok?o.num:null)}).catch(function(){$("f-err").textContent="Ojo: sin conexión, el cobro de la moto #"+o.num+" no se guardó.";sigue(null)});return}
+  fetch("/api/ventas",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({telefono:o.tel,cliente:cliName(o),placa:o.sin?"":o.placa,sinPlaca:!!o.sin,modelo:o.modelo,servicios:o.svc.map(function(id){return{id:id,nombre:svc(id).name,precio:svc(id).price}}),total:total(o),descuento:o.disc&&o.disc.status==="approved"?o.disc.pct+"%":"",lavador:o.lav,metodo:o.pay.method,ref:o.pay.ref,moneda:a.cur,monto:a.val,esperado:o.pay.esp,tasa:o.pay.tasa})})
   .then(function(r){return r.json().then(function(j){if(!r.ok)$("f-err").textContent="Ojo: la moto #"+o.num+" no se guardó en el servidor. Avisa al dueño.";sigue(r.ok?j.num:null)})}).catch(function(){$("f-err").textContent="Ojo: sin conexión, la moto #"+o.num+" no se guardó en el servidor.";sigue(null)});
 }
 var TASA_INFO=null;
@@ -571,7 +595,7 @@ function sendTicket(o,numSrv){
   var k=$("k-estado"); if(!window.__yo){k.textContent="Así le llega por WhatsApp.";return}
   var a=paidAmt(o), tz=o.pay.tasa||S.tasa; k.textContent="Enviando por WhatsApp…";
   fetch("/api/ticket",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({telefono:o.tel,num:String(numSrv||o.num).padStart(3,"0"),cliente:cliName(o),placa:o.placa,modelo:o.modelo,
-    servicios:o.svc.map(function(id){return{nombre:svc(id).name,precio:"Bs "+fmtN(svc(id).price*tz)}}).concat(o.disc&&o.disc.status==="approved"?[{nombre:"Descuento "+o.disc.pct+"%",precio:"- Bs "+fmtN((subtotal(o)-total(o))*tz)}]:[]),descuento:"",total:"Bs "+fmtN(total(o)*tz),pagado:"Bs "+fmtN(total(o)*tz),metodo:o.pay.method,ref:o.pay.ref,tasa:""})})
+    servicios:o.svc.map(function(id){return{nombre:svc(id).name,precio:"Bs "+fmtN(svc(id).price*tz)}}).concat(o.disc&&o.disc.status==="approved"?[{nombre:"Descuento "+o.disc.pct+"%",precio:"- Bs "+fmtN((subtotal(o)-total(o))*tz)}]:[]),descuento:"",total:"Bs "+fmtN(total(o)*tz),pagado:a.txt,metodo:o.pay.method,ref:o.pay.ref,tasa:""})})
   .then(function(r){return r.json().then(function(j){k.textContent=r.ok?"Enviado por WhatsApp al "+fmtTel(o.tel)+".":"No se envió por WhatsApp: "+(j.error||"error")})}).catch(function(){k.textContent="No se envió por WhatsApp: sin conexión."});
 }
 function showTicket(o){$("k-to").textContent="WhatsApp al "+fmtTel(o.tel)+" · "+cliName(o);$("k-body").innerHTML=ticketHtml(o);$("ov-ticket").classList.add("on")}
@@ -580,7 +604,10 @@ function confirmPay(){
   var ref=$("p-ref").value.trim();
   if(!payMethod){$("p-err").textContent="Elige cómo pagó.";return}
   if(NEEDREF[payMethod]&&!ref){$("p-err").textContent="Escribe la referencia del "+payMethod+".";return}
-  var pa=payAmt(payMethod,total(paying),S.tasa); paying.pay={method:payMethod,ref:ref,tasa:S.tasa,cur:pa.cur,val:pa.val};
+  var pa=payAmt(payMethod,total(paying),S.tasa), mc=parseMonto($("p-monto").value);
+  if(mc==null){$("p-err").textContent="Escribe el monto cobrado.";return}
+  if(mc<pa.val*0.5||mc>pa.val*2){$("p-err").textContent="El monto cobrado no se parece al total ("+pa.txt+"). Revísalo.";return}
+  paying.pay={method:payMethod,ref:ref,tasa:S.tasa,cur:pa.cur,val:mc,esp:pa.val};
   var po=paying; po.ticket=true; $("ov-pay").classList.remove("on");
   if(pendingNew===po){pendingNew=null;commitOrder(po);$("f-err").textContent="Moto #"+po.num+" cobrada y registrada. Ya puede pasar al puente."}
   else renderAll();
@@ -945,7 +972,7 @@ document.addEventListener("click",function(ev){
   else if(a==="hreal"){var hi=$("hr-"+t.dataset.id);if(hi)jpost("/api/camara/historial/real",{id:t.dataset.id,real:hi.value}).then(function(){hi.blur();loadHist()})}
   else if(a==="aprobar"||a==="negar")decidir(t.dataset.aid,a==="aprobar");
   else if(a==="pay")openPay(n);
-  else if(a==="method"){payMethod=t.dataset.m;renderMethods()}
+  else if(a==="method"){payMethod=t.dataset.m;setMonto();renderMethods()}
   else if(a==="confirmpay")confirmPay();
   else if(a==="closepay"){pendingNew=null;$("ov-pay").classList.remove("on")}
   else if(a==="approve"){o.disc.status="approved";renderAll()}
@@ -1051,6 +1078,7 @@ document.addEventListener("input",function(ev){
   }
   else if(t.dataset&&t.dataset.greal){var gr=S.gastos.filter(function(x){return x.id===+t.dataset.greal})[0], rr=parseFloat(t.value);gr.real=rr>=0?rr:null}
   else if(t.id==="a-meta"){var mv=parseInt(t.value,10);if(mv>0){S.meta=mv;renderMeta()}}
+  else if(t.id==="p-monto")montoDif();
   else if(t.id==="a-tasa"){var x=parseFloat(t.value);if(x>0){S.tasa=x;draftTotal();renderAll()}}
 });
 $("c-buscar").addEventListener("input",renderClientes);

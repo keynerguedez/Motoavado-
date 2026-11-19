@@ -134,6 +134,7 @@ details.grp summary{cursor:pointer;font-weight:600;font-size:.9rem;color:var(--m
     <button role="tab" id="tab-gastos" data-act="go" data-v="gastos">Gastos</button>
     <button role="tab" id="tab-clientes" data-act="go" data-v="clientes">Clientes</button>
     <button role="tab" id="tab-admin" data-act="go" data-v="admin">Administración<span class="badge" id="badge" hidden>0</span></button>
+    <button role="tab" id="tab-autorizar" data-act="go" data-v="autorizar">Autorizaciones<span class="badge" id="badge-a" hidden>0</span></button>
     <button role="tab" id="tab-vigilante" data-act="go" data-v="vigilante">Vigilante (cámara)<span class="badge" id="badge-v" hidden>0</span></button>
   </div>
   <a class="btn sm" id="lnk-usuarios" href="/usuarios" hidden>Usuarios</a>
@@ -165,7 +166,7 @@ details.grp summary{cursor:pointer;font-weight:600;font-size:.9rem;color:var(--m
         </label>
         <div class="note" id="ph-ai"></div>
         <div class="row">
-          <label class="f">Placa<input id="f-placa" type="text" placeholder="AB1C23D" autocomplete="off" style="text-transform:uppercase"></label>
+          <label class="f">Placa<input id="f-placa" type="text" placeholder="AB1C23D" autocomplete="off" style="text-transform:uppercase"><span class="row note" style="gap:6px;margin-top:4px"><input type="checkbox" id="f-sinplaca" style="width:auto"> <label for="f-sinplaca" style="margin:0">La moto no tiene placa</label></span></label>
           <label class="f">Modelo / color (opcional)<input id="f-modelo" type="text" placeholder="Empire Horse negra" autocomplete="off"></label>
         </div>
         <div class="row">
@@ -174,16 +175,19 @@ details.grp summary{cursor:pointer;font-weight:600;font-size:.9rem;color:var(--m
         </div>
         <div class="note" id="f-cli"></div>
         <div><div class="note" style="margin-bottom:6px;font-weight:600">2. ¿Qué se le va a hacer?</div><div class="stack" style="gap:8px" id="f-chips"></div></div>
-        <div class="row"><label class="f">Lavador que la atiende<select id="f-lav"></select></label></div>
+        <div class="row"><label class="f">Lavador que la atiende<select id="f-lav"></select></label>
+          <label class="f">Tipo de lavado<select id="f-tipo"><option value="normal">Normal</option><option value="garantia">Garantía (el lavado salió mal)</option><option value="autorizado">Lavado autorizado (apoyo o regalo)</option></select></label></div>
         <div class="row">
           <label class="f">Descuento (requiere autorización)
             <select id="f-desc"><option value="0">Sin descuento</option><option value="10">10%</option><option value="20">20%</option><option value="50">50%</option><option value="100">Cortesía (100%)</option></select></label>
-          <label class="f">Motivo del descuento<input id="f-motivo" type="text" placeholder="Cliente frecuente" autocomplete="off"></label>
+          <label class="f">Motivo (descuento, garantía o autorizado)<input id="f-motivo" type="text" placeholder="Cliente frecuente" autocomplete="off"></label>
         </div>
+        <label class="f">Nota si el pago queda pendiente<input id="f-nota" type="text" placeholder="Cliente conocido, paga al entregar la moto" autocomplete="off"></label>
         <div class="total"><span>Total</span><span><b class="num" id="f-total">$0.00</b> <span class="note num" id="f-bs"></span></span></div>
         <div class="err" id="f-err"></div>
         <div class="row">
           <button class="btn pri" data-act="addpay" style="flex:1">Cobrar y registrar</button>
+          <button class="btn" data-act="addpend" style="flex:1">Registrar, pago pendiente</button>
         </div>
       </div>
       <div class="card">
@@ -270,6 +274,15 @@ details.grp summary{cursor:pointer;font-weight:600;font-size:.9rem;color:var(--m
     </div>
   </section>
 
+  <!-- ============ AUTORIZACIONES ============ -->
+  <section class="view" id="v-autorizar">
+    <div class="stack" style="gap:16px">
+      <div class="card stack"><h3>Pendientes de autorizar</h3><div class="stack" id="z-pend"></div>
+        <p class="note">Descuentos, garantías y lavados autorizados. Quien pide no puede aprobar su propia solicitud (salvo el dueño).</p></div>
+      <div class="card stack"><h3>Respondidas (últimos días)</h3><div class="stack" id="z-hist" style="gap:6px"></div></div>
+    </div>
+  </section>
+
   <!-- ============ VIGILANTE ============ -->
   <section class="view" id="v-vigilante">
     <div class="stack" style="gap:16px">
@@ -335,7 +348,7 @@ var S={
   week:[["Vie",0],["Sáb",0],["Dom",0],["Lun",0],["Mar",0],["Mié",0]]
 };
 var draft={photo:null,svc:{}}, paying=null, payMethod=null;
-var VIEWS=["tablet","comisiones","gastos","clientes","admin","vigilante"], EXPECT={lp:15,la:20,rp:15,ra:20,pre:35,vip:45,pc:10,pp:30,pg:40,px:50,cp:45,cg:55,cx:65,ca:15,lc:5,kit:5}, NOW=Date.now();
+var VIEWS=["tablet","comisiones","gastos","clientes","admin","autorizar","vigilante"], EXPECT={lp:15,la:20,rp:15,ra:20,pre:35,vip:45,pc:10,pp:30,pg:40,px:50,cp:45,cg:55,cx:65,ca:15,lc:5,kit:5}, NOW=Date.now();
 function hhmm(d){return String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0")}
 S.bridges=[{n:1,state:"libre"},{n:2,state:"libre"},{n:3,state:"libre"},{n:4,state:"libre"}];
 S.camCount=0;
@@ -395,7 +408,7 @@ function renderTablet(){
     var blocked=o.disc&&o.disc.status==="pending";
     var side=o.pay?'<span class="pill ok">Cobrada · '+esc(o.pay.method)+'</span>'
       :(blocked?'<span class="pill warn">No cobrar todavía</span>':'<button class="btn pri sm" data-act="pay" data-n="'+o.num+'">Cobrar</button>');
-    return '<div class="order"><img class="thumb" src="'+o.photo+'" alt="Foto de la moto '+o.num+'"><div class="info"><div class="n">#'+String(o.num).padStart(3,"0")+' · '+esc(o.placa)+'</div><div class="svc">'+esc(o.modelo||"")+(o.modelo?" · ":"")+esc(names(o))+'</div><div class="svc">'+esc(cliName(o))+' · '+fmtTel(o.tel)+'</div><div class="svc">'+o.time+' · Lavador: '+esc(o.lav||"")+'</div>'+discPill(o)+(o.ticket?' <span class="pill mut">Ticket enviado</span>':'')+'</div><div class="side"><b class="num">'+usd(total(o))+'</b>'+side+'</div></div>';
+    return '<div class="order"><img class="thumb" src="'+o.photo+'" alt="Foto de la moto '+o.num+'"><div class="info"><div class="n">#'+String(o.num).padStart(3,"0")+' · '+esc(o.placa)+'</div><div class="svc">'+esc(o.modelo||"")+(o.modelo?" · ":"")+esc(names(o))+'</div><div class="svc">'+esc(cliName(o))+' · '+fmtTel(o.tel)+'</div><div class="svc">'+o.time+' · Lavador: '+esc(o.lav||"")+(o.tipo&&o.tipo!=="normal"?' · '+(o.tipo==="garantia"?"Garantía":"Lavado autorizado"):"")+'</div>'+(o.nota?'<div class="svc">Pago pendiente: '+esc(o.nota)+'</div>':"")+discPill(o)+(o.ticket?' <span class="pill mut">Ticket enviado</span>':'')+'</div><div class="side"><b class="num">'+usd(total(o))+'</b>'+side+'</div></div>';
   };
   var gs=groupOrders();
   $("t-list").innerHTML=gs.map(function(g){
@@ -405,7 +418,7 @@ function renderTablet(){
 }
 var pendingNew=null;
 function resetForm(){
-  draft={photo:null,svc:{}}; $("f-placa").value="";$("f-modelo").value="";$("f-tel").value="";$("f-nombre").value="";$("f-cli").textContent="";$("f-motivo").value="";$("f-desc").value="0";$("f-lav").value="";$("ph-ai").textContent="";autoPlaca="";autoModelo="";$("ph-in").value="";
+  draft={photo:null,svc:{}}; $("f-placa").value="";$("f-modelo").value="";$("f-tel").value="";$("f-nombre").value="";$("f-cli").textContent="";$("f-motivo").value="";$("f-desc").value="0";$("f-nota").value="";$("f-sinplaca").checked=false;$("f-placa").disabled=false;$("f-tipo").value="normal";$("f-desc").disabled=false;$("f-lav").value="";$("ph-ai").textContent="";autoPlaca="";autoModelo="";$("ph-in").value="";
   $("ph-prev").hidden=true; $("ph-txt").innerHTML='<b>1. Tomar foto de atrás, con la placa</b><br><span class="note">Toca aquí. La placa y el modelo se llenan solos. En este demo la foto es opcional.</span>';
   renderChips();
 }
@@ -416,17 +429,33 @@ function commitOrder(o){
   S.bridges.forEach(function(b){if(b.state==="alerta"&&b.plate===o.placa){b.state="ok";b.num=o.num;S.log.unshift({time:o.time,txt:"Puente "+b.n+": se registró la moto "+o.placa+" (#"+o.num+").",kind:"ok"})}});
   resetForm(); renderAll();
 }
-function addOrder(){
-  var placa=$("f-placa").value.trim().toUpperCase(), ids=S.services.filter(function(s){return draft.svc[s.id]}).map(function(s){return s.id});
-  var pct=+$("f-desc").value, motivo=$("f-motivo").value.trim(), e="", tel=normTel($("f-tel").value), nombre=$("f-nombre").value.trim(), lav=$("f-lav").value;
-  if(!placa)e="Escribe la placa.";
+function jpost(url,obj){return fetch(url,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(obj)}).then(function(r){return r.json().catch(function(){return{}}).then(function(j){return{ok:r.ok,j:j}})})}
+function authBody(o,motivo){return{tipo:o.tipo==="normal"?"descuento":o.tipo,pct:o.disc.pct,motivo:motivo,telefono:o.tel,cliente:o._nombre||cliName(o),placa:o.sin?"":o.placa,sinPlaca:!!o.sin,modelo:o.modelo,lavador:o.lav,servicios:o.svc.map(function(id){return{id:id,nombre:svc(id).name,precio:svc(id).price}})}}
+function addOrder(pend){
+  var sin=$("f-sinplaca").checked, placa=sin?"SIN PLACA":$("f-placa").value.trim().toUpperCase(), ids=S.services.filter(function(s){return draft.svc[s.id]}).map(function(s){return s.id});
+  var tipo=$("f-tipo").value, pct=tipo==="normal"?+$("f-desc").value:100, motivo=$("f-motivo").value.trim(), nota=$("f-nota").value.trim(), e="", tel=normTel($("f-tel").value), nombre=$("f-nombre").value.trim(), lav=$("f-lav").value;
+  if(!placa)e="Escribe la placa o marca que la moto no tiene.";
   else if(!/^0[24]\d{9}$/.test(tel))e="Escribe el teléfono del cliente (11 dígitos). Sin teléfono no se puede facturar.";
   else if(!ids.length)e="Marca al menos un servicio.";
   else if(!lav)e="Elige el lavador que la atiende.";
-  else if(pct&&!motivo)e="Escribe el motivo del descuento.";
+  else if(pct&&motivo.length<3)e="Escribe el motivo ("+(tipo==="garantia"?"qué quedó mal en el lavado":tipo==="autorizado"?"por qué se autoriza":"del descuento")+").";
+  else if(pend===true&&pct)e="El pago pendiente es solo para lavados normales y sin descuento.";
+  else if(pend===true&&nota.length<3)e="Escribe la nota que explica por qué el pago queda pendiente.";
   $("f-err").textContent=e; if(e)return;
-  var o={num:S.orders.length+1,time:hhmm(new Date()),placa:placa,modelo:$("f-modelo").value.trim(),photo:draft.photo||ph("#55606a"),svc:ids,lav:lav,tel:tel,_nombre:nombre,disc:pct?{pct:pct,motivo:motivo,status:"pending"}:null,pay:null,op:S.user};
-  if(pct){commitOrder(o);$("f-err").textContent="Moto #"+o.num+" en espera: se pidió autorización del descuento. Se cobra cuando respondan, antes de lavar.";return}
+  var o={num:S.orders.length+1,time:hhmm(new Date()),placa:placa,sin:sin,tipo:tipo,modelo:$("f-modelo").value.trim(),photo:draft.photo||ph("#55606a"),svc:ids,lav:lav,tel:tel,_nombre:nombre,disc:pct?{pct:pct,motivo:motivo,status:"pending"}:null,pay:null,op:S.user,nota:pend===true?nota:""};
+  if(pend===true){
+    if(!window.__yo){$("f-err").textContent="El pago pendiente solo funciona con sesión real.";return}
+    jpost("/api/ventas",{telefono:tel,cliente:nombre||"Sin nombre",placa:sin?"":placa,sinPlaca:sin,modelo:o.modelo,servicios:ids.map(function(id){return{id:id,nombre:svc(id).name,precio:svc(id).price}}),total:total(o),lavador:lav,estado:"pendiente",nota:nota}).then(function(r){
+      if(!r.ok){$("f-err").textContent=r.j.error||"No se pudo guardar en el servidor.";return}
+      o.srvId=r.j.id; commitOrder(o); o.num=r.j.num||o.num; renderAll(); $("f-err").textContent="Moto #"+o.num+" registrada con el pago pendiente. Ya puede pasar al puente; ciérrala con Cobrar cuando pague.";
+    });return}
+  if(pct){
+    if(!window.__yo){commitOrder(o);$("f-err").textContent="Moto #"+o.num+" en espera: se pidió autorización. Se cobra cuando respondan, antes de lavar.";return}
+    jpost("/api/autorizaciones",authBody(o,motivo)).then(function(r){
+      if(!r.ok){$("f-err").textContent=r.j.error||"No se pudo pedir la autorización.";return}
+      o.autId=r.j.id; commitOrder(o);
+      $("f-err").textContent=tipo==="normal"?"Moto #"+o.num+" en espera: se pidió autorización del descuento. Se cobra cuando respondan.":"Solicitud enviada ("+(tipo==="garantia"?"garantía":"lavado autorizado")+"). Cuando un dueño o administrador la apruebe, la moto queda registrada sin cobro.";
+    });return}
   pendingNew=o; openPayObj(o);
 }
 function openPay(n){openPayObj(S.orders.filter(function(o){return o.num===n})[0])}
@@ -469,7 +498,8 @@ function renderClientes(){
 }
 function saveSale(o,sigue){
   if(!window.__yo){sigue();return} var a=paidAmt(o);
-  fetch("/api/ventas",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({telefono:o.tel,cliente:cliName(o),placa:o.placa,modelo:o.modelo,servicios:o.svc.map(function(id){return{id:id,nombre:svc(id).name,precio:svc(id).price}}),total:total(o),descuento:o.disc&&o.disc.status==="approved"?o.disc.pct+"%":"",lavador:o.lav,metodo:o.pay.method,ref:o.pay.ref,moneda:a.cur,monto:a.val,tasa:o.pay.tasa})})
+  if(o.srvId){jpost("/api/ventas/cobrar",{id:o.srvId,metodo:o.pay.method,ref:o.pay.ref,moneda:a.cur,monto:a.val,tasa:o.pay.tasa}).then(function(r){if(!r.ok)$("f-err").textContent="Ojo: el cobro de la moto #"+o.num+" no se guardó en el servidor ("+(r.j.error||"error")+"). Avisa al dueño.";sigue(r.ok?o.num:null)}).catch(function(){$("f-err").textContent="Ojo: sin conexión, el cobro de la moto #"+o.num+" no se guardó.";sigue(null)});return}
+  fetch("/api/ventas",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({telefono:o.tel,cliente:cliName(o),placa:o.sin?"":o.placa,sinPlaca:!!o.sin,modelo:o.modelo,servicios:o.svc.map(function(id){return{id:id,nombre:svc(id).name,precio:svc(id).price}}),total:total(o),descuento:o.disc&&o.disc.status==="approved"?o.disc.pct+"%":"",lavador:o.lav,metodo:o.pay.method,ref:o.pay.ref,moneda:a.cur,monto:a.val,tasa:o.pay.tasa})})
   .then(function(r){return r.json().then(function(j){if(!r.ok)$("f-err").textContent="Ojo: la moto #"+o.num+" no se guardó en el servidor. Avisa al dueño.";sigue(r.ok?j.num:null)})}).catch(function(){$("f-err").textContent="Ojo: sin conexión, la moto #"+o.num+" no se guardó en el servidor.";sigue(null)});
 }
 var TASA_INFO=null;
@@ -482,13 +512,16 @@ function loadTasa(){
 function loadDia(){
   return fetch("/api/dia").then(function(r){return r.ok?r.json():null}).then(function(d){
     if(!d)return; var cols=["#2f3b46","#a8443c","#2b5f9e","#8a9aa5","#6b7780","#3f7a52"];
+    var loc=S.orders.filter(function(o){return !o.srvId&&!o.pay}), oldC=S.clients;
     S.orders=[];S.clients={};
     d.ventas.forEach(function(v,i){
       var ids=v.servicios.map(function(x){return x.id}).filter(function(id){return svc(id)}); if(!ids.length)return;
       var pct=parseFloat(v.descuento)||0;
       S.clients[v.telefono]={nombre:v.cliente||"Sin nombre",prev:(d.previas&&d.previas[v.telefono])||0};
-      S.orders.push({num:v.num,time:hhmm(new Date(v.fecha)),placa:v.placa,modelo:v.modelo,photo:ph(cols[i%cols.length]),svc:ids,lav:v.lavador,tel:v.telefono,disc:pct?{pct:pct,motivo:"",status:"approved"}:null,pay:{method:v.metodo,ref:v.ref,tasa:v.tasa||S.tasa,cur:v.moneda,val:v.monto},op:v.usuario,ticket:true,ejemplo:!!v.ejemplo});
+      S.orders.push({num:v.num,time:hhmm(new Date(v.fecha)),placa:v.placa,modelo:v.modelo,photo:ph(cols[i%cols.length]),svc:ids,lav:v.lavador,tel:v.telefono,disc:pct?{pct:pct,motivo:"",status:"approved"}:null,pay:v.estado==="pendiente"?null:{method:v.metodo,ref:v.ref,tasa:v.tasa||S.tasa,cur:v.moneda,val:v.monto},op:v.usuario,ticket:true,ejemplo:!!v.ejemplo,srvId:v.id,sin:!!v.sinPlaca,tipo:v.tipo||"normal",nota:v.nota||""});
+      if(v.sinPlaca)S.orders[S.orders.length-1].placa="SIN PLACA";
     });
+    loc.forEach(function(o){o.num=S.orders.length+1;if(!S.clients[o.tel])S.clients[o.tel]=oldC[o.tel]||{nombre:"Sin nombre",prev:0};S.orders.push(o)});
     S.gastos=d.gastos.map(function(g,i){return{id:i+1,time:"",desc:g.desc,monto:g.monto,real:g.monto,cat:"Otros",pago:g.pago,foto:ph("#6b7780"),factura:ph("#8a9aa5"),status:"done",op:g.usuario}});
     $("btn-ejborrar").hidden=!(d.hayEjemplo&&window.__yo&&window.__yo.rol==="dueno");
     renderAll();
@@ -555,11 +588,11 @@ function renderAdmin(){
   $("a-kpis").innerHTML=[
     [S.orders.length,"Motos atendidas"],[usd(ing),"Cobrado · "+bs(ing)],[usd(paid.length?ing/paid.length:0),"Promedio por moto"],[usd(porCobrar),unpaid.length+" por cobrar"]
   ].map(function(k){return '<div class="card kpi"><b class="num">'+k[0]+'</b><span>'+k[1]+'</span></div>'}).join("");
-  var pa=pendingAuth();
+  var pa=window.__yo?[]:pendingAuth();
   $("a-auth").innerHTML=pa.length?pa.map(function(o){
     var s=subtotal(o);
     return '<div class="auth"><img class="thumb" src="'+o.photo+'" alt=""><div><b>'+esc(o.op)+' pide '+o.disc.pct+'% de descuento</b><br>Moto #'+o.num+' · '+esc(o.placa)+' · '+esc(names(o))+'<br><span class="num">'+usd(s)+' → '+usd(s*(1-o.disc.pct/100))+'</span> · Motivo: '+esc(o.disc.motivo)+'</div><button class="btn sm" data-act="deny" data-n="'+o.num+'">Negar</button><button class="btn ok sm" data-act="approve" data-n="'+o.num+'">Autorizar</button></div>';
-  }).join(""):'<span class="pill ok">Sin solicitudes pendientes</span>';
+  }).join(""):(window.__yo?'<span class="note">Las solicitudes se responden en la pestaña Autorizaciones.</span>':'<span class="pill ok">Sin solicitudes pendientes</span>');
   var arow=function(o){
     var pago=o.pay?'<span class="pill ok">'+esc(o.pay.method)+(paidAmt(o).cur!=="$"?" · "+paidAmt(o).txt:"")+(o.pay.ref?" · "+esc(o.pay.ref):"")+'</span>':(o.disc&&o.disc.status==="pending"?'<span class="pill warn">Espera autorización</span>':'<span class="pill bad">Por cobrar</span>');
     var d=o.disc&&o.disc.status==="approved"?' <span class="pill mut">-'+o.disc.pct+'%</span>':"";
@@ -795,13 +828,39 @@ function readInvoice(g,u){
     return run.then(function(v){v=v||{};var t=parseFloat(v.total);g.ai={total:isFinite(t)?t:null,moneda:v.moneda==="Bs"?"Bs":"USD"};renderAll()});
   }).catch(function(){g.ai={total:null};renderAll()});
 }
+var AUTS=[];
+function autTxt(a){return a.tipo==="descuento"?a.pct+"% de descuento":a.tipo==="garantia"?"una garantía":"un lavado autorizado (sin cobro)"}
+function autInfo(a){return esc(a.sinPlaca?"SIN PLACA":a.placa)+" · "+esc(a.servicios.map(function(x){return x.nombre}).join(" + "))+" · "+usd(a.lista||0)+"<br>Cliente: "+esc(a.cliente||"Sin nombre")+" · Motivo: "+esc(a.motivo)}
+function renderAuts(){
+  var yo=window.__yo, pend=AUTS.filter(function(a){return a.estado==="pendiente"}), hist=AUTS.filter(function(a){return a.estado!=="pendiente"});
+  $("badge-a").hidden=!pend.length; $("badge-a").textContent=pend.length;
+  if(!yo){var lp=pendingAuth();$("z-pend").innerHTML=lp.length?lp.map(function(o){return '<div class="auth"><div><b>'+esc(o.op)+' pide '+o.disc.pct+'% de descuento</b><br>Moto #'+o.num+' · '+esc(o.placa)+'</div><button class="btn sm" data-act="deny" data-n="'+o.num+'">Negar</button><button class="btn ok sm" data-act="approve" data-n="'+o.num+'">Autorizar</button></div>'}).join(""):'<span class="pill ok">Sin solicitudes pendientes</span>';$("z-hist").innerHTML="";return}
+  $("z-pend").innerHTML='<div class="err" id="z-err">'+esc(AUTERR)+'</div>'+(pend.length?pend.map(function(a){return '<div class="auth"><div><b>'+esc(a.pidio)+' pide '+autTxt(a)+'</b> <span class="note">'+esc(hace(a.creada))+'</span><br>'+autInfo(a)+'</div><button class="btn sm" data-act="negar" data-aid="'+a.id+'">Negar</button><button class="btn ok sm" data-act="aprobar" data-aid="'+a.id+'">Autorizar</button></div>'}).join(""):'<span class="pill ok">Sin solicitudes pendientes</span>');
+  $("z-hist").innerHTML=hist.length?hist.map(function(a){return '<div class="row" style="justify-content:space-between;align-items:flex-start"><span><b>'+esc(a.pidio)+'</b> · '+autTxt(a)+' · '+autInfo(a)+'</span><span class="pill '+(a.estado==="aprobada"?"ok":"bad")+'" style="white-space:normal">'+(a.estado==="aprobada"?"Aprobada":"Negada")+' por '+esc(a.decidio||"")+'</span></div>'}).join(""):'<span class="note">Todavía no hay solicitudes respondidas.</span>';
+}
+var AUTERR="";
+function decidir(id,ok){AUTERR="";jpost("/api/autorizaciones/decidir",{id:id,aprobar:ok}).then(function(r){if(!r.ok)AUTERR=r.j.error||"No se pudo responder.";loadAuts()})}
+function loadAuts(){
+  if(!window.__yo)return;
+  fetch("/api/autorizaciones").then(function(r){return r.ok?r.json():[]}).then(function(l){
+    AUTS=l; var recargar=false, msg="";
+    S.orders.slice().forEach(function(o){
+      if(!o.autId)return; var a=l.filter(function(x){return x.id===o.autId})[0]; if(!a||a.estado==="pendiente")return;
+      if(a.tipo==="descuento"){ if(o.disc&&o.disc.status==="pending")o.disc.status=a.estado==="aprobada"?"approved":"rejected"; return }
+      S.orders=S.orders.filter(function(x){return x!==o});
+      if(a.estado==="aprobada")recargar=true; else msg="Solicitud de "+(a.tipo==="garantia"?"garantía":"lavado autorizado")+" de "+a.placa+" negada por "+a.decidio+(a.nota?": "+a.nota:".");
+    });
+    if(msg)$("f-err").textContent=msg;
+    if(recargar){loadDia();$("f-err").textContent="Autorización aprobada: la moto quedó registrada sin cobro."} else renderAll();
+  }).catch(function(){});
+}
 function renderAll(){
-  renderMeta();renderTablet();renderAdmin();renderGastos();renderMis();renderCom();renderVigilante();
+  renderMeta();renderTablet();renderAdmin();renderAuts();renderGastos();renderMis();renderCom();renderVigilante();
   if(!S.orders.length){$("a-rows").innerHTML='<tr><td colspan="9" class="note">Sin motos facturadas todavía.</td></tr>';$("a-svc").innerHTML='<span class="note">Sin ventas todavía.</span>'}
   if(!Object.keys(S.clients).length)$("a-cli").innerHTML='<tr><td colspan="5" class="note">Se llena sola con cada moto que factures.</td></tr>';
 }
 function isEnc(){return $("role").value==="enc"}
-function allowed(v){var y=window.__yo; if(y&&y.rol!=="dueno")return y.permisos.indexOf(v)>=0; return !(isEnc()&&(v==="admin"||v==="vigilante"||v==="clientes"))}
+function allowed(v){var y=window.__yo; if(y&&y.rol!=="dueno")return y.permisos.indexOf(v)>=0; return !(isEnc()&&(v==="admin"||v==="vigilante"||v==="clientes"||v==="autorizar"))}
 function applyRole(){
   VIEWS.forEach(function(x){$("tab-"+x).hidden=!allowed(x)});
   var cur=VIEWS.filter(function(x){return $("v-"+x).classList.contains("on")})[0]||"tablet"; go(cur);
@@ -820,6 +879,8 @@ document.addEventListener("click",function(ev){
   if(a==="go")go(t.dataset.v);
   else if(a==="chip"){draft.svc[t.dataset.id]=!draft.svc[t.dataset.id];t.setAttribute("aria-pressed",!!draft.svc[t.dataset.id]);draftTotal()}
   else if(a==="addpay")addOrder();
+  else if(a==="addpend")addOrder(true);
+  else if(a==="aprobar"||a==="negar")decidir(t.dataset.aid,a==="aprobar");
   else if(a==="pay")openPay(n);
   else if(a==="method"){payMethod=t.dataset.m;renderMethods()}
   else if(a==="confirmpay")confirmPay();
@@ -930,6 +991,8 @@ document.addEventListener("input",function(ev){
   else if(t.id==="a-tasa"){var x=parseFloat(t.value);if(x>0){S.tasa=x;draftTotal();renderAll()}}
 });
 $("c-buscar").addEventListener("input",renderClientes);
+$("f-sinplaca").addEventListener("change",function(){$("f-placa").disabled=this.checked;if(this.checked)$("f-placa").value=""});
+$("f-tipo").addEventListener("change",function(){$("f-desc").disabled=this.value!=="normal";if(this.value!=="normal")$("f-desc").value="0"});
 window.addEventListener("hashchange",function(){go(location.hash.slice(1))});
 
 (function seedDay(){
@@ -955,7 +1018,7 @@ if(location.protocol!=="file:"&&window.fetch){fetch("/api/yo").then(function(r){
   if(u.permisos.indexOf("usuarios")>=0)$("lnk-usuarios").hidden=false; if(u.rol==="dueno")$("lnk-wa").hidden=false; if(u.rol!=="dueno"){$("role").value="enc";$("role-lbl").style.display="none"}
   $("btn-reset").hidden=true; applyRole(); renderAll();
   loadTasa(); setInterval(loadTasa,30*60*1000);
-  loadDia().then(ejemploDesdeEnlace);
+  loadDia().then(ejemploDesdeEnlace); loadAuts(); setInterval(loadAuts,5000);
   if(u.permisos.indexOf("vigilante")>=0){loadCam();setInterval(loadCam,4000)}
 }).catch(function(){})}
  $("a-meta").value=S.meta; renderRules(); setInterval(function(){renderVigilante();renderMeta()},30000);

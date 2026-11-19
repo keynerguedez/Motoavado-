@@ -83,25 +83,91 @@ function guardarClientes(c) { const tmp = CLIENTES + '.tmp'; fs.writeFileSync(tm
 function limpio(v, max) { return String(v == null ? '' : v).replace(/[\r\n\t]+/g, ' ').trim().slice(0, max); }
 function dinero(v) { const n = Math.round(Number(v) * 100) / 100; return n >= 0 && n < 100000 ? n : null; }
 function fechaCaracas(d) { return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Caracas' }).format(d); }
-function registrarVenta(d, yo) {
+const TIPOS_LAVADO = ['normal', 'garantia', 'autorizado'];
+const ETIQUETA_TIPO = { garantia: 'Garantía', autorizado: 'Lavado autorizado' };
+function registrarVenta(d, yo, extra) {
+  extra = extra || {};
   const tel = String(d.telefono || '').replace(/\D/g, '');
   if (!/^0[24]\d{9}$/.test(tel)) return { error: 'Teléfono no válido.' };
-  const placa = limpio(d.placa, 14).toUpperCase().replace(/[^A-Z0-9]/g, ''); if (!placa) return { error: 'Falta la placa.' };
+  const sinPlaca = d.sinPlaca === true;
+  const placa = sinPlaca ? '' : limpio(d.placa, 14).toUpperCase().replace(/[^A-Z0-9]/g, ''); if (!placa && !sinPlaca) return { error: 'Falta la placa (o marca que no tiene).' };
   const servicios = (Array.isArray(d.servicios) ? d.servicios : []).slice(0, 12).map(x => ({ id: limpio(x.id, 10), nombre: limpio(x.nombre, 60), precio: dinero(x.precio) })).filter(x => x.nombre && x.precio != null);
   const total = dinero(d.total);
   if (!servicios.length || total == null) return { error: 'Venta incompleta.' };
+  // Tipo de lavado: garantía y autorizado solo los crea el servidor al aprobarse una autorización.
+  const tipo = extra.tipo || 'normal';
+  const pendiente = !extra.tipo && d.estado === 'pendiente';
+  const nota = limpio(d.nota, 200);
+  if (pendiente && nota.length < 3) return { error: 'Escribe una nota que explique por qué el pago queda pendiente.' };
   const ahora = new Date(), dia = fechaCaracas(ahora), archivo = path.join(DATA, 'ventas-' + dia.slice(0, 7) + '.jsonl');
   let delDia = 0; try { delDia = fs.readFileSync(archivo, 'utf8').split('\n').filter(l => l.includes('"dia":"' + dia + '"')).length; } catch (e) {}
-  const v = { id: crypto.randomBytes(6).toString('hex'), num: delDia + 1, dia, fecha: ahora.toISOString(), usuario: yo.nombre, usuarioId: yo.id, telefono: tel, cliente: limpio(d.cliente, 60), placa, modelo: limpio(d.modelo, 60),
-    servicios, total, descuento: limpio(d.descuento, 10), lavador: limpio(d.lavador, 40), metodo: limpio(d.metodo, 20), ref: limpio(d.ref, 30), moneda: limpio(d.moneda, 6), monto: dinero(d.monto), tasa: Number(d.tasa) > 0 ? Number(d.tasa) : null };
+  const v = { id: crypto.randomBytes(6).toString('hex'), num: delDia + 1, dia, fecha: ahora.toISOString(), usuario: yo.nombre, usuarioId: yo.id, telefono: tel, cliente: limpio(d.cliente, 60), placa, sinPlaca, modelo: limpio(d.modelo, 60),
+    servicios, total, descuento: limpio(d.descuento, 10), lavador: limpio(d.lavador, 40), metodo: limpio(d.metodo, 20), ref: limpio(d.ref, 30), moneda: limpio(d.moneda, 6), monto: dinero(d.monto), tasa: Number(d.tasa) > 0 ? Number(d.tasa) : null,
+    estado: pendiente ? 'pendiente' : 'pagada', tipo };
+  if (nota) v.nota = nota;
+  if (extra.autId) { v.autId = extra.autId; v.metodo = ETIQUETA_TIPO[tipo] || tipo; v.descuento = '100%'; v.monto = 0; }
   fs.appendFileSync(archivo, JSON.stringify(v) + '\n', { mode: 0o600 });
   const cs = leerClientes(), c = cs[tel] || { telefono: tel, nombre: '', motos: [], visitas: 0, gastado: 0, primera: v.fecha };
   if (v.cliente && v.cliente !== 'Sin nombre') c.nombre = v.cliente;
-  const m = c.motos.find(x => String(x.placa).replace(/[^A-Z0-9]/g, '') === placa); if (m) m.placa = placa;
-  if (m) { m.ultima = v.fecha; m.visitas = (m.visitas || 1) + 1; if (v.modelo) m.modelo = v.modelo; } else c.motos.push({ placa, modelo: v.modelo, ultima: v.fecha, visitas: 1 });
+  if (placa) {
+    const m = c.motos.find(x => String(x.placa).replace(/[^A-Z0-9]/g, '') === placa); if (m) m.placa = placa;
+    if (m) { m.ultima = v.fecha; m.visitas = (m.visitas || 1) + 1; if (v.modelo) m.modelo = v.modelo; } else c.motos.push({ placa, modelo: v.modelo, ultima: v.fecha, visitas: 1 });
+  }
   c.visitas++; c.gastado = Math.round((c.gastado + total) * 100) / 100; c.ultima = v.fecha; c.ultimoServicio = servicios.map(x => x.nombre).join(' + ');
   cs[tel] = c; guardarClientes(cs);
   return { ok: true, id: v.id, num: v.num };
+}
+// Cierra una factura que quedó con el pago pendiente.
+function cobrarPendiente(d, yo) {
+  const id = limpio(d.id, 20), hoy = fechaCaracas(new Date());
+  for (const archivo of archivosVentas()) {
+    const filas = leerLineas(archivo), v = filas.find(x => x.id === id);
+    if (!v) continue;
+    if (v.estado !== 'pendiente') return { error: 'Esa factura ya está cobrada.' };
+    if (!limpio(d.metodo, 20)) return { error: 'Falta el método de pago.' };
+    Object.assign(v, { estado: 'pagada', metodo: limpio(d.metodo, 20), ref: limpio(d.ref, 30), moneda: limpio(d.moneda, 6), monto: dinero(d.monto), tasa: Number(d.tasa) > 0 ? Number(d.tasa) : null, cobradaPor: yo.nombre, cobradaFecha: new Date().toISOString(), cobradaDia: hoy });
+    escribirLineas(archivo, filas);
+    return { ok: true, id: v.id, num: v.num };
+  }
+  return { error: 'No se encontró la factura.' };
+}
+
+// ---------- autorizaciones (descuentos, garantías y lavados autorizados) ----------
+const AUTS = path.join(DATA, 'autorizaciones.json');
+function leerAuts() { try { return JSON.parse(fs.readFileSync(AUTS, 'utf8')); } catch (e) { return []; } }
+function guardarAuts(l) { const tmp = AUTS + '.tmp'; fs.writeFileSync(tmp, JSON.stringify(l), { mode: 0o600 }); fs.renameSync(tmp, AUTS); }
+function pedirAut(d, yo) {
+  const tipo = ['descuento', 'garantia', 'autorizado'].includes(d.tipo) ? d.tipo : null;
+  if (!tipo) return { error: 'Tipo de autorización no válido.' };
+  const motivo = limpio(d.motivo, 200); if (motivo.length < 3) return { error: 'Escribe el motivo.' };
+  const tel = String(d.telefono || '').replace(/\D/g, ''); if (!/^0[24]\d{9}$/.test(tel)) return { error: 'Teléfono no válido.' };
+  const sinPlaca = d.sinPlaca === true, placa = sinPlaca ? '' : limpio(d.placa, 14).toUpperCase().replace(/[^A-Z0-9]/g, ''); if (!placa && !sinPlaca) return { error: 'Falta la placa.' };
+  const servicios = (Array.isArray(d.servicios) ? d.servicios : []).slice(0, 12).map(x => ({ id: limpio(x.id, 10), nombre: limpio(x.nombre, 60), precio: dinero(x.precio) })).filter(x => x.nombre && x.precio != null);
+  if (!servicios.length) return { error: 'Faltan los servicios.' };
+  const pct = tipo === 'descuento' ? Number(d.pct) : 100; if (!(pct > 0 && pct <= 100)) return { error: 'Porcentaje no válido.' };
+  const a = { id: crypto.randomBytes(6).toString('hex'), tipo, estado: 'pendiente', creada: new Date().toISOString(), dia: fechaCaracas(new Date()), pidio: yo.nombre, pidioId: yo.id, placa, sinPlaca, modelo: limpio(d.modelo, 60), telefono: tel, cliente: limpio(d.cliente, 60), lavador: limpio(d.lavador, 40),
+    servicios, lista: dinero(servicios.reduce((x, y) => x + y.precio, 0)), pct, motivo };
+  const l = leerAuts(); l.push(a); guardarAuts(l);
+  return { ok: true, id: a.id };
+}
+function decidirAut(d, yo) {
+  const l = leerAuts(), a = l.find(x => x.id === limpio(d.id, 20));
+  if (!a) return { error: 'No se encontró la solicitud.' };
+  if (a.estado !== 'pendiente') return { error: 'Esa solicitud ya fue respondida.' };
+  if (a.pidioId === yo.id && yo.rol !== 'dueno') return { error: 'No puedes autorizar tu propia solicitud.' };
+  const aprobar = d.aprobar === true;
+  if (aprobar && a.tipo !== 'descuento') {
+    const r = registrarVenta({ telefono: a.telefono, cliente: a.cliente, placa: a.placa, sinPlaca: a.sinPlaca, modelo: a.modelo, servicios: a.servicios, total: 0, lavador: a.lavador }, { nombre: a.pidio, id: a.pidioId }, { tipo: a.tipo, autId: a.id });
+    if (r.error) return r;
+    a.ventaId = r.id; a.num = r.num;
+  }
+  Object.assign(a, { estado: aprobar ? 'aprobada' : 'negada', decidio: yo.nombre, decidioId: yo.id, decidida: new Date().toISOString(), nota: limpio(d.nota, 200) });
+  guardarAuts(l);
+  return { ok: true, estado: a.estado };
+}
+function listarAuts(yo, todas) {
+  const desde = Date.now() - 4 * 864e5;
+  return leerAuts().filter(a => (a.estado === 'pendiente' || Date.parse(a.creada) > desde) && (todas || a.pidioId === yo.id)).sort((a, b) => b.creada.localeCompare(a.creada));
 }
 // Cliente frecuente: ya vino más de 3 veces.
 const FRECUENTE_DESDE = 3;
@@ -280,6 +346,7 @@ async function api(req, res, ruta) {
     }
     if (ruta === '/api/waqr') return yo && yo.rol === 'dueno' ? json(res, 200, waqr ? waqr.publico() : { estado: 'error', error: 'No disponible en este servidor.' }) : json(res, 403, { error: 'Solo el dueño.' });
     if (ruta === '/api/whatsapp') return yo && yo.rol === 'dueno' ? json(res, 200, waPublico(waLeer())) : json(res, 403, { error: 'Solo el dueño.' });
+    if (ruta === '/api/autorizaciones') { if (!yo) return json(res, 401, { error: 'Sin sesión.' }); return json(res, 200, listarAuts(yo, puede(yo, 'autorizar') && !/[?&]mias=1/.test(req.url))); }
     if (ruta === '/api/usuarios') return puede(yo, 'usuarios') ? json(res, 200, leerUsuarios().map(publico)) : json(res, 403, { error: 'No tienes permiso.' });
     if (ruta === '/api/camara') return puede(yo, 'vigilante') ? json(res, 200, camara.publico()) : json(res, 403, { error: 'No tienes permiso.' });
     if (ruta === '/api/camara/vista') {
@@ -332,6 +399,21 @@ async function api(req, res, ruta) {
   if (ruta === '/api/ventas') {
     if (!puede(yo, 'tablet')) return json(res, 403, { error: 'No tienes permiso.' });
     const r = registrarVenta(d, yo);
+    return json(res, r.error ? 400 : 200, r);
+  }
+  if (ruta === '/api/ventas/cobrar') {
+    if (!puede(yo, 'tablet')) return json(res, 403, { error: 'No tienes permiso.' });
+    const r = cobrarPendiente(d, yo);
+    return json(res, r.error ? 400 : 200, r);
+  }
+  if (ruta === '/api/autorizaciones') {
+    if (!puede(yo, 'tablet')) return json(res, 403, { error: 'No tienes permiso.' });
+    const r = pedirAut(d, yo);
+    return json(res, r.error ? 400 : 200, r);
+  }
+  if (ruta === '/api/autorizaciones/decidir') {
+    if (!puede(yo, 'autorizar')) return json(res, 403, { error: 'No tienes permiso para autorizar.' });
+    const r = decidirAut(d, yo);
     return json(res, r.error ? 400 : 200, r);
   }
   if (ruta === '/api/ticket') {

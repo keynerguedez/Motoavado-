@@ -132,6 +132,29 @@ function cobrarPendiente(d, yo) {
   return { error: 'No se encontró la factura.' };
 }
 
+// Pone o corrige la placa de una factura (la corrige el dueño, o la completa la cámara en una factura "sin placa"). Actualiza también la ficha del cliente.
+function corregirPlaca(id, placaNueva, quien, soloSiVacia) {
+  const placa = String(placaNueva || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  if (!/^[A-Z0-9]{5,8}$/.test(placa)) return { error: 'La placa debe tener de 5 a 8 letras y números.' };
+  for (const archivo of archivosVentas()) {
+    const filas = leerLineas(archivo), v = filas.find(x => x.id === String(id));
+    if (!v) continue;
+    if (soloSiVacia && v.placa) return { error: 'La factura ya tiene placa.' };
+    const antes = v.placa || '';
+    if (antes === placa) return { ok: true, placa };
+    v.placaAnterior = antes; v.placa = placa; v.sinPlaca = false; v.placaPor = quien;
+    escribirLineas(archivo, filas);
+    const cs = leerClientes(), c = cs[v.telefono];
+    if (c) {
+      if (antes) { const i = c.motos.findIndex(m => String(m.placa).replace(/[^A-Z0-9]/g, '') === antes); if (i >= 0 && (c.motos[i].visitas || 1) <= 1) c.motos.splice(i, 1); }
+      if (!c.motos.some(m => String(m.placa).replace(/[^A-Z0-9]/g, '') === placa)) c.motos.push({ placa, modelo: v.modelo, ultima: v.fecha, visitas: 1 });
+      guardarClientes(cs);
+    }
+    return { ok: true, placa };
+  }
+  return { error: 'No se encontró la factura.' };
+}
+
 // ---------- autorizaciones (descuentos, garantías y lavados autorizados) ----------
 const AUTS = path.join(DATA, 'autorizaciones.json');
 function leerAuts() { try { return JSON.parse(fs.readFileSync(AUTS, 'utf8')); } catch (e) { return []; } }
@@ -420,6 +443,11 @@ async function api(req, res, ruta) {
     const r = registrarVenta(d, yo);
     return json(res, r.error ? 400 : 200, r);
   }
+  if (ruta === '/api/ventas/placa') {
+    if (yo.rol !== 'dueno') return json(res, 403, { error: 'Solo el dueño puede corregir la placa.' });
+    const r = corregirPlaca(d.id, d.placa, yo.nombre, false);
+    return json(res, r.error ? 400 : 200, r);
+  }
   if (ruta === '/api/ventas/cobrar') {
     if (!puede(yo, 'tablet')) return json(res, 403, { error: 'No tienes permiso.' });
     const r = cobrarPendiente(d, yo);
@@ -525,7 +553,7 @@ async function api(req, res, ruta) {
   return json(res, 404, { error: 'No encontrado.' });
 }
 
-const camara = require('./camara').crear({ DATA, json, fechaCaracas, ventasDeHoy: () => diaDeHoy().ventas });
+const camara = require('./camara').crear({ DATA, json, fechaCaracas, ventasDeHoy: () => diaDeHoy().ventas, completarPlaca: (id, placa) => !corregirPlaca(id, placa, 'cámara', true).error });
 // FTP para las fotos 4K de la cámara. Solo arranca si hay clave en vault/.env (CAMARA_FTP_CLAVE); no lleva nada más: la carpeta es propia y solo acepta subir .jpg.
 // CAMARA_FTP_USUARIO (por defecto "camara"), CAMARA_FTP_PUERTO (2121), CAMARA_FTP_PASIVO ("30000-30009"), CAMARA_FTP_IP (IP pública del servidor; si falta se usa la de la conexión).
 // Solo para pruebas locales: con CAMARA_PRUEBA=1 y sin clave acepta usuario anónimo.

@@ -273,7 +273,13 @@ function crear(ctx) {
   }
   function evaluar(p) {
     if (p.estado === 'libre') return;
-    let v = registrada(p.placa) || (p.cruceId && ctx.ventasDeHoy().find(x => x.id === p.cruceId)) || null, aprox = false;
+    // Moto enlazada a una factura "sin placa" (por la foto o por el orden): si la cámara lee la placa completa y confirmada, la factura la toma.
+    const vid = p.sinPlacaId || p.cruceId;
+    if (vid && p.placa && p.confirmada && ctx.completarPlaca) {
+      const vs = ctx.ventasDeHoy().find(x => x.id === vid);
+      if (vs && vs.sinPlaca && !vs.placa && ctx.completarPlaca(vs.id, p.placa)) avisar('info', nombre(p.n) + ': la factura #' + vs.num + ' no tenía placa; la cámara leyó ' + p.placa + ' y se la completó.');
+    }
+    let v = registrada(p.placa) || (vid && ctx.ventasDeHoy().find(x => x.id === vid)) || null, aprox = false;
     if (!v && !p.placa && p.parcial) { v = registradaParcial(p.parcial); aprox = !!v; }
     if (v) {
       if (p.estado !== 'ok') avisar('ok', nombre(p.n) + ': ' + (aprox ? 'la lectura parcial ' + p.parcial + ' coincide con la moto ' + limpiarPlaca(v.placa) : 'se registró la moto ' + p.placa) + ' (#' + v.num + ').');

@@ -40,6 +40,17 @@ function crear(ctx) {
     while (H.length > MAX_HIST) { const v = H.shift(); try { fs.unlinkSync(path.join(HFOTOS, v.id + '.jpg')); } catch (e) {} }
     p.hid = id; hSucio = true; hFoto(p, jpeg);
   }
+  // Si la moto de un puente desaparece y vuelve a verse en menos de 10 minutos, es la misma: se reabre su fila y su reloj (no empieza otra).
+  const MISMA_MOTO_MS = 10 * 60e3;
+  function hAbrir(p, jpeg) {
+    let ult = null; for (let i = H.length - 1; i >= 0; i--) if (H[i].puente === p.n) { ult = H[i]; break; }
+    if (ult && ult.salida && Date.now() - Date.parse(ult.salida) < MISMA_MOTO_MS && ult.dia === ctx.fechaCaracas(new Date())) {
+      ult.salida = null; hSucio = true; p.hid = ult.id;
+      p.desde = ult.llegada; p.placa = ult.placa || ''; p.parcial = ult.parcial || ''; if (ult.sinPlaca) { /* se vuelve a emparejar solo */ }
+      hFoto(p, jpeg); return true;
+    }
+    hNuevo(p, jpeg); return false;
+  }
   function hFoto(p, jpeg) { if (p.hid && jpeg) try { fs.writeFileSync(path.join(HFOTOS, p.hid + '.jpg'), jpeg, { mode: 0o600 }); } catch (e) {} }
   function hSync() {
     S.puentes.forEach(p => {
@@ -49,7 +60,7 @@ function crear(ctx) {
         hNuevo(p, f); const e0 = H[H.length - 1]; if (p.desde) { e0.llegada = p.desde; e0.dia = ctx.fechaCaracas(new Date(p.desde)); }
       }
       if (!p.hid) return; const e = H.find(x => x.id === p.hid); if (!e) return;
-      const nuevo = { placa: p.placa || '', parcial: p.parcial || '', motivo: p.motivo || '', estado: p.estado === 'libre' ? e.estado : p.estado, num: p.num == null ? null : p.num, aprox: p.aprox || '', sinPlaca: !!p.sinPlacaId };
+      const nuevo = { placa: p.placa || e.placa || '', parcial: p.placa ? '' : (p.parcial || e.parcial || ''), motivo: p.motivo || '', estado: p.estado === 'libre' ? e.estado : p.estado, num: p.num == null ? null : p.num, aprox: p.aprox || '', sinPlaca: !!p.sinPlacaId };
       if (Object.keys(nuevo).some(k => (e[k] == null ? '' : e[k]) !== (nuevo[k] == null ? '' : nuevo[k]))) { Object.assign(e, nuevo); hSucio = true; }
     });
     hGuardar();
@@ -193,7 +204,7 @@ function crear(ctx) {
     const llegada = (r, origen) => {
       Object.assign(p, { estado: 'esperando', desde: ahora, placa: '', parcial: '', intentos: 1, leidoT: Date.now(), sinMoto: 0, origen }); delete p.num; delete p.alertado; delete p.motivo; delete p.aprox; delete p.sinPlacaId;
       S.vistas++; avisar('info', 'Puente ' + n + (origen === 'revision' ? ': se encontró una moto ya montada.' : ': llegó una moto.'));
-      hNuevo(p, jpeg);
+      hAbrir(p, jpeg);
       guardarLectura(p, r);
       guardarFoto();
     };

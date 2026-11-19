@@ -43,6 +43,7 @@ function crear(ctx) {
     p.hid = id; hSucio = true; hFoto(p, jpeg);
   }
   // Si la moto de un puente desaparece y vuelve a verse en menos de 10 minutos, es la misma: se reabre su fila y su reloj (no empieza otra).
+  const RELEER_MS = 5 * 60e3;
   const MISMA_MOTO_MS = 10 * 60e3;
   function hAbrir(p, jpeg) {
     let ult = null; for (let i = H.length - 1; i >= 0; i--) if (H[i].puente === p.n) { ult = H[i]; break; }
@@ -105,7 +106,26 @@ function crear(ctx) {
 
   // ---------- lectura de la imagen: ¿hay moto? ¿qué placa? ----------
   // moto: true/false lo dice el modelo; null = no se pudo saber (sin clave o error), y entonces se confía en el agente.
-  const leer = (jpeg, modelo) => (ctx.leerPlaca || leerPlaca)(jpeg, modelo);
+  // Una placa completa del modelo bueno solo se acepta si una segunda lectura de la misma foto da exactamente lo mismo;
+  // si no coinciden se guarda como lectura parcial (los caracteres iguales y "?" en los que difieren). Evita placas inventadas.
+  function confirmar(r, r2) {
+    if (r2 && r2.placa === r.placa) return r;
+    let parcial = '';
+    if (r2 && r2.placa && r2.placa.length === r.placa.length) parcial = limpiarParcial([...r.placa].map((c, i) => c === r2.placa[i] ? c : '?').join(''));
+    return { moto: r.moto, placa: '', parcial, motivo: parcial ? 'parcial' : 'ilegible' };
+  }
+  const leer = async (jpeg, modelo) => {
+    const f = ctx.leerPlaca || leerPlaca, r = await f(jpeg, modelo);
+    if (modelo || !r || !r.placa) return r;
+    return confirmar(r, await f(jpeg, modelo));
+  };
+  // ¿Esta placa completa encaja con la placa (o lectura parcial) que ya tiene el puente?
+  function encajaPuente(pl, p) {
+    if (p.placa) return pl === p.placa;
+    if (!p.parcial) return true;
+    const nucleo = p.parcial.replace(/\?+$/, ''), abierta = nucleo.length < p.parcial.length;
+    return (abierta ? pl.length >= nucleo.length : pl.length === nucleo.length) && [...nucleo].every((c, i) => c === '?' || c === pl[i]);
+  }
   function limpiarPlaca(v) { return String(v || '').toUpperCase().replace(/[^A-Z0-9]/g, ''); }
   // Lectura parcial: lo que el modelo sí ve, con "?" en cada carácter que no distingue (p. ej. "AB1C??").
   // Solo se acepta con 5 a 8 caracteres y al menos 4 conocidos; si no, no sirve para identificar nada.
@@ -203,10 +223,10 @@ function crear(ctx) {
       guardar(); return { ok: true };
     }
     const guardarFoto = () => { p.visto = ahora; hFoto(p, jpeg); try { fs.writeFileSync(path.join(FOTOS, 'camara-puente-' + n + '.jpg'), jpeg, { mode: 0o600 }); } catch (e) {} };
-    const llegada = (r, origen) => {
-      Object.assign(p, { estado: 'esperando', desde: ahora, placa: '', parcial: '', intentos: 1, leidoT: Date.now(), sinMoto: 0, origen }); delete p.num; delete p.alertado; delete p.motivo; delete p.aprox; delete p.sinPlacaId;
+    const llegada = (r, origen, nueva) => {
+      Object.assign(p, { estado: 'esperando', desde: ahora, placa: '', parcial: '', intentos: 1, leidoT: Date.now(), relT: Date.now(), sinMoto: 0, origen }); delete p.num; delete p.alertado; delete p.motivo; delete p.aprox; delete p.sinPlacaId;
       S.vistas++; avisar('info', nombre(n) + (origen === 'revision' ? ': se encontró una moto ya montada.' : ': llegó una moto.'));
-      hAbrir(p, jpeg);
+      if (nueva) hNuevo(p, jpeg); else hAbrir(p, jpeg);
       guardarLectura(p, r);
       guardarFoto();
     };
@@ -232,6 +252,18 @@ function crear(ctx) {
       p.rev = { t: ahora, h: rapida.moto, s: conf ? conf.moto : null };
       if (sinMoto) { p.sinMoto = (p.sinMoto || 0) + 1; p.rev.n = p.sinMoto; if (p.sinMoto >= 2) return libera(); }
       else if (hayMoto) { p.sinMoto = 0; p.rev.n = 0; guardarFoto(); }
+      // Cada 5 minutos con la moto en el puente se vuelve a leer la placa: si sale una placa completa que no encaja con la guardada, es otra moto (la anterior se fue sin que el puente quedara vacío).
+      if (hayMoto && (p.placa || p.parcial) && Date.now() - (p.relT || 0) >= RELEER_MS) {
+        p.relT = Date.now();
+        const r = await leer(jpeg);
+        if (r.moto === true && r.placa && !encajaPuente(r.placa, p)) {
+          avisar('info', nombre(n) + ': otra moto en el puente (placa ' + r.placa + ', antes ' + (p.placa || p.parcial) + ').');
+          hSalida(p); S.vistas = Math.max(0, S.vistas - 1);
+          llegada(r, 'revision', true); evaluar(p); guardar();
+          return { ok: true, estado: p.estado, placa: p.placa || null, revision: 'moto-nueva' };
+        }
+        if (r.moto === true && r.placa && !p.placa) guardarLectura(p, r);
+      }
       // Mientras siga sin placa completa, la revisión también sirve de intento de lectura.
       if (!p.placa && p.intentos < MAX_LECTURAS_LENTAS && rapida.moto !== false) { p.intentos++; p.leidoT = Date.now(); guardarLectura(p, await leer(jpeg)); guardarFoto(); }
       evaluar(p); guardar();

@@ -14,6 +14,7 @@ const crypto = require('crypto');
 const PUENTES = 5;            // 1 a 4: los puentes. 5: la zona extra, a la izquierda del puente 1, para motos que se lavan fuera del puente
 const EXTRA = 5;
 const nombre = n => n === EXTRA ? 'Zona fuera del puente' : 'Puente ' + n;
+const ESPERA_BAJADA_MIN = 15;   // minutos que tiene una moto que ya bajó para que la facturen (el cliente puede pagar al terminar) antes de la alerta
 const MIN_GRACIA = 5;           // minutos que se le da a una moto montada para que la registren antes de alertar
 const MAX_FOTO = 3 * 1024 * 1024;
 const MAX_REINTENTOS_LECTURA = 3;   // lecturas seguidas al llegar la moto (el agente reenvía a los 8 y 20 s)
@@ -67,16 +68,44 @@ function crear(ctx) {
       const nuevo = { placa: p.placa || e.placa || '', parcial: p.placa ? '' : (p.parcial || e.parcial || ''), motivo: p.motivo || '', estado: p.estado === 'libre' ? e.estado : p.estado, num: p.num == null ? null : p.num, aprox: p.aprox || '', sinPlaca: !!p.sinPlacaId };
       if (Object.keys(nuevo).some(k => (e[k] == null ? '' : e[k]) !== (nuevo[k] == null ? '' : nuevo[k]))) { Object.assign(e, nuevo); hSucio = true; }
     });
+    try { hTarde(); } catch (e) {}
     hGuardar();
   }
-  function hSalida(p) { const e = p && p.hid && H.find(x => x.id === p.hid); if (e && !e.salida) { e.salida = new Date().toISOString(); hSucio = true; } }
+  // Al bajar una moto sin factura (que estuvo montada más de MIN_GRACIA minutos) no hay alerta todavía: queda "esperando factura" ESPERA_BAJADA_MIN minutos.
+  function hSalida(p) {
+    const e = p && p.hid && H.find(x => x.id === p.hid); if (!e || e.salida) return;
+    e.salida = new Date().toISOString(); hSucio = true;
+    if ((p.estado === 'esperando' || p.estado === 'lavando') && (Date.now() - new Date(p.desde || e.llegada).getTime()) / 60000 >= MIN_GRACIA) e.estado = 'espera';
+  }
+  // Venta de hoy que corresponde a una fila del historial (misma placa, lectura parcial compatible o factura "sin placa"), hecha después de su llegada.
+  function ventaDeFila(e, vs, usadas) {
+    const desde = vs.filter(x => String(x.fecha || '') >= e.llegada && !usadas.has(x.num));
+    if (e.placa) return desde.find(x => limpiarPlaca(x.placa) === limpiarPlaca(e.placa)) || null;
+    if (e.parcial) { const m = desde.filter(x => coincideParcial(e.parcial, limpiarPlaca(x.placa))); return m.length === 1 ? m[0] : null; }
+    return desde.find(x => x.sinPlaca) || null;
+  }
+  // Una moto que bajó sin factura y se factura después queda "facturada después"; si pasan ESPERA_BAJADA_MIN minutos sin factura, salta la alerta.
+  function hTarde() {
+    const hoy = ctx.fechaCaracas(new Date()); let vs = null, usadas = null;
+    H.forEach(e => {
+      if (e.dia !== hoy || !e.salida || (e.estado !== 'alerta' && e.estado !== 'espera')) return;
+      vs = vs || ctx.ventasDeHoy(); usadas = usadas || new Set(H.filter(x => x.dia === hoy && x.num != null).map(x => x.num));
+      const v = ventaDeFila(e, vs, usadas);
+      if (v) { e.estado = 'tarde'; e.num = v.num; usadas.add(v.num); hSucio = true; return; }
+      if (e.estado === 'espera' && Date.now() - Date.parse(e.salida) >= ESPERA_BAJADA_MIN * 60e3) {
+        e.estado = 'alerta'; hSucio = true;
+        avisar('bad', nombre(e.puente) + ': la moto ' + (e.placa || e.parcial || 'sin placa legible') + ' bajó hace ' + ESPERA_BAJADA_MIN + ' min y no tiene factura.');
+      }
+    });
+  }
   function historial(dia) {
+    try { hTarde(); hGuardar(); } catch (e) {}
     const hoy = ctx.fechaCaracas(new Date()), d = /^\d{4}-\d{2}-\d{2}$/.test(dia || '') ? dia : hoy;
     const items = H.filter(e => e.dia === d).slice().reverse();
-    const r = { total: items.length, completa: 0, parcial: 0, ilegible: 0, verificadas: 0, sinFactura: 0, esperando: 0, conReal: 0, aciertos: 0 };
+    const r = { total: items.length, completa: 0, parcial: 0, ilegible: 0, verificadas: 0, sinFactura: 0, tarde: 0, espera: 0, esperando: 0, conReal: 0, aciertos: 0 };
     items.forEach(e => {
       if (e.placa) r.completa++; else if (e.parcial) r.parcial++; else r.ilegible++;
-      if (e.estado === 'ok') r.verificadas++; else if (e.estado === 'alerta') r.sinFactura++; else r.esperando++;
+      if (e.estado === 'ok') r.verificadas++; else if (e.estado === 'alerta') r.sinFactura++; else if (e.estado === 'tarde') r.tarde++; else if (e.estado === 'espera') r.espera++; else r.esperando++;
       if (e.real) { r.conReal++; const real = limpiarPlaca(e.real); if (real && (limpiarPlaca(e.placa) === real || (e.parcial && coincideParcial(e.parcial, real)))) r.aciertos++; }
     });
     return { dia: d, hoy, resumen: r, items: items.slice(0, 200).map(e => Object.assign({}, e, { foto: '/api/camara/hist/' + e.id + '.jpg' })) };
@@ -205,7 +234,7 @@ function crear(ctx) {
     try { fs.mkdirSync(path.join(FOTOS, 'venta'), { recursive: true }); fs.writeFileSync(path.join(FOTOS, 'venta', v.id + '.jpg'), jpeg, { mode: 0o600 }); } catch (e) {}
     const ya = S.puentes.find(p => p.estado === 'ok' && (p.cruceId === v.id || (p.num === v.num && v.placa && p.placa === v.placa)));
     if (ya) return { puente: ya.n, misma: true, por: ya.cruceId === v.id ? 'foto' : 'placa' };
-    const cands = S.puentes.filter(p => (p.estado === 'esperando' || p.estado === 'alerta') && !p.cruceId);
+    const cands = S.puentes.filter(p => (p.estado === 'esperando' || p.estado === 'lavando' || p.estado === 'alerta') && !p.cruceId);
     if (!cands.length) { pendiente(v); return { puente: null, pendiente: true }; }
     const res = await Promise.all(cands.map(async p => { const f = fotoPuente(p.n); return f ? { p, r: await comparar(jpeg, f) } : null; }));
     const si = res.filter(x => x && buena(x.r)).sort((a, b) => (b.r.confianza === 'alta') - (a.r.confianza === 'alta'));
@@ -257,7 +286,8 @@ function crear(ctx) {
       if (sp) { if (p.estado !== 'ok') avisar('ok', nombre(p.n) + ': moto sin placa legible, coincide con la factura sin placa #' + sp.num + '.'); p.estado = 'ok'; p.num = sp.num; p.sinPlacaId = sp.id; return; }
     }
     const min = (Date.now() - new Date(p.desde).getTime()) / 60000;
-    if (min >= MIN_GRACIA && p.estado !== 'alerta') { p.estado = 'alerta'; p.alertado = true; avisar('bad', nombre(p.n) + ': moto sin factura' + (p.placa ? '. Placa leída ' + p.placa + '.' : p.parcial ? '. Placa leída en parte: ' + p.parcial + '.' : '. Placa no legible.')); }
+    // El cliente puede pagar al terminar: mientras la moto sigue montada solo se marca "en lavado, sin factura"; la alerta salta si baja y pasan ESPERA_BAJADA_MIN minutos sin factura.
+    if (min >= MIN_GRACIA && p.estado === 'esperando') { p.estado = 'lavando'; avisar('info', nombre(p.n) + ': moto en lavado sin factura todavía' + (p.placa ? ' (' + p.placa + ')' : p.parcial ? ' (' + p.parcial + ')' : '') + '. Si baja sin factura saltará la alerta.'); }
   }
   // Guarda lo que leyó el modelo: placa completa, o la lectura parcial con más caracteres conocidos.
   function guardarLectura(p, r) {
@@ -329,7 +359,7 @@ function crear(ctx) {
           if (p.dudas >= 2) { avisar('info', nombre(n) + ': la placa ' + p.placa + ' no se pudo confirmar y se descartó.'); const eh = p.hid && H.find(x => x.id === p.hid); if (eh) { eh.placa = ''; eh.parcial = ''; hSucio = true; } p.placa = ''; p.parcial = ''; p.motivo = 'ilegible'; delete p.aprox; delete p.num; if (p.estado === 'ok') p.estado = 'esperando'; p.desde = p.desde || ahora; p.dudas = 0; }
         }
       }
-      if (hayMoto && (p.estado === 'esperando' || p.estado === 'alerta') && S.cruces.length && Date.now() - (p.cruceT || 0) >= 2 * 60e3) await cruzarPuente(p, jpeg);
+      if (hayMoto && (p.estado === 'esperando' || p.estado === 'lavando' || p.estado === 'alerta') && S.cruces.length && Date.now() - (p.cruceT || 0) >= 2 * 60e3) await cruzarPuente(p, jpeg);
       // Mientras siga sin placa completa, la revisión también sirve de intento de lectura.
       if (!p.placa && p.intentos < MAX_LECTURAS_LENTAS && rapida.moto !== false) { p.intentos++; p.leidoT = Date.now(); guardarLectura(p, await leer(jpeg)); guardarFoto(); }
       evaluar(p); guardar();

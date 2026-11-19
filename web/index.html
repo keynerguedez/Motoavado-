@@ -296,7 +296,7 @@ details.grp summary{cursor:pointer;font-weight:600;font-size:.9rem;color:var(--m
         <div class="card stack"><h3 id="g-wa-t">Así te llega al teléfono</h3><div id="g-wa"></div></div>
       </div>
       <div class="card stack" id="h-card">
-        <div class="row" style="flex-wrap:wrap;gap:10px"><h3 style="margin-right:auto">Historial de motos vistas por la cámara</h3><label class="row note" style="gap:6px">Día<input type="date" id="h-dia" style="width:auto"></label></div>
+        <div class="row" style="flex-wrap:wrap;gap:10px"><h3 style="margin-right:auto">Historial de motos vistas por la cámara</h3><label class="row note" style="gap:6px"><input type="checkbox" id="h-ahora" style="width:auto"> Solo las que están ahora en un puente</label><label class="row note" style="gap:6px">Día<input type="date" id="h-dia" style="width:auto"></label></div>
         <div class="kpis" id="h-kpis"></div>
         <div class="tablewrap"><table style="min-width:760px"><thead><tr><th>Foto</th><th>Hora</th><th>Puente</th><th>Placa leída</th><th>Resultado</th><th>Placa real</th></tr></thead><tbody id="h-rows"><tr><td colspan="6" class="note">Cargando…</td></tr></tbody></table></div>
         <p class="note">Cada moto que la cámara detecta queda aquí con la foto que se usó para leer la placa. Escribe la placa real para medir los aciertos. Se guardan las últimas 600 lecturas.</p>
@@ -322,6 +322,8 @@ details.grp summary{cursor:pointer;font-weight:600;font-size:.9rem;color:var(--m
   <p class="note" id="k-estado">Así le llega por WhatsApp.</p>
   <button class="btn pri" data-act="closeticket">Listo</button>
 </div></div>
+
+<div class="overlay" id="ov-foto" data-act="closefoto" style="cursor:zoom-out"><div style="max-width:min(96vw,900px);max-height:92vh;display:flex;flex-direction:column;gap:8px;align-items:center"><img id="ov-foto-img" alt="" style="max-width:100%;max-height:84vh;border-radius:10px;background:#000"><span id="ov-foto-t" class="pill mut" style="white-space:normal"></span></div></div>
 
 <div class="overlay" id="ov-cierre"><div class="sheet stack">
   <h2>Cierre del día</h2>
@@ -693,12 +695,17 @@ function renderHist(){
   if(!HIST)return; var a=document.activeElement; if(a&&a.id&&a.id.indexOf("hr-")===0)return;
   var r=HIST.resumen, pct=function(n){return r.total?Math.round(n*100/r.total)+"%":"–"};
   $("h-kpis").innerHTML=[[r.total,"Motos vistas"],[r.completa+" · "+pct(r.completa),"Placa completa"],[r.parcial+" · "+pct(r.parcial),"Placa parcial"],[r.ilegible+" · "+pct(r.ilegible),"No legible"],[r.verificadas,"Con factura"],[r.sinFactura,"Sin factura"],[r.conReal?r.aciertos+" de "+r.conReal:"–","Aciertos (placa real anotada)"]].map(function(k){return '<div class="card kpi"><b class="num">'+k[0]+'</b><span>'+k[1]+'</span></div>'}).join("");
-  swapImgs($("h-rows"),HIST.items.length?HIST.items.map(function(e){
+  var ahoraIds={}; if(CAM)CAM.puentes.forEach(function(b){if(b.hid&&b.estado!=="libre")ahoraIds[b.hid]=b.n});
+  var soloAhora=$("h-ahora").checked, items=HIST.items.filter(function(e){return !soloAhora||ahoraIds[e.id]});
+  // Las que están ahora en un puente van primero.
+  items=items.slice().sort(function(a,b){return (ahoraIds[b.id]?1:0)-(ahoraIds[a.id]?1:0)});
+  swapImgs($("h-rows"),items.length?items.map(function(e){
     var leida=e.placa?'<b>'+esc(e.placa)+'</b>':e.parcial?'<b>'+esc(e.parcial)+'</b> <span class="note">parcial</span>':'<span class="note">No legible'+(e.sinPlaca?" (factura sin placa)":"")+'</span>';
     var est=e.estado==="ok"?'<span class="pill ok">Con factura #'+esc(e.num)+(e.aprox?" · "+esc(e.aprox):"")+'</span>':e.estado==="alerta"?'<span class="pill bad">Sin factura</span>':'<span class="pill warn">Esperando</span>';
     var hora=new Date(e.llegada).toLocaleTimeString("es-VE",{hour:"2-digit",minute:"2-digit",timeZone:"America/Caracas"});
     var real=e.real?'<b>'+esc(e.real)+'</b>':"";
-    return '<tr><td><img class="thumb" style="width:96px;height:72px;object-fit:cover" loading="lazy" src="'+esc(e.foto)+'" alt=""></td><td class="num">'+hora+(e.salida?'<br><span class="note">salió '+new Date(e.salida).toLocaleTimeString("es-VE",{hour:"2-digit",minute:"2-digit",timeZone:"America/Caracas"})+'</span>':"")+'</td><td>'+(e.puente===5?"Fuera del puente":e.puente)+'</td><td>'+leida+'</td><td>'+est+'</td><td>'+real+'<div class="row" style="gap:4px"><input id="hr-'+esc(e.id)+'" type="text" placeholder="Placa real" style="width:96px;text-transform:uppercase" value="'+esc(e.real||"")+'"><button class="btn sm" data-act="hreal" data-id="'+esc(e.id)+'">Guardar</button></div></td></tr>'}).join(""):'<tr><td colspan="6" class="note">Ninguna moto vista en este día.</td></tr>');
+    var ahora=ahoraIds[e.id]?'<span class="pill ok" style="margin-top:4px">En el puente ahora</span>':"";
+    return '<tr'+(ahora?' style="background:rgba(34,197,94,.08)"':'')+'><td><img class="thumb" style="width:96px;height:72px;object-fit:cover;cursor:zoom-in" loading="lazy" src="'+esc(e.foto)+'" alt="Ampliar" data-act="foto" data-src="'+esc(e.foto)+'" data-t="'+esc((e.puente===5?"Fuera del puente":"Puente "+e.puente)+" · "+hora+" · "+(e.placa||e.parcial||"placa no legible"))+'"></td><td class="num">'+hora+(e.salida?'<br><span class="note">salió '+new Date(e.salida).toLocaleTimeString("es-VE",{hour:"2-digit",minute:"2-digit",timeZone:"America/Caracas"})+'</span>':"")+'</td><td>'+(e.puente===5?"Fuera del puente":e.puente)+'</td><td>'+leida+'</td><td>'+est+ahora+'</td><td>'+real+'<div class="row" style="gap:4px"><input id="hr-'+esc(e.id)+'" type="text" placeholder="Placa real" style="width:96px;text-transform:uppercase" value="'+esc(e.real||"")+'"><button class="btn sm" data-act="hreal" data-id="'+esc(e.id)+'">Guardar</button></div></td></tr>'}).join(""):'<tr><td colspan="6" class="note">'+(soloAhora?"Ahora no hay ninguna moto en los puentes.":"Ninguna moto vista en este día.")+'</td></tr>');
 }
 function renderVigilanteReal(){
   $("g-sim").style.display="none";
@@ -933,6 +940,8 @@ document.addEventListener("click",function(ev){
   else if(a==="chip"){draft.svc[t.dataset.id]=!draft.svc[t.dataset.id];t.setAttribute("aria-pressed",!!draft.svc[t.dataset.id]);draftTotal()}
   else if(a==="addpay")addOrder();
   else if(a==="addpend")addOrder(true);
+  else if(a==="foto"){$("ov-foto-img").src=t.dataset.src;$("ov-foto-t").textContent=t.dataset.t||"";$("ov-foto").classList.add("on")}
+  else if(a==="closefoto")$("ov-foto").classList.remove("on");
   else if(a==="hreal"){var hi=$("hr-"+t.dataset.id);if(hi)jpost("/api/camara/historial/real",{id:t.dataset.id,real:hi.value}).then(function(){hi.blur();loadHist()})}
   else if(a==="aprobar"||a==="negar")decidir(t.dataset.aid,a==="aprobar");
   else if(a==="pay")openPay(n);
@@ -1073,7 +1082,7 @@ if(location.protocol!=="file:"&&window.fetch){fetch("/api/yo").then(function(r){
   $("btn-reset").hidden=true; applyRole(); renderAll();
   loadTasa(); setInterval(loadTasa,30*60*1000);
   loadDia().then(ejemploDesdeEnlace); loadAuts(); setInterval(loadAuts,5000);
-  if(u.permisos.indexOf("vigilante")>=0){loadCam();setInterval(loadCam,4000);loadHist();setInterval(loadHist,10000);$("h-dia").addEventListener("change",function(){HIST=null;loadHist()})}
+  if(u.permisos.indexOf("vigilante")>=0){loadCam();setInterval(loadCam,4000);loadHist();setInterval(loadHist,10000);$("h-dia").addEventListener("change",function(){HIST=null;loadHist()});$("h-ahora").addEventListener("change",renderHist)}
 }).catch(function(){})}
  $("a-meta").value=S.meta; renderRules(); setInterval(function(){renderVigilante();renderMeta()},30000);
 })();

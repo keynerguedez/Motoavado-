@@ -736,7 +736,7 @@ function renderHist(){
   items=items.slice().sort(function(a,b){return (ahoraIds[b.id]?1:0)-(ahoraIds[a.id]?1:0)});
   swapImgs($("h-rows"),items.length?items.map(function(e){
     var leida=e.placa?'<b>'+esc(e.placa)+'</b>':e.parcial?'<b>'+esc(e.parcial)+'</b> <span class="note">parcial</span>':'<span class="note">No legible'+(e.sinPlaca?" (factura sin placa)":"")+'</span>';
-    var est=e.estado==="ok"?'<span class="pill ok">Con factura #'+esc(e.num)+(e.aprox?" · "+esc(e.aprox):"")+'</span>':e.estado==="alerta"?'<span class="pill bad">Sin factura</span>':'<span class="pill warn">Esperando</span>';
+    var est=e.estado==="ok"?'<span class="pill ok">Con factura #'+esc(e.num)+(e.aprox?" · "+esc(e.aprox):"")+'</span>':e.estado==="alerta"?'<span class="pill bad">Sin factura</span>':e.estado==="espera"?'<span class="pill warn">Bajó · esperando factura</span>':e.estado==="tarde"?'<span class="pill warn">Facturada después #'+esc(e.num)+'</span>':'<span class="pill warn">Esperando</span>';
     var hora=new Date(e.llegada).toLocaleTimeString("es-VE",{hour:"2-digit",minute:"2-digit",timeZone:"America/Caracas"});
     var real=e.real?'<b>'+esc(e.real)+'</b>':"";
     var ahora=ahoraIds[e.id]?'<span class="pill ok" style="margin-top:4px">En el puente ahora</span>':"";
@@ -778,11 +778,12 @@ function renderVigilanteReal(){
     var head='<div class="row"><h2>'+(b.n===5?"Fuera del puente":"Puente "+b.n)+'</h2>';
     if(b.estado==="libre")return '<div class="card bridge">'+head+'<span class="pill mut" style="margin-left:auto">Libre</span></div><div class="cam">Sin moto</div></div>';
     var m=mins(new Date(b.desde).getTime()), pl=b.placa?'Placa '+esc(b.placa):b.parcial?'Placa parcial '+esc(b.parcial):'Placa no legible';
-    var pill=b.estado==="alerta"?'<span class="pill bad" style="margin-left:auto">Sin factura</span>':b.estado==="ok"?'<span class="pill ok" style="margin-left:auto">Coincide con #'+String(b.num).padStart(3,"0")+'</span>':'<span class="pill warn" style="margin-left:auto">Esperando registro</span>';
+    var pill=b.estado==="alerta"?'<span class="pill bad" style="margin-left:auto">Sin factura</span>':b.estado==="ok"?'<span class="pill ok" style="margin-left:auto">Coincide con #'+String(b.num).padStart(3,"0")+'</span>':b.estado==="lavando"?'<span class="pill warn" style="margin-left:auto">En lavado · sin factura</span>':'<span class="pill warn" style="margin-left:auto">Esperando registro</span>';
     var img=b.foto?'<img src="'+bridgeSrc(b)+'" alt="Moto en el puente '+b.n+'"><span class="live">Hace '+hace(IMGV[b.n]||b.visto)+'</span><span class="box'+(b.estado==="alerta"?' bad':'')+'">'+pl+'</span>':'Sin imagen';
     var rv=b.rev?'<span class="note">Última revisión hace '+hace(b.rev.t)+': '+(b.rev.h===true?"hay moto":b.rev.h===false?"sin moto"+(b.rev.s===true?" (pero el segundo modelo ve moto)":b.rev.s===false?" confirmado":""):"sin respuesta")+(b.rev.n?' · sin moto '+b.rev.n+'/2':'')+'</span>':"";
     var txt=b.estado==="alerta"?'<b>Moto sin registro en el sistema</b><span class="note">Lleva '+m+' min '+(b.n===5?"lavándose":"montada")+' y ninguna venta de hoy tiene esa placa.</span><div class="row"><button class="btn pri sm" data-act="regnow" data-b="'+b.n+'">Registrar ahora</button></div>'
       :b.estado==="ok"?'<b>Moto registrada</b><span class="note">Lleva '+m+' min montada.'+(b.aprox?' Coincidencia por lectura parcial ('+esc(b.parcial)+' → '+esc(b.aprox)+'): confírmala a ojo.':'')+'</span>'
+      :b.estado==="lavando"?'<b>En lavado, sin factura todavía</b><span class="note">Lleva '+m+' min. Si el cliente paga al terminar, no pasa nada; si la moto baja y pasan 15 min sin factura, salta la alerta.</span><div class="row"><button class="btn pri sm" data-act="regnow" data-b="'+b.n+'">Registrar ahora</button></div>'
       :'<b>Moto recién llegada</b><span class="note">Lleva '+m+' min. Si no se registra pronto, salta la alerta.</span>';
     return '<div class="card bridge'+(b.estado==="alerta"?' alerta':b.estado==="ok"?' ok':'')+'">'+head+pill+'</div><div class="cam">'+img+'</div>'+txt+rv+'</div>';
   }).join(""));

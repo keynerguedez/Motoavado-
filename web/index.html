@@ -161,7 +161,7 @@ details.grp summary{cursor:pointer;font-weight:600;font-size:.9rem;color:var(--m
         <div class="row"><h2 style="margin-right:auto">Nueva moto</h2><span class="note" id="who"></span><button class="btn sm" data-act="logout">Salir</button></div>
         <label class="photo" id="ph-label">
           <img id="ph-prev" alt="" hidden>
-          <span id="ph-txt"><b>1. Tomar foto de atrás, con la placa</b><br><span class="note">Toca aquí. La placa y el modelo se llenan solos. En este demo la foto es opcional.</span></span>
+          <span id="ph-txt"><b>1. Tomar foto de atrás, con la placa</b><br><span class="note">Toca aquí. Es obligatoria: sin la foto no se puede facturar.</span></span>
           <input id="ph-in" type="file" accept="image/*" capture="environment">
         </label>
         <div class="note" id="ph-ai"></div>
@@ -434,7 +434,7 @@ function renderTablet(){
 var pendingNew=null;
 function resetForm(){
   draft={photo:null,svc:{}}; $("f-placa").value="";$("f-modelo").value="";$("f-tel").value="";$("f-nombre").value="";$("f-cli").textContent="";$("f-motivo").value="";$("f-desc").value="0";$("f-nota").value="";$("f-sinplaca").checked=false;$("f-placa").disabled=false;$("f-tipo").value="normal";$("f-desc").disabled=false;$("f-lav").value="";$("ph-ai").textContent="";autoPlaca="";autoModelo="";$("ph-in").value="";
-  $("ph-prev").hidden=true; $("ph-txt").innerHTML='<b>1. Tomar foto de atrás, con la placa</b><br><span class="note">Toca aquí. La placa y el modelo se llenan solos. En este demo la foto es opcional.</span>';
+  $("ph-prev").hidden=true; $("ph-txt").innerHTML='<b>1. Tomar foto de atrás, con la placa</b><br><span class="note">Toca aquí. Es obligatoria: sin la foto no se puede facturar.</span>';
   renderChips();
 }
 function commitOrder(o){
@@ -449,7 +449,8 @@ function authBody(o,motivo){return{tipo:o.tipo==="normal"?"descuento":o.tipo,pct
 function addOrder(pend){
   var sin=$("f-sinplaca").checked, placa=sin?"SIN PLACA":$("f-placa").value.trim().toUpperCase(), ids=S.services.filter(function(s){return draft.svc[s.id]}).map(function(s){return s.id});
   var tipo=$("f-tipo").value, pct=tipo==="normal"?+$("f-desc").value:100, motivo=$("f-motivo").value.trim(), nota=$("f-nota").value.trim(), e="", tel=normTel($("f-tel").value), nombre=$("f-nombre").value.trim(), lav=$("f-lav").value;
-  if(!placa)e="Escribe la placa o marca que la moto no tiene.";
+  if(window.__yo&&!draft.fotoGrande)e="Toma la foto de la moto antes de facturar. Es obligatoria.";
+  else if(!placa)e="Escribe la placa o marca que la moto no tiene.";
   else if(!/^0[24]\d{9}$/.test(tel))e="Escribe el teléfono del cliente (11 dígitos). Sin teléfono no se puede facturar.";
   else if(!ids.length)e="Marca al menos un servicio.";
   else if(!lav)e="Elige el lavador que la atiende.";

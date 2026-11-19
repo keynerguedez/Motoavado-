@@ -738,10 +738,11 @@ function renderVigilanteReal(){
     var m=mins(new Date(b.desde).getTime()), pl=b.placa?'Placa '+esc(b.placa):b.parcial?'Placa parcial '+esc(b.parcial):'Placa no legible';
     var pill=b.estado==="alerta"?'<span class="pill bad" style="margin-left:auto">Sin factura</span>':b.estado==="ok"?'<span class="pill ok" style="margin-left:auto">Coincide con #'+String(b.num).padStart(3,"0")+'</span>':'<span class="pill warn" style="margin-left:auto">Esperando registro</span>';
     var img=b.foto?'<img src="'+bridgeSrc(b)+'" alt="Moto en el puente '+b.n+'"><span class="live">Hace '+hace(IMGV[b.n]||b.visto)+'</span><span class="box'+(b.estado==="alerta"?' bad':'')+'">'+pl+'</span>':'Sin imagen';
+    var rv=b.rev?'<span class="note">Última revisión hace '+hace(b.rev.t)+': '+(b.rev.h===true?"hay moto":b.rev.h===false?"sin moto"+(b.rev.s===true?" (pero el segundo modelo ve moto)":b.rev.s===false?" confirmado":""):"sin respuesta")+(b.rev.n?' · sin moto '+b.rev.n+'/2':'')+'</span>':"";
     var txt=b.estado==="alerta"?'<b>Moto sin registro en el sistema</b><span class="note">Lleva '+m+' min '+(b.n===5?"lavándose":"montada")+' y ninguna venta de hoy tiene esa placa.</span><div class="row"><button class="btn pri sm" data-act="regnow" data-b="'+b.n+'">Registrar ahora</button></div>'
       :b.estado==="ok"?'<b>Moto registrada</b><span class="note">Lleva '+m+' min montada.'+(b.aprox?' Coincidencia por lectura parcial ('+esc(b.parcial)+' → '+esc(b.aprox)+'): confírmala a ojo.':'')+'</span>'
       :'<b>Moto recién llegada</b><span class="note">Lleva '+m+' min. Si no se registra pronto, salta la alerta.</span>';
-    return '<div class="card bridge'+(b.estado==="alerta"?' alerta':b.estado==="ok"?' ok':'')+'">'+head+pill+'</div><div class="cam">'+img+'</div>'+txt+'</div>';
+    return '<div class="card bridge'+(b.estado==="alerta"?' alerta':b.estado==="ok"?' ok':'')+'">'+head+pill+'</div><div class="cam">'+img+'</div>'+txt+rv+'</div>';
   }).join(""));
   var L=CAM?CAM.log:[];
   $("g-log").innerHTML=L.length?L.map(function(l){return '<div class="logrow"><span class="num note">'+hhmm(new Date(l.t))+'</span><span class="pill '+(l.kind==="info"?"mut":l.kind)+'">'+(l.kind==="bad"?"Alerta":l.kind==="ok"?"Resuelta":"Aviso")+'</span><span>'+esc(l.txt)+'</span></div>'}).join(""):'<span class="pill ok">Sin avisos hoy</span>';

@@ -13,7 +13,7 @@ const crypto = require('crypto');
 
 const PUENTES = 5;            // 1 a 4: los puentes. 5: la zona extra, a la izquierda del puente 1, para motos que se lavan fuera del puente
 const EXTRA = 5;
-const nombre = n => n === EXTRA ? 'Zona fuera del puente' : nombre(n);
+const nombre = n => n === EXTRA ? 'Zona fuera del puente' : 'Puente ' + n;
 const MIN_GRACIA = 5;           // minutos que se le da a una moto montada para que la registren antes de alertar
 const MAX_FOTO = 3 * 1024 * 1024;
 const MAX_REINTENTOS_LECTURA = 3;   // lecturas seguidas al llegar la moto (el agente reenvía a los 8 y 20 s)
@@ -225,10 +225,13 @@ function crear(ctx) {
         return { ok: true, estado: p.estado, placa: p.placa || null, revision: 'moto-encontrada' };
       }
       // Ya marcada por una revisión anterior: si deja de verse dos veces seguidas, se libera.
-      // El modelo barato se equivoca a veces con una moto que sí está: antes de contar un "no hay moto" se confirma con el modelo bueno.
-      let sinMoto = rapida.moto === false;
-      if (sinMoto) { const conf = await leer(jpeg); if (conf.moto !== false) { sinMoto = false; if (!p.placa) guardarLectura(p, conf); } }
-      if (sinMoto) { if (++p.sinMoto >= 2) return libera(); } else p.sinMoto = 0;
+      // El modelo barato se equivoca a veces: un "no hay moto" se confirma con el modelo bueno antes de contarlo, y solo un "sí hay moto" claro reinicia la cuenta.
+      let sinMoto = rapida.moto === false, conf = null;
+      if (sinMoto) { conf = await leer(jpeg); if (conf.moto === true) { sinMoto = false; if (!p.placa) guardarLectura(p, conf); } }
+      const hayMoto = rapida.moto === true || (conf && conf.moto === true);
+      p.rev = { t: ahora, h: rapida.moto, s: conf ? conf.moto : null };
+      if (sinMoto) { p.sinMoto = (p.sinMoto || 0) + 1; p.rev.n = p.sinMoto; if (p.sinMoto >= 2) return libera(); }
+      else if (hayMoto) { p.sinMoto = 0; p.rev.n = 0; guardarFoto(); }
       // Mientras siga sin placa completa, la revisión también sirve de intento de lectura.
       if (!p.placa && p.intentos < MAX_LECTURAS_LENTAS && rapida.moto !== false) { p.intentos++; p.leidoT = Date.now(); guardarLectura(p, await leer(jpeg)); guardarFoto(); }
       evaluar(p); guardar();
@@ -337,6 +340,8 @@ function crear(ctx) {
     let jpeg; try { jpeg = fs.readFileSync(f.ruta); } catch (e) { return null; }
     const z = zonas().find(x => x.puente === n);
     const recorte = z && await cortarZona(jpeg, z);
+    // Un aviso de movimiento en un puente ya ocupado es una revisión más: se comprueba que la moto siga ahí (antes solo se cambiaba la foto sin mirar).
+    if (S.puentes[n - 1].estado !== 'libre' && !(opc && opc.revision)) opc = Object.assign({}, opc, { revision: true });
     return procesar(n, true, recorte || jpeg, opc); // sin ffmpeg se manda el cuadro completo (se lee peor)
   }
 

@@ -26,9 +26,10 @@ function crear(ctx) {
   const FOTOS = path.join(ctx.DATA, 'fotos');
   fs.mkdirSync(FOTOS, { recursive: true });
 
-  const vacio = () => ({ puentes: Array.from({ length: PUENTES }, (_, i) => ({ n: i + 1, estado: 'libre' })), log: [], dia: '', vistas: 0 });
+  const vacio = () => ({ puentes: Array.from({ length: PUENTES }, (_, i) => ({ n: i + 1, estado: 'libre' })), log: [], dia: '', vistas: 0, cruces: [] });
   let S = vacio();
   try { const d = JSON.parse(fs.readFileSync(ESTADO, 'utf8')); if (d && Array.isArray(d.puentes) && d.puentes.length === PUENTES - 1) d.puentes.push({ n: EXTRA, estado: 'libre' }); if (d && Array.isArray(d.puentes) && d.puentes.length === PUENTES) S = d; } catch (e) {}
+  if (!Array.isArray(S.cruces)) S.cruces = [];
   function guardar() { try { hSync(); } catch (e) {} try { const tmp = ESTADO + '.tmp'; fs.writeFileSync(tmp, JSON.stringify(S), { mode: 0o600 }); fs.renameSync(tmp, ESTADO); } catch (e) { console.error('camara:', e.message); } }
   // ---------- historial de motos vistas (para validar cómo se leen las placas) ----------
   const HIST = path.join(ctx.DATA, 'camara-historial.json'), HFOTOS = path.join(FOTOS, 'hist'), MAX_HIST = 600;
@@ -169,6 +170,64 @@ function crear(ctx) {
     });
   }
 
+  // ---------- cruce de la foto del encargado con la foto del puente ----------
+  // Dos fotos a Claude: ¿es la misma moto? Se comparan color, tipo, accesorios… no las personas ni el fondo.
+  function compararFotos(a, b) {
+    const clave = process.env.ANTHROPIC_API_KEY;
+    if (!clave) return Promise.resolve({ misma: null });
+    const img = j => ({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: j.toString('base64') } });
+    const cuerpo = JSON.stringify({ model: process.env.CAMARA_MODELO || 'claude-sonnet-5-5', max_tokens: 1500, messages: [{ role: 'user', content: [
+      { type: 'text', text: 'Foto 1 (la tomó el encargado al registrar la moto):' }, img(a), { type: 'text', text: 'Foto 2 (cámara fija sobre el puente de lavado):' }, img(b),
+      { type: 'text', text: 'Son de un lavadero de motos. ¿La moto de la foto 1 es la misma que la moto montada en el puente de la foto 2? Compara color, tipo, marca, maletas, carenado, accesorios y estado; ignora personas, fondo y luz. Responde solo JSON: {"misma":true,"confianza":"alta"}. "misma" es true, false, o null si no puedes saberlo; "confianza" es "alta", "media" o "baja".' }] }] });
+    return new Promise(ok => {
+      const r = https.request({ hostname: 'api.anthropic.com', path: '/v1/messages', method: 'POST', timeout: 30000,
+        headers: { 'content-type': 'application/json', 'x-api-key': clave, 'anthropic-version': '2023-06-01', 'content-length': Buffer.byteLength(cuerpo) } }, res => {
+        let t = ''; res.on('data', c => { t += c; });
+        res.on('end', () => { try { const txt = (JSON.parse(t).content || []).map(x => x.text || '').join(''); const j = JSON.parse(/\{[\s\S]*\}/.exec(txt)[0]); ok({ misma: j.misma === true ? true : j.misma === false ? false : null, confianza: ['alta', 'media', 'baja'].includes(j.confianza) ? j.confianza : 'baja' }); } catch (e) { ok({ misma: null }); } });
+      });
+      r.on('error', () => ok({ misma: null })); r.on('timeout', () => { r.destroy(); ok({ misma: null }); });
+      r.end(cuerpo);
+    });
+  }
+  const comparar = (a, b) => (ctx.compararFotos || compararFotos)(a, b);
+  const fotoVenta = id => { try { return fs.readFileSync(path.join(FOTOS, 'venta', id + '.jpg')); } catch (e) { return null; } };
+  const fotoPuente = n => { try { return fs.readFileSync(path.join(FOTOS, 'camara-puente-' + n + '.jpg')); } catch (e) { return null; } };
+  const buena = r => r && r.misma === true && r.confianza !== 'baja';
+  function enlazar(p, v) {
+    p.cruceId = v.id; p.cruce = true; p.estado = 'ok'; p.num = v.num; delete p.alertado; delete p.aprox;
+    S.cruces = S.cruces.filter(c => c.id !== v.id);
+    avisar('ok', nombre(p.n) + ': la foto del encargado coincide con la moto del puente (#' + v.num + ').'); guardar();
+  }
+  const pendiente = v => { S.cruces = S.cruces.filter(c => c.id !== v.id); S.cruces.unshift({ id: v.id, num: v.num, placa: v.placa || '', t: Date.now() }); S.cruces.length = Math.min(S.cruces.length, 5); guardar(); };
+  // Al registrar una moto: se guarda su foto y se compara con la moto de cada puente que aún no tiene factura.
+  async function cruzar(v, jpeg) {
+    cambioDeDia();
+    try { fs.mkdirSync(path.join(FOTOS, 'venta'), { recursive: true }); fs.writeFileSync(path.join(FOTOS, 'venta', v.id + '.jpg'), jpeg, { mode: 0o600 }); } catch (e) {}
+    const ya = S.puentes.find(p => p.estado === 'ok' && (p.cruceId === v.id || (p.num === v.num && v.placa && p.placa === v.placa)));
+    if (ya) return { puente: ya.n, misma: true, por: ya.cruceId === v.id ? 'foto' : 'placa' };
+    const cands = S.puentes.filter(p => (p.estado === 'esperando' || p.estado === 'alerta') && !p.cruceId);
+    if (!cands.length) { pendiente(v); return { puente: null, pendiente: true }; }
+    const res = await Promise.all(cands.map(async p => { const f = fotoPuente(p.n); return f ? { p, r: await comparar(jpeg, f) } : null; }));
+    const si = res.filter(x => x && buena(x.r)).sort((a, b) => (b.r.confianza === 'alta') - (a.r.confianza === 'alta'));
+    const unico = si.length === 1 || (si.length > 1 && si[0].r.confianza === 'alta' && si[1].r.confianza !== 'alta');
+    if (unico && S.puentes[si[0].p.n - 1] === si[0].p && si[0].p.estado !== 'libre') { enlazar(si[0].p, v); return { puente: si[0].p.n, misma: true, por: 'foto' }; }
+    pendiente(v);
+    if (si.length > 1) { avisar('bad', 'La foto de la moto #' + v.num + ' encaja con varias motos de los puentes; no se pudo elegir una.'); return { puente: null, ambigua: true }; }
+    avisar('bad', 'La foto de la moto #' + v.num + (v.placa ? ' (' + v.placa + ')' : '') + ' no coincide con ninguna moto de los puentes (' + cands.map(p => nombre(p.n)).join(', ') + ').');
+    return { puente: null, misma: false, comparadas: cands.map(p => p.n) };
+  }
+  // Cada revisión de un puente sin factura: si hay fotos de encargado sin cruzar, se prueban contra la moto del puente.
+  async function cruzarPuente(p, jpeg) {
+    const lim = Date.now() - 3 * 3600e3;
+    S.cruces = S.cruces.filter(c => c.t > lim && !S.puentes.some(x => x.estado === 'ok' && (x.cruceId === c.id || x.num === c.num)));
+    p.cruceT = Date.now();
+    for (const c of S.cruces.slice(0, 3)) {
+      const v = ctx.ventasDeHoy().find(x => x.id === c.id), f = fotoVenta(c.id); if (!v || !f) continue;
+      if (buena(await comparar(f, jpeg)) && S.puentes[p.n - 1] === p && p.estado !== 'libre') { enlazar(p, v); return true; }
+    }
+    return false;
+  }
+
   // ---------- comparación con lo registrado hoy ----------
   function registrada(placa) {
     if (!placa) return null;
@@ -185,7 +244,7 @@ function crear(ctx) {
   }
   function evaluar(p) {
     if (p.estado === 'libre') return;
-    let v = registrada(p.placa), aprox = false;
+    let v = registrada(p.placa) || (p.cruceId && ctx.ventasDeHoy().find(x => x.id === p.cruceId)) || null, aprox = false;
     if (!v && !p.placa && p.parcial) { v = registradaParcial(p.parcial); aprox = !!v; }
     if (v) {
       if (p.estado !== 'ok') avisar('ok', nombre(p.n) + ': ' + (aprox ? 'la lectura parcial ' + p.parcial + ' coincide con la moto ' + limpiarPlaca(v.placa) : 'se registró la moto ' + p.placa) + ' (#' + v.num + ').');
@@ -193,7 +252,7 @@ function crear(ctx) {
     }
     // Moto sin placa legible: si hoy hay una factura marcada "sin placa" que ningún otro puente tiene asignada, se da por registrada.
     if (!p.placa && !p.parcial) {
-      const tomadas = new Set(S.puentes.filter(x => x !== p && x.sinPlacaId).map(x => x.sinPlacaId));
+      const tomadas = new Set(S.puentes.filter(x => x !== p && (x.sinPlacaId || x.cruceId)).map(x => x.sinPlacaId || x.cruceId));
       const sp = ctx.ventasDeHoy().find(x => x.sinPlaca && !tomadas.has(x.id) && (p.sinPlacaId ? x.id === p.sinPlacaId : true));
       if (sp) { if (p.estado !== 'ok') avisar('ok', nombre(p.n) + ': moto sin placa legible, coincide con la factura sin placa #' + sp.num + '.'); p.estado = 'ok'; p.num = sp.num; p.sinPlacaId = sp.id; return; }
     }
@@ -224,7 +283,7 @@ function crear(ctx) {
     }
     const guardarFoto = () => { p.visto = ahora; hFoto(p, jpeg); try { fs.writeFileSync(path.join(FOTOS, 'camara-puente-' + n + '.jpg'), jpeg, { mode: 0o600 }); } catch (e) {} };
     const llegada = (r, origen, nueva) => {
-      Object.assign(p, { estado: 'esperando', desde: ahora, placa: '', parcial: '', intentos: 1, leidoT: Date.now(), relT: Date.now(), sinMoto: 0, origen }); delete p.num; delete p.confirmada; delete p.dudas; delete p.alertado; delete p.motivo; delete p.aprox; delete p.sinPlacaId;
+      Object.assign(p, { estado: 'esperando', desde: ahora, placa: '', parcial: '', intentos: 1, leidoT: Date.now(), relT: Date.now(), sinMoto: 0, origen }); delete p.num; delete p.cruceId; delete p.cruce; delete p.cruceT; delete p.confirmada; delete p.dudas; delete p.alertado; delete p.motivo; delete p.aprox; delete p.sinPlacaId;
       S.vistas++; avisar('info', nombre(n) + (origen === 'revision' ? ': se encontró una moto ya montada.' : ': llegó una moto.'));
       if (nueva) hNuevo(p, jpeg); else hAbrir(p, jpeg);
       guardarLectura(p, r);
@@ -270,6 +329,7 @@ function crear(ctx) {
           if (p.dudas >= 2) { avisar('info', nombre(n) + ': la placa ' + p.placa + ' no se pudo confirmar y se descartó.'); const eh = p.hid && H.find(x => x.id === p.hid); if (eh) { eh.placa = ''; eh.parcial = ''; hSucio = true; } p.placa = ''; p.parcial = ''; p.motivo = 'ilegible'; delete p.aprox; delete p.num; if (p.estado === 'ok') p.estado = 'esperando'; p.desde = p.desde || ahora; p.dudas = 0; }
         }
       }
+      if (hayMoto && (p.estado === 'esperando' || p.estado === 'alerta') && S.cruces.length && Date.now() - (p.cruceT || 0) >= 2 * 60e3) await cruzarPuente(p, jpeg);
       // Mientras siga sin placa completa, la revisión también sirve de intento de lectura.
       if (!p.placa && p.intentos < MAX_LECTURAS_LENTAS && rapida.moto !== false) { p.intentos++; p.leidoT = Date.now(); guardarLectura(p, await leer(jpeg)); guardarFoto(); }
       evaluar(p); guardar();
@@ -472,7 +532,7 @@ function crear(ctx) {
   }
   function foto(n) { try { return fs.readFileSync(path.join(FOTOS, 'camara-puente-' + Number(n) + '.jpg')); } catch (e) { return null; } }
 
-  return { evento, vista, fotoVista, publico, foto, historial, marcarReal, fotoHist, alarma, fotoRecibida, leerPlaca, FOTOS4K, PUENTES };
+  return { cruzar, leerFoto, evento, vista, fotoVista, publico, foto, historial, marcarReal, fotoHist, alarma, fotoRecibida, leerPlaca, FOTOS4K, PUENTES };
 }
 
 module.exports = { crear };

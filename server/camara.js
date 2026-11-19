@@ -43,7 +43,7 @@ function crear(ctx) {
     p.hid = id; hSucio = true; hFoto(p, jpeg);
   }
   // Si la moto de un puente desaparece y vuelve a verse en menos de 10 minutos, es la misma: se reabre su fila y su reloj (no empieza otra).
-  const RELEER_MS = 5 * 60e3;
+  const RELEER_MS = Number(process.env.CAMARA_RELEER_MS) || 5 * 60e3;
   const MISMA_MOTO_MS = 10 * 60e3;
   function hAbrir(p, jpeg) {
     let ult = null; for (let i = H.length - 1; i >= 0; i--) if (H[i].puente === p.n) { ult = H[i]; break; }
@@ -146,7 +146,7 @@ function crear(ctx) {
       model: modelo, max_tokens: 1500,
       messages: [{ role: 'user', content: [
         { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: jpeg.toString('base64') } },
-        { type: 'text', text: (process.env.CAMARA_PRUEBA === '1' ? 'MODO DE PRUEBA: un cartón o papel con una placa escrita cuenta como la moto (moto:true). ' : '') + 'Es una foto de una rampa de un lavadero de motos. Responde solo JSON: {"moto":true,"placa":"ABC123","segura":true}. "moto" es true solo si ves una moto sobre la rampa (aunque esté a medias, mojada o sin placa visible); es false si solo hay personas, cubetas, mangueras, herramientas, el piso o la rampa vacía. "placa" es la placa venezolana (6 a 8 letras y números); si no se ve completa o no estás seguro de cada carácter, deja "placa":"" y "segura":false, y en "parcial" escribe los caracteres que sí distingues, en su posición, con "?" en cada uno que no ves o no estás seguro (ejemplo: {"moto":true,"placa":"","segura":false,"parcial":"AB1C??"}). Nunca inventes un carácter que no se vea.' }] }],
+        { type: 'text', text: (process.env.CAMARA_PRUEBA === '1' ? 'MODO DE PRUEBA: un cartón o papel con una placa escrita cuenta como la moto (moto:true). ' : '') + 'Es una foto de una rampa de un lavadero de motos. Responde solo JSON: {"moto":true,"placa":"ABC123","segura":true}. "moto" es true solo si ves una moto sobre la rampa (aunque esté a medias, mojada o sin placa visible); es false si solo hay personas, cubetas, mangueras, herramientas, el piso o la rampa vacía. "placa" es la placa venezolana (6 a 8 letras y números); si no se ve completa o no estás seguro de cada carácter, deja "placa":"" y "segura":false, y en "parcial" escribe los caracteres que sí distingues, en su posición, con "?" en cada uno que no ves o no estás seguro (ejemplo: {"moto":true,"placa":"","segura":false,"parcial":"AB1C??"}). Nunca inventes un carácter que no se vea. Si la moto no tiene placa o está tapada, deja "placa":"" y "parcial":""; no tomes números de otras motos, cascos, carteles, ropa o calcomanías.' }] }],
     }, /haiku/.test(modelo) ? { thinking: { type: 'disabled' } } : {}));
     return new Promise(ok => {
       const r = https.request({ hostname: 'api.anthropic.com', path: '/v1/messages', method: 'POST', timeout: 20000,
@@ -202,7 +202,7 @@ function crear(ctx) {
   }
   // Guarda lo que leyó el modelo: placa completa, o la lectura parcial con más caracteres conocidos.
   function guardarLectura(p, r) {
-    if (r.placa) { p.placa = r.placa; p.parcial = ''; avisar('info', nombre(p.n) + ': placa leída ' + r.placa + '.'); return; }
+    if (r.placa) { p.placa = r.placa; p.parcial = ''; p.confirmada = true; p.dudas = 0; avisar('info', nombre(p.n) + ': placa leída ' + r.placa + '.'); return; }
     p.motivo = r.motivo;
     if (r.parcial && conocidos(r.parcial) >= conocidos(p.parcial)) { if (r.parcial !== p.parcial) avisar('info', nombre(p.n) + ': placa leída en parte: ' + r.parcial + '.'); p.parcial = r.parcial; }
   }
@@ -224,7 +224,7 @@ function crear(ctx) {
     }
     const guardarFoto = () => { p.visto = ahora; hFoto(p, jpeg); try { fs.writeFileSync(path.join(FOTOS, 'camara-puente-' + n + '.jpg'), jpeg, { mode: 0o600 }); } catch (e) {} };
     const llegada = (r, origen, nueva) => {
-      Object.assign(p, { estado: 'esperando', desde: ahora, placa: '', parcial: '', intentos: 1, leidoT: Date.now(), relT: Date.now(), sinMoto: 0, origen }); delete p.num; delete p.alertado; delete p.motivo; delete p.aprox; delete p.sinPlacaId;
+      Object.assign(p, { estado: 'esperando', desde: ahora, placa: '', parcial: '', intentos: 1, leidoT: Date.now(), relT: Date.now(), sinMoto: 0, origen }); delete p.num; delete p.confirmada; delete p.dudas; delete p.alertado; delete p.motivo; delete p.aprox; delete p.sinPlacaId;
       S.vistas++; avisar('info', nombre(n) + (origen === 'revision' ? ': se encontró una moto ya montada.' : ': llegó una moto.'));
       if (nueva) hNuevo(p, jpeg); else hAbrir(p, jpeg);
       guardarLectura(p, r);
@@ -263,6 +263,12 @@ function crear(ctx) {
           return { ok: true, estado: p.estado, placa: p.placa || null, revision: 'moto-nueva' };
         }
         if (r.moto === true && r.placa && !p.placa) guardarLectura(p, r);
+        // Una placa que no se vuelve a confirmar dos relecturas seguidas se descarta (pudo ser inventada): la moto queda sin placa legible.
+        if (r.moto === true && p.placa && r.placa === p.placa) { p.confirmada = true; p.dudas = 0; }
+        else if (r.moto === true && p.placa && !r.placa && !p.confirmada) {
+          p.dudas = (p.dudas || 0) + 1;
+          if (p.dudas >= 2) { avisar('info', nombre(n) + ': la placa ' + p.placa + ' no se pudo confirmar y se descartó.'); const eh = p.hid && H.find(x => x.id === p.hid); if (eh) { eh.placa = ''; eh.parcial = ''; hSucio = true; } p.placa = ''; p.parcial = ''; p.motivo = 'ilegible'; delete p.aprox; delete p.num; if (p.estado === 'ok') p.estado = 'esperando'; p.desde = p.desde || ahora; p.dudas = 0; }
+        }
       }
       // Mientras siga sin placa completa, la revisión también sirve de intento de lectura.
       if (!p.placa && p.intentos < MAX_LECTURAS_LENTAS && rapida.moto !== false) { p.intentos++; p.leidoT = Date.now(); guardarLectura(p, await leer(jpeg)); guardarFoto(); }

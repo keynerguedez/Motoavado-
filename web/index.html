@@ -558,7 +558,7 @@ function loadDia(){
       var ids=v.servicios.map(function(x){return x.id}).filter(function(id){return svc(id)}); if(!ids.length)return;
       var pct=parseFloat(v.descuento)||0;
       S.clients[v.telefono]={nombre:v.cliente||"Sin nombre",prev:(d.previas&&d.previas[v.telefono])||0};
-      S.orders.push({num:v.num,time:hhmm(new Date(v.fecha)),placa:v.placa,modelo:v.modelo,photo:ph(cols[i%cols.length]),svc:ids,lav:v.lavador,tel:v.telefono,disc:pct?{pct:pct,motivo:"",status:"approved"}:null,pay:v.estado==="pendiente"?null:{method:v.metodo,ref:v.ref,tasa:v.tasa||S.tasa,cur:v.moneda,val:v.monto},op:v.usuario,ticket:true,ejemplo:!!v.ejemplo,srvId:v.id,sin:!!v.sinPlaca,tipo:v.tipo||"normal",nota:v.nota||""});
+      S.orders.push({placaPor:v.placaPor||"",num:v.num,time:hhmm(new Date(v.fecha)),placa:v.placa,modelo:v.modelo,photo:ph(cols[i%cols.length]),svc:ids,lav:v.lavador,tel:v.telefono,disc:pct?{pct:pct,motivo:"",status:"approved"}:null,pay:v.estado==="pendiente"?null:{method:v.metodo,ref:v.ref,tasa:v.tasa||S.tasa,cur:v.moneda,val:v.monto},op:v.usuario,ticket:true,ejemplo:!!v.ejemplo,srvId:v.id,sin:!!v.sinPlaca,tipo:v.tipo||"normal",nota:v.nota||""});
       if(v.sinPlaca)S.orders[S.orders.length-1].placa="SIN PLACA";
     });
     loc.forEach(function(o){o.num=S.orders.length+1;if(!S.clients[o.tel])S.clients[o.tel]=oldC[o.tel]||{nombre:"Sin nombre",prev:0};S.orders.push(o)});
@@ -639,7 +639,7 @@ function renderAdmin(){
   var arow=function(o){
     var pago=o.pay?'<span class="pill ok">'+esc(o.pay.method)+(paidAmt(o).cur!=="$"?" · "+paidAmt(o).txt:"")+(o.pay.ref?" · "+esc(o.pay.ref):"")+'</span>':(o.disc&&o.disc.status==="pending"?'<span class="pill warn">Espera autorización</span>':'<span class="pill bad">Por cobrar</span>');
     var d=o.disc&&o.disc.status==="approved"?' <span class="pill mut">-'+o.disc.pct+'%</span>':"";
-    return '<tr><td class="num">#'+String(o.num).padStart(3,"0")+'</td><td><img class="thumb" style="width:56px;height:42px" src="'+o.photo+'" alt=""></td><td class="num">'+o.time+'</td><td>'+esc(o.placa)+'</td><td>'+esc(cliName(o))+'<br><span class="note num">'+fmtTel(o.tel)+'</span></td><td>'+esc(names(o))+d+'</td><td>'+esc(o.op)+'</td><td>'+pago+'</td><td class="r num"><b>'+usd(total(o))+'</b></td></tr>';
+    return '<tr><td class="num">#'+String(o.num).padStart(3,"0")+'</td><td><img class="thumb" style="width:56px;height:42px" src="'+o.photo+'" alt=""></td><td class="num">'+o.time+'</td><td>'+(o.placa?esc(o.placa):'<span class="note">Sin placa</span>')+(o.placaPor?'<br><span class="note">'+(o.placaPor==="cámara"?"completada por la cámara":"corregida por "+esc(o.placaPor))+'</span>':"")+(window.__yo&&window.__yo.rol==="dueno"&&o.srvId?'<br><button class="btn sm" data-act="fixplaca" data-n="'+o.num+'">Corregir placa</button>':"")+'</td><td>'+esc(cliName(o))+'<br><span class="note num">'+fmtTel(o.tel)+'</span></td><td>'+esc(names(o))+d+'</td><td>'+esc(o.op)+'</td><td>'+pago+'</td><td class="r num"><b>'+usd(total(o))+'</b></td></tr>';
   };
   $("a-rows").innerHTML=groupOrders().map(function(g){
     var op=!!openA[g.k];
@@ -976,6 +976,7 @@ document.addEventListener("click",function(ev){
   else if(a==="chip"){draft.svc[t.dataset.id]=!draft.svc[t.dataset.id];t.setAttribute("aria-pressed",!!draft.svc[t.dataset.id]);draftTotal()}
   else if(a==="addpay")addOrder();
   else if(a==="addpend")addOrder(true);
+  else if(a==="fixplaca"){var fo=S.orders.filter(function(x){return String(x.num)===t.dataset.n})[0]; if(fo&&fo.srvId){var np=window.prompt("Placa correcta de la moto #"+fo.num+" (5 a 8 letras y números):",fo.placa||""); if(np){np=np.toUpperCase().replace(/[^A-Z0-9]/g,""); jpost("/api/ventas/placa",{id:fo.srvId,placa:np}).then(function(r){if(!r.ok){alert(r.j.error||"No se pudo corregir la placa.");return}fo.placa=r.j.placa;fo.sin=false;fo.placaPor=window.__yo.nombre;renderAll()})}}}
   else if(a==="foto"){$("ov-foto-img").src=t.dataset.src;$("ov-foto-t").textContent=t.dataset.t||"";$("ov-foto").classList.add("on")}
   else if(a==="closefoto")$("ov-foto").classList.remove("on");
   else if(a==="hreal"){var hi=$("hr-"+t.dataset.id);if(hi)jpost("/api/camara/historial/real",{id:t.dataset.id,real:hi.value}).then(function(){hi.blur();loadHist()})}

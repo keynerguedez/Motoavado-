@@ -27,7 +27,43 @@ function crear(ctx) {
   const vacio = () => ({ puentes: Array.from({ length: PUENTES }, (_, i) => ({ n: i + 1, estado: 'libre' })), log: [], dia: '', vistas: 0 });
   let S = vacio();
   try { const d = JSON.parse(fs.readFileSync(ESTADO, 'utf8')); if (d && Array.isArray(d.puentes) && d.puentes.length === PUENTES) S = d; } catch (e) {}
-  function guardar() { try { const tmp = ESTADO + '.tmp'; fs.writeFileSync(tmp, JSON.stringify(S), { mode: 0o600 }); fs.renameSync(tmp, ESTADO); } catch (e) { console.error('camara:', e.message); } }
+  function guardar() { try { hSync(); } catch (e) {} try { const tmp = ESTADO + '.tmp'; fs.writeFileSync(tmp, JSON.stringify(S), { mode: 0o600 }); fs.renameSync(tmp, ESTADO); } catch (e) { console.error('camara:', e.message); } }
+  // ---------- historial de motos vistas (para validar cómo se leen las placas) ----------
+  const HIST = path.join(ctx.DATA, 'camara-historial.json'), HFOTOS = path.join(FOTOS, 'hist'), MAX_HIST = 600;
+  fs.mkdirSync(HFOTOS, { recursive: true });
+  let H = []; try { H = JSON.parse(fs.readFileSync(HIST, 'utf8')); if (!Array.isArray(H)) H = []; } catch (e) {}
+  let hSucio = false;
+  function hGuardar() { if (!hSucio) return; hSucio = false; try { const tmp = HIST + '.tmp'; fs.writeFileSync(tmp, JSON.stringify(H), { mode: 0o600 }); fs.renameSync(tmp, HIST); } catch (e) { console.error('camara historial:', e.message); } }
+  function hNuevo(p, jpeg) {
+    const id = Date.now().toString(36) + crypto.randomBytes(3).toString('hex');
+    H.push({ id, puente: p.n, llegada: new Date().toISOString(), dia: ctx.fechaCaracas(new Date()), origen: p.origen || '', placa: '', parcial: '', motivo: '', estado: 'esperando', num: null, salida: null, real: '' });
+    while (H.length > MAX_HIST) { const v = H.shift(); try { fs.unlinkSync(path.join(HFOTOS, v.id + '.jpg')); } catch (e) {} }
+    p.hid = id; hSucio = true; hFoto(p, jpeg);
+  }
+  function hFoto(p, jpeg) { if (p.hid && jpeg) try { fs.writeFileSync(path.join(HFOTOS, p.hid + '.jpg'), jpeg, { mode: 0o600 }); } catch (e) {} }
+  function hSync() {
+    S.puentes.forEach(p => {
+      if (!p.hid) return; const e = H.find(x => x.id === p.hid); if (!e) return;
+      const nuevo = { placa: p.placa || '', parcial: p.parcial || '', motivo: p.motivo || '', estado: p.estado === 'libre' ? e.estado : p.estado, num: p.num == null ? null : p.num, aprox: p.aprox || '', sinPlaca: !!p.sinPlacaId };
+      if (Object.keys(nuevo).some(k => (e[k] == null ? '' : e[k]) !== (nuevo[k] == null ? '' : nuevo[k]))) { Object.assign(e, nuevo); hSucio = true; }
+    });
+    hGuardar();
+  }
+  function hSalida(p) { const e = p && p.hid && H.find(x => x.id === p.hid); if (e && !e.salida) { e.salida = new Date().toISOString(); hSucio = true; } }
+  function historial(dia) {
+    const hoy = ctx.fechaCaracas(new Date()), d = /^\d{4}-\d{2}-\d{2}$/.test(dia || '') ? dia : hoy;
+    const items = H.filter(e => e.dia === d).slice().reverse();
+    const r = { total: items.length, completa: 0, parcial: 0, ilegible: 0, verificadas: 0, sinFactura: 0, esperando: 0, conReal: 0, aciertos: 0 };
+    items.forEach(e => {
+      if (e.placa) r.completa++; else if (e.parcial) r.parcial++; else r.ilegible++;
+      if (e.estado === 'ok') r.verificadas++; else if (e.estado === 'alerta') r.sinFactura++; else r.esperando++;
+      if (e.real) { r.conReal++; const real = limpiarPlaca(e.real); if (real && (limpiarPlaca(e.placa) === real || (e.parcial && coincideParcial(e.parcial, real)))) r.aciertos++; }
+    });
+    return { dia: d, hoy, resumen: r, items: items.slice(0, 200).map(e => Object.assign({}, e, { foto: '/api/camara/hist/' + e.id + '.jpg' })) };
+  }
+  function coincideParcial(parcial, real) { const nucleo = parcial.replace(/\?+$/, ''), abierta = nucleo.length < parcial.length; return (abierta ? real.length >= nucleo.length : real.length === nucleo.length) && [...nucleo].every((c, i) => c === '?' || c === real[i]); }
+  function marcarReal(id, real) { const e = H.find(x => x.id === String(id)); if (!e) return false; e.real = limpiarPlaca(real).slice(0, 10); hSucio = true; hGuardar(); return true; }
+  function fotoHist(id) { if (!/^[a-z0-9]{6,20}$/.test(String(id))) return null; try { return fs.readFileSync(path.join(HFOTOS, id + '.jpg')); } catch (e) { return null; } }
   function avisar(kind, txt) { S.log.unshift({ t: new Date().toISOString(), kind, txt }); S.log.length = Math.min(S.log.length, MAX_LOG); }
   function cambioDeDia() { const d = ctx.fechaCaracas(new Date()); if (S.dia !== d) { S.dia = d; S.vistas = 0; } }
 
@@ -144,18 +180,19 @@ function crear(ctx) {
     if (!presente) {
       if (p.estado !== 'libre') {
         avisar(p.estado === 'alerta' ? 'bad' : 'info', 'Puente ' + n + ': la moto ' + (p.placa || 'sin placa leída') + ' bajó' + (p.estado === 'alerta' ? ' sin registrarse.' : '.'));
-        S.puentes[n - 1] = { n, estado: 'libre' };
+        hSalida(p); S.puentes[n - 1] = { n, estado: 'libre' };
       }
       guardar(); return { ok: true };
     }
-    const guardarFoto = () => { p.visto = ahora; try { fs.writeFileSync(path.join(FOTOS, 'camara-puente-' + n + '.jpg'), jpeg, { mode: 0o600 }); } catch (e) {} };
+    const guardarFoto = () => { p.visto = ahora; hFoto(p, jpeg); try { fs.writeFileSync(path.join(FOTOS, 'camara-puente-' + n + '.jpg'), jpeg, { mode: 0o600 }); } catch (e) {} };
     const llegada = (r, origen) => {
       Object.assign(p, { estado: 'esperando', desde: ahora, placa: '', parcial: '', intentos: 1, leidoT: Date.now(), sinMoto: 0, origen }); delete p.num; delete p.alertado; delete p.motivo; delete p.aprox; delete p.sinPlacaId;
       S.vistas++; avisar('info', 'Puente ' + n + (origen === 'revision' ? ': se encontró una moto ya montada.' : ': llegó una moto.'));
+      hNuevo(p, jpeg);
       guardarLectura(p, r);
       guardarFoto();
     };
-    const libera = () => { avisar('info', 'Puente ' + n + ': ya no se ve la moto.'); S.puentes[n - 1] = { n, estado: 'libre' }; S.vistas = Math.max(0, S.vistas - 1); guardar(); return { ok: true, estado: 'libre' }; };
+    const libera = () => { avisar('info', 'Puente ' + n + ': ya no se ve la moto.'); hSalida(p); S.puentes[n - 1] = { n, estado: 'libre' }; S.vistas = Math.max(0, S.vistas - 1); guardar(); return { ok: true, estado: 'libre' }; };
     const modeloBarato = process.env.CAMARA_MODELO_REVISION || 'claude-haiku-5-5';
     // Revisión de zona quieta: cada cierto tiempo se mira la zona igual, por si hay una moto que ya estaba montada
     // o que el detector de movimiento no notó, y para saber si la moto que estaba ya se fue.
@@ -364,12 +401,12 @@ function crear(ctx) {
   // ---------- lo que ve la pantalla ----------
   function publico() {
     cambioDeDia();
-    S.puentes.forEach(evaluar);
+    S.puentes.forEach(evaluar); try { hSync(); } catch (e) {}
     return { dia: S.dia, vistas: S.vistas, contacto: S.contacto || null, vista: S.vistaT ? { t: S.vistaT, zonas: S.zonas || [] } : null, puentes: S.puentes.map(p => Object.assign({}, p, { foto: p.estado !== 'libre' })), log: S.log.slice(0, 30), ahora: new Date().toISOString() };
   }
   function foto(n) { try { return fs.readFileSync(path.join(FOTOS, 'camara-puente-' + Number(n) + '.jpg')); } catch (e) { return null; } }
 
-  return { evento, vista, fotoVista, publico, foto, alarma, fotoRecibida, leerPlaca, FOTOS4K, PUENTES };
+  return { evento, vista, fotoVista, publico, foto, historial, marcarReal, fotoHist, alarma, fotoRecibida, leerPlaca, FOTOS4K, PUENTES };
 }
 
 module.exports = { crear };

@@ -11,7 +11,9 @@ const path = require('path');
 const https = require('https');
 const crypto = require('crypto');
 
-const PUENTES = 4;
+const PUENTES = 5;            // 1 a 4: los puentes. 5: la zona extra, a la izquierda del puente 1, para motos que se lavan fuera del puente
+const EXTRA = 5;
+const nombre = n => n === EXTRA ? 'Zona fuera del puente' : nombre(n);
 const MIN_GRACIA = 5;           // minutos que se le da a una moto montada para que la registren antes de alertar
 const MAX_FOTO = 3 * 1024 * 1024;
 const MAX_REINTENTOS_LECTURA = 3;   // lecturas seguidas al llegar la moto (el agente reenvía a los 8 y 20 s)
@@ -26,7 +28,7 @@ function crear(ctx) {
 
   const vacio = () => ({ puentes: Array.from({ length: PUENTES }, (_, i) => ({ n: i + 1, estado: 'libre' })), log: [], dia: '', vistas: 0 });
   let S = vacio();
-  try { const d = JSON.parse(fs.readFileSync(ESTADO, 'utf8')); if (d && Array.isArray(d.puentes) && d.puentes.length === PUENTES) S = d; } catch (e) {}
+  try { const d = JSON.parse(fs.readFileSync(ESTADO, 'utf8')); if (d && Array.isArray(d.puentes) && d.puentes.length === PUENTES - 1) d.puentes.push({ n: EXTRA, estado: 'libre' }); if (d && Array.isArray(d.puentes) && d.puentes.length === PUENTES) S = d; } catch (e) {}
   function guardar() { try { hSync(); } catch (e) {} try { const tmp = ESTADO + '.tmp'; fs.writeFileSync(tmp, JSON.stringify(S), { mode: 0o600 }); fs.renameSync(tmp, ESTADO); } catch (e) { console.error('camara:', e.message); } }
   // ---------- historial de motos vistas (para validar cómo se leen las placas) ----------
   const HIST = path.join(ctx.DATA, 'camara-historial.json'), HFOTOS = path.join(FOTOS, 'hist'), MAX_HIST = 600;
@@ -166,23 +168,23 @@ function crear(ctx) {
     let v = registrada(p.placa), aprox = false;
     if (!v && !p.placa && p.parcial) { v = registradaParcial(p.parcial); aprox = !!v; }
     if (v) {
-      if (p.estado !== 'ok') avisar('ok', 'Puente ' + p.n + ': ' + (aprox ? 'la lectura parcial ' + p.parcial + ' coincide con la moto ' + limpiarPlaca(v.placa) : 'se registró la moto ' + p.placa) + ' (#' + v.num + ').');
+      if (p.estado !== 'ok') avisar('ok', nombre(p.n) + ': ' + (aprox ? 'la lectura parcial ' + p.parcial + ' coincide con la moto ' + limpiarPlaca(v.placa) : 'se registró la moto ' + p.placa) + ' (#' + v.num + ').');
       p.estado = 'ok'; p.num = v.num; if (aprox) p.aprox = limpiarPlaca(v.placa); else delete p.aprox; return;
     }
     // Moto sin placa legible: si hoy hay una factura marcada "sin placa" que ningún otro puente tiene asignada, se da por registrada.
     if (!p.placa && !p.parcial) {
       const tomadas = new Set(S.puentes.filter(x => x !== p && x.sinPlacaId).map(x => x.sinPlacaId));
       const sp = ctx.ventasDeHoy().find(x => x.sinPlaca && !tomadas.has(x.id) && (p.sinPlacaId ? x.id === p.sinPlacaId : true));
-      if (sp) { if (p.estado !== 'ok') avisar('ok', 'Puente ' + p.n + ': moto sin placa legible, coincide con la factura sin placa #' + sp.num + '.'); p.estado = 'ok'; p.num = sp.num; p.sinPlacaId = sp.id; return; }
+      if (sp) { if (p.estado !== 'ok') avisar('ok', nombre(p.n) + ': moto sin placa legible, coincide con la factura sin placa #' + sp.num + '.'); p.estado = 'ok'; p.num = sp.num; p.sinPlacaId = sp.id; return; }
     }
     const min = (Date.now() - new Date(p.desde).getTime()) / 60000;
-    if (min >= MIN_GRACIA && p.estado !== 'alerta') { p.estado = 'alerta'; p.alertado = true; avisar('bad', 'Puente ' + p.n + ': moto sin factura' + (p.placa ? '. Placa leída ' + p.placa + '.' : p.parcial ? '. Placa leída en parte: ' + p.parcial + '.' : '. Placa no legible.')); }
+    if (min >= MIN_GRACIA && p.estado !== 'alerta') { p.estado = 'alerta'; p.alertado = true; avisar('bad', nombre(p.n) + ': moto sin factura' + (p.placa ? '. Placa leída ' + p.placa + '.' : p.parcial ? '. Placa leída en parte: ' + p.parcial + '.' : '. Placa no legible.')); }
   }
   // Guarda lo que leyó el modelo: placa completa, o la lectura parcial con más caracteres conocidos.
   function guardarLectura(p, r) {
-    if (r.placa) { p.placa = r.placa; p.parcial = ''; avisar('info', 'Puente ' + p.n + ': placa leída ' + r.placa + '.'); return; }
+    if (r.placa) { p.placa = r.placa; p.parcial = ''; avisar('info', nombre(p.n) + ': placa leída ' + r.placa + '.'); return; }
     p.motivo = r.motivo;
-    if (r.parcial && conocidos(r.parcial) >= conocidos(p.parcial)) { if (r.parcial !== p.parcial) avisar('info', 'Puente ' + p.n + ': placa leída en parte: ' + r.parcial + '.'); p.parcial = r.parcial; }
+    if (r.parcial && conocidos(r.parcial) >= conocidos(p.parcial)) { if (r.parcial !== p.parcial) avisar('info', nombre(p.n) + ': placa leída en parte: ' + r.parcial + '.'); p.parcial = r.parcial; }
   }
 
   // ---------- núcleo: una imagen de un puente, venga del agente o de la cámara directa ----------
@@ -195,7 +197,7 @@ function crear(ctx) {
     S.contacto = ahora; // última vez que llegó algo de la cámara: la pantalla avisa si se queda sin señal
     if (!presente) {
       if (p.estado !== 'libre') {
-        avisar(p.estado === 'alerta' ? 'bad' : 'info', 'Puente ' + n + ': la moto ' + (p.placa || 'sin placa leída') + ' bajó' + (p.estado === 'alerta' ? ' sin registrarse.' : '.'));
+        avisar(p.estado === 'alerta' ? 'bad' : 'info', nombre(n) + ': la moto ' + (p.placa || 'sin placa leída') + ' bajó' + (p.estado === 'alerta' ? ' sin registrarse.' : '.'));
         hSalida(p); S.puentes[n - 1] = { n, estado: 'libre' };
       }
       guardar(); return { ok: true };
@@ -203,12 +205,12 @@ function crear(ctx) {
     const guardarFoto = () => { p.visto = ahora; hFoto(p, jpeg); try { fs.writeFileSync(path.join(FOTOS, 'camara-puente-' + n + '.jpg'), jpeg, { mode: 0o600 }); } catch (e) {} };
     const llegada = (r, origen) => {
       Object.assign(p, { estado: 'esperando', desde: ahora, placa: '', parcial: '', intentos: 1, leidoT: Date.now(), sinMoto: 0, origen }); delete p.num; delete p.alertado; delete p.motivo; delete p.aprox; delete p.sinPlacaId;
-      S.vistas++; avisar('info', 'Puente ' + n + (origen === 'revision' ? ': se encontró una moto ya montada.' : ': llegó una moto.'));
+      S.vistas++; avisar('info', nombre(n) + (origen === 'revision' ? ': se encontró una moto ya montada.' : ': llegó una moto.'));
       hAbrir(p, jpeg);
       guardarLectura(p, r);
       guardarFoto();
     };
-    const libera = () => { avisar('info', 'Puente ' + n + ': ya no se ve la moto.'); hSalida(p); S.puentes[n - 1] = { n, estado: 'libre' }; S.vistas = Math.max(0, S.vistas - 1); guardar(); return { ok: true, estado: 'libre' }; };
+    const libera = () => { avisar('info', nombre(n) + ': ya no se ve la moto.'); hSalida(p); S.puentes[n - 1] = { n, estado: 'libre' }; S.vistas = Math.max(0, S.vistas - 1); guardar(); return { ok: true, estado: 'libre' }; };
     const modeloBarato = process.env.CAMARA_MODELO_REVISION || 'claude-haiku-5-5';
     // Revisión de zona quieta: cada cierto tiempo se mira la zona igual, por si hay una moto que ya estaba montada
     // o que el detector de movimiento no notó, y para saber si la moto que estaba ya se fue.
@@ -282,8 +284,13 @@ function crear(ctx) {
 
   // Zonas de los puentes (fracciones de la imagen). Por defecto 4 tiras verticales; se ajustan en data/camara-zonas.json.
   function zonas() {
-    try { const z = JSON.parse(fs.readFileSync(ZONAS_ARCHIVO, 'utf8')); const ok = (Array.isArray(z) ? z : []).filter(x => Number.isInteger(x.puente) && x.puente >= 1 && x.puente <= PUENTES && [x.x, x.y, x.w, x.h].every(v => typeof v === 'number' && v >= 0 && v <= 1 && isFinite(v))); if (ok.length) return ok; } catch (e) {}
-    return Array.from({ length: PUENTES }, (_, i) => ({ puente: i + 1, x: i / PUENTES, y: 0.15, w: 1 / PUENTES, h: 0.8 }));
+    let ok = [];
+    try { const z = JSON.parse(fs.readFileSync(ZONAS_ARCHIVO, 'utf8')); ok = (Array.isArray(z) ? z : []).filter(x => Number.isInteger(x.puente) && x.puente >= 1 && x.puente <= PUENTES && [x.x, x.y, x.w, x.h].every(v => typeof v === 'number' && v >= 0 && v <= 1 && isFinite(v))); } catch (e) {}
+    if (!ok.length) return Array.from({ length: PUENTES - 1 }, (_, i) => ({ puente: i + 1, x: i / (PUENTES - 1), y: 0.15, w: 1 / (PUENTES - 1), h: 0.8 }));
+    // La zona extra se pone sola a la izquierda del puente 1 (mismo tamaño) si el archivo no la define.
+    const p1 = ok.find(x => x.puente === 1);
+    if (!ok.some(x => x.puente === EXTRA) && p1) { const w = p1.w, x = Math.max(0, p1.x - w - 0.01); if (x + w <= p1.x) ok.push({ puente: EXTRA, x: Math.round(x * 1000) / 1000, y: p1.y, w, h: p1.h }); }
+    return ok;
   }
   function puenteDe(cx, cy) {
     const zs = zonas(); let mejor = null, dist = Infinity;
@@ -372,7 +379,7 @@ function crear(ctx) {
       enCurso[pn] = true;
       try {
         const f = await fotoDespuesDe(llego - 1000);
-        if (!f) { avisar('info', 'Puente ' + pn + ': hubo movimiento pero no llegó la foto 4K.'); guardar(); return; }
+        if (!f) { avisar('info', nombre(pn) + ': hubo movimiento pero no llegó la foto 4K.'); guardar(); return; }
         dep('foto', f.nombre, 'tras', Date.now() - llego, 'ms');
         if (ultimaFoto[pn] === f.nombre) return; // ya se miró esta misma foto
         ultimaFoto[pn] = f.nombre;

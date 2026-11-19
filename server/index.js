@@ -354,6 +354,16 @@ async function api(req, res, ruta) {
       const f = camara.fotoVista(); if (!f) return json(res, 404, { error: 'Sin imagen.' });
       res.writeHead(200, { 'content-type': 'image/jpeg', 'cache-control': 'no-store' }); return res.end(f);
     }
+    if (ruta === '/api/camara/historial') {
+      if (!puede(yo, 'vigilante')) return json(res, 403, { error: 'No tienes permiso.' });
+      return json(res, 200, camara.historial((/[?&]dia=([\d-]+)/.exec(req.url) || [])[1]));
+    }
+    const hm = /^\/api\/camara\/hist\/([a-z0-9]+)\.jpg$/.exec(ruta);
+    if (hm) {
+      if (!puede(yo, 'vigilante')) return json(res, 403, { error: 'No tienes permiso.' });
+      const f = camara.fotoHist(hm[1]); if (!f) return json(res, 404, { error: 'Sin foto.' });
+      res.writeHead(200, { 'content-type': 'image/jpeg', 'cache-control': 'private, max-age=3600' }); return res.end(f);
+    }
     const fm = /^\/api\/camara\/foto\/(\d)$/.exec(ruta);
     if (fm) {
       if (!puede(yo, 'vigilante')) return json(res, 403, { error: 'No tienes permiso.' });
@@ -415,6 +425,10 @@ async function api(req, res, ruta) {
     if (!puede(yo, 'autorizar')) return json(res, 403, { error: 'No tienes permiso para autorizar.' });
     const r = decidirAut(d, yo);
     return json(res, r.error ? 400 : 200, r);
+  }
+  if (ruta === '/api/camara/historial/real') {
+    if (!puede(yo, 'vigilante')) return json(res, 403, { error: 'No tienes permiso.' });
+    return camara.marcarReal(d.id, d.real) ? json(res, 200, { ok: true }) : json(res, 404, { error: 'No se encontró la lectura.' });
   }
   if (ruta === '/api/ticket') {
     if (!puede(yo, 'tablet')) return json(res, 403, { error: 'No tienes permiso.' });

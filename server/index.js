@@ -102,7 +102,7 @@ function registrarVenta(d, yo, extra) {
   const ahora = new Date(), dia = fechaCaracas(ahora), archivo = path.join(DATA, 'ventas-' + dia.slice(0, 7) + '.jsonl');
   let delDia = 0; try { delDia = fs.readFileSync(archivo, 'utf8').split('\n').filter(l => l.includes('"dia":"' + dia + '"')).length; } catch (e) {}
   const v = { id: crypto.randomBytes(6).toString('hex'), num: delDia + 1, dia, fecha: ahora.toISOString(), usuario: yo.nombre, usuarioId: yo.id, telefono: tel, cliente: limpio(d.cliente, 60), placa, sinPlaca, modelo: limpio(d.modelo, 60),
-    servicios, total, descuento: limpio(d.descuento, 10), lavador: limpio(d.lavador, 40), metodo: limpio(d.metodo, 20), ref: limpio(d.ref, 30), moneda: limpio(d.moneda, 6), monto: dinero(d.monto), tasa: Number(d.tasa) > 0 ? Number(d.tasa) : null,
+    servicios, total, descuento: limpio(d.descuento, 10), lavador: limpio(d.lavador, 40), metodo: limpio(d.metodo, 20), ref: limpio(d.ref, 30), moneda: limpio(d.moneda, 6), monto: dinero(d.monto), esperado: dinero(d.esperado), tasa: Number(d.tasa) > 0 ? Number(d.tasa) : null,
     estado: pendiente ? 'pendiente' : 'pagada', tipo };
   if (nota) v.nota = nota;
   if (extra.autId) { v.autId = extra.autId; v.metodo = ETIQUETA_TIPO[tipo] || tipo; v.descuento = '100%'; v.monto = 0; }
@@ -125,7 +125,7 @@ function cobrarPendiente(d, yo) {
     if (!v) continue;
     if (v.estado !== 'pendiente') return { error: 'Esa factura ya está cobrada.' };
     if (!limpio(d.metodo, 20)) return { error: 'Falta el método de pago.' };
-    Object.assign(v, { estado: 'pagada', metodo: limpio(d.metodo, 20), ref: limpio(d.ref, 30), moneda: limpio(d.moneda, 6), monto: dinero(d.monto), tasa: Number(d.tasa) > 0 ? Number(d.tasa) : null, cobradaPor: yo.nombre, cobradaFecha: new Date().toISOString(), cobradaDia: hoy });
+    Object.assign(v, { estado: 'pagada', metodo: limpio(d.metodo, 20), ref: limpio(d.ref, 30), moneda: limpio(d.moneda, 6), monto: dinero(d.monto), esperado: dinero(d.esperado), tasa: Number(d.tasa) > 0 ? Number(d.tasa) : null, cobradaPor: yo.nombre, cobradaFecha: new Date().toISOString(), cobradaDia: hoy });
     escribirLineas(archivo, filas);
     return { ok: true, id: v.id, num: v.num };
   }

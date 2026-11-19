@@ -207,18 +207,34 @@ function crear(ctx) {
     const img = j => ({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: j.toString('base64') } });
     const cuerpo = JSON.stringify({ model: process.env.CAMARA_MODELO || 'claude-sonnet-5-5', max_tokens: 1500, messages: [{ role: 'user', content: [
       { type: 'text', text: 'Foto 1 (la tomó el encargado al registrar la moto):' }, img(a), { type: 'text', text: 'Foto 2 (cámara fija sobre el puente de lavado):' }, img(b),
-      { type: 'text', text: 'Son de un lavadero de motos. ¿La moto de la foto 1 es la misma que la moto montada en el puente de la foto 2? Compara color, tipo, marca, maletas, carenado, accesorios y estado; ignora personas, fondo y luz. Responde solo JSON: {"misma":true,"confianza":"alta"}. "misma" es true, false, o null si no puedes saberlo; "confianza" es "alta", "media" o "baja".' }] }] });
+      { type: 'text', text: 'Son de un lavadero de motos. ¿La moto de la foto 1 es la misma que la moto montada en el puente de la foto 2? Compara color, tipo, marca, maletas, carenado, accesorios y estado; ignora personas, fondo y luz. Responde solo JSON: {"misma":true,"confianza":"alta","motivo":"frase corta"}. "misma" es true, false, o null si no puedes saberlo; "confianza" es "alta", "media" o "baja"; "motivo" es una frase de menos de 20 palabras con lo que viste (qué coincide o qué difiere).' }] }] });
     return new Promise(ok => {
       const r = https.request({ hostname: 'api.anthropic.com', path: '/v1/messages', method: 'POST', timeout: 30000,
         headers: { 'content-type': 'application/json', 'x-api-key': clave, 'anthropic-version': '2023-06-01', 'content-length': Buffer.byteLength(cuerpo) } }, res => {
         let t = ''; res.on('data', c => { t += c; });
-        res.on('end', () => { try { const txt = (JSON.parse(t).content || []).map(x => x.text || '').join(''); const j = JSON.parse(/\{[\s\S]*\}/.exec(txt)[0]); ok({ misma: j.misma === true ? true : j.misma === false ? false : null, confianza: ['alta', 'media', 'baja'].includes(j.confianza) ? j.confianza : 'baja' }); } catch (e) { ok({ misma: null }); } });
+        res.on('end', () => { try { const txt = (JSON.parse(t).content || []).map(x => x.text || '').join(''); const j = JSON.parse(/\{[\s\S]*\}/.exec(txt)[0]); ok({ misma: j.misma === true ? true : j.misma === false ? false : null, confianza: ['alta', 'media', 'baja'].includes(j.confianza) ? j.confianza : 'baja', motivo: String(j.motivo || '').slice(0, 200) }); } catch (e) { ok({ misma: null }); } });
       });
       r.on('error', () => ok({ misma: null })); r.on('timeout', () => { r.destroy(); ok({ misma: null }); });
       r.end(cuerpo);
     });
   }
   const comparar = (a, b) => (ctx.compararFotos || compararFotos)(a, b);
+  // Registro de cada cruce (con las fotos comparadas y lo que dijo Claude) para que el dueño valide si acertó.
+  const CRU = path.join(ctx.DATA, 'camara-cruces.json'), CFOTOS = path.join(FOTOS, 'cruce');
+  fs.mkdirSync(CFOTOS, { recursive: true });
+  let C = []; try { C = JSON.parse(fs.readFileSync(CRU, 'utf8')); if (!Array.isArray(C)) C = []; } catch (e) {}
+  function cGuardar() { try { const tmp = CRU + '.tmp'; fs.writeFileSync(tmp, JSON.stringify(C), { mode: 0o600 }); fs.renameSync(tmp, CRU); } catch (e) { console.error('camara cruces:', e.message); } }
+  function cNuevo(v, origen, comps, tipo, puente) {
+    const id = Date.now().toString(36) + crypto.randomBytes(3).toString('hex');
+    const cs = comps.map(x => { const nf = id + '-p' + x.p.n + '.jpg'; try { fs.writeFileSync(path.join(CFOTOS, nf), x.foto, { mode: 0o600 }); } catch (e) {} return { puente: x.p.n, misma: x.r.misma, confianza: x.r.confianza || null, motivo: x.r.motivo || '', foto: nf }; });
+    C.unshift({ id, t: new Date().toISOString(), origen, venta: { id: v.id, num: v.num, placa: v.placa || '', sinPlaca: !!v.sinPlaca }, comps: cs, tipo, puente: puente || null, valido: null });
+    while (C.length > 100) { const x = C.pop(); x.comps.forEach(k => { try { fs.unlinkSync(path.join(CFOTOS, k.foto)); } catch (e) {} }); }
+    cGuardar();
+  }
+  const cruces = () => { const v = C.filter(x => x.valido !== null); return { resumen: { total: C.length, validados: v.length, acertó: v.filter(x => x.valido === true).length }, items: C.slice(0, 50).map(x => Object.assign({}, x, { fotoVenta: '/api/camara/cruce-venta/' + x.venta.id + '.jpg', comps: x.comps.map(k => Object.assign({}, k, { url: '/api/camara/cruce/' + k.foto })) })) }; };
+  function validarCruce(id, ok) { const e = C.find(x => x.id === String(id)); if (!e) return false; e.valido = ok === true ? true : ok === false ? false : null; cGuardar(); return true; }
+  const fotoCruce = nombre => /^[a-z0-9]+-p[1-5]\.jpg$/.test(String(nombre)) ? (() => { try { return fs.readFileSync(path.join(CFOTOS, nombre)); } catch (e) { return null; } })() : null;
+  const fotoVentaId = id => /^[a-f0-9]{6,20}$/.test(String(id)) ? fotoVenta(id) : null;
   const fotoVenta = id => { try { return fs.readFileSync(path.join(FOTOS, 'venta', id + '.jpg')); } catch (e) { return null; } };
   const fotoPuente = n => { try { return fs.readFileSync(path.join(FOTOS, 'camara-puente-' + n + '.jpg')); } catch (e) { return null; } };
   const buena = r => r && r.misma === true && r.confianza !== 'baja';
@@ -236,11 +252,13 @@ function crear(ctx) {
     if (ya) return { puente: ya.n, misma: true, por: ya.cruceId === v.id ? 'foto' : 'placa' };
     const cands = S.puentes.filter(p => (p.estado === 'esperando' || p.estado === 'lavando' || p.estado === 'alerta') && !p.cruceId);
     if (!cands.length) { pendiente(v); return { puente: null, pendiente: true }; }
-    const res = await Promise.all(cands.map(async p => { const f = fotoPuente(p.n); return f ? { p, r: await comparar(jpeg, f) } : null; }));
+    const res = await Promise.all(cands.map(async p => { const f = fotoPuente(p.n); return f ? { p, r: await comparar(jpeg, f), foto: f } : null; }));
+    const comps = res.filter(Boolean);
     const si = res.filter(x => x && buena(x.r)).sort((a, b) => (b.r.confianza === 'alta') - (a.r.confianza === 'alta'));
     const unico = si.length === 1 || (si.length > 1 && si[0].r.confianza === 'alta' && si[1].r.confianza !== 'alta');
-    if (unico && S.puentes[si[0].p.n - 1] === si[0].p && si[0].p.estado !== 'libre') { enlazar(si[0].p, v); return { puente: si[0].p.n, misma: true, por: 'foto' }; }
+    if (unico && S.puentes[si[0].p.n - 1] === si[0].p && si[0].p.estado !== 'libre') { cNuevo(v, 'registro', comps, 'enlazada', si[0].p.n); enlazar(si[0].p, v); return { puente: si[0].p.n, misma: true, por: 'foto' }; }
     pendiente(v);
+    if (comps.length) cNuevo(v, 'registro', comps, si.length > 1 ? 'ambigua' : 'sin-coincidencia', null);
     if (si.length > 1) { avisar('bad', 'La foto de la moto #' + v.num + ' encaja con varias motos de los puentes; no se pudo elegir una.'); return { puente: null, ambigua: true }; }
     avisar('bad', 'La foto de la moto #' + v.num + (v.placa ? ' (' + v.placa + ')' : '') + ' no coincide con ninguna moto de los puentes (' + cands.map(p => nombre(p.n)).join(', ') + ').');
     return { puente: null, misma: false, comparadas: cands.map(p => p.n) };
@@ -252,7 +270,9 @@ function crear(ctx) {
     p.cruceT = Date.now();
     for (const c of S.cruces.slice(0, 3)) {
       const v = ctx.ventasDeHoy().find(x => x.id === c.id), f = fotoVenta(c.id); if (!v || !f) continue;
-      if (buena(await comparar(f, jpeg)) && S.puentes[p.n - 1] === p && p.estado !== 'libre') { enlazar(p, v); return true; }
+      const r = await comparar(f, jpeg), ok = buena(r) && S.puentes[p.n - 1] === p && p.estado !== 'libre';
+      if (ok) { cNuevo(v, 'revisión', [{ p, r, foto: jpeg }], 'enlazada', p.n); enlazar(p, v); return true; }
+      if (r && r.misma !== null && !C.some(x => x.venta.id === v.id && x.comps.some(k => k.puente === p.n) && Date.now() - Date.parse(x.t) < 30 * 60e3)) cNuevo(v, 'revisión', [{ p, r, foto: jpeg }], 'sin-coincidencia', null);
     }
     return false;
   }
@@ -568,7 +588,7 @@ function crear(ctx) {
   }
   function foto(n) { try { return fs.readFileSync(path.join(FOTOS, 'camara-puente-' + Number(n) + '.jpg')); } catch (e) { return null; } }
 
-  return { cruzar, leerFoto, evento, vista, fotoVista, publico, foto, historial, marcarReal, fotoHist, alarma, fotoRecibida, leerPlaca, FOTOS4K, PUENTES };
+  return { cruces, validarCruce, fotoCruce, fotoVentaId, cruzar, leerFoto, evento, vista, fotoVista, publico, foto, historial, marcarReal, fotoHist, alarma, fotoRecibida, leerPlaca, FOTOS4K, PUENTES };
 }
 
 module.exports = { crear };

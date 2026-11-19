@@ -374,6 +374,15 @@ async function api(req, res, ruta) {
   }
   if (req.method !== 'POST') return json(res, 405, { error: 'Método no permitido.' });
   if (!mismoOrigen(req)) return json(res, 403, { error: 'Origen no permitido.' });
+  // La foto de la moto que toma el encargado llega como imagen cruda (el JSON no admite fotos): se cruza con la moto del puente.
+  if (ruta === '/api/ventas/foto') {
+    if (!yo) return json(res, 401, { error: 'Sin sesión.' });
+    if (!puede(yo, 'tablet')) return json(res, 403, { error: 'No tienes permiso.' });
+    let jpeg; try { jpeg = await camara.leerFoto(req); } catch (e) { return json(res, 400, { error: 'Falta la foto (image/jpeg, máx. 3 MB).' }); }
+    const id = new URL(req.url, 'http://localhost').searchParams.get('id') || '', v = diaDeHoy().ventas.find(x => x.id === id);
+    if (!v || jpeg.length < 1000) return json(res, 404, { error: 'No se encontró la factura de hoy.' });
+    return json(res, 200, Object.assign({ ok: true }, await camara.cruzar(v, jpeg)));
+  }
   let d; try { d = await cuerpoJson(req); } catch (e) { return json(res, 400, { error: 'Datos no válidos.' }); }
   const lista = leerUsuarios(), ip = ipDe(req);
 

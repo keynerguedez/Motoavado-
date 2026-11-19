@@ -418,7 +418,7 @@ function renderTablet(){
     var blocked=o.disc&&o.disc.status==="pending";
     var side=o.pay?'<span class="pill ok">Cobrada · '+esc(o.pay.method)+'</span>'
       :(blocked?'<span class="pill warn">No cobrar todavía</span>':'<button class="btn pri sm" data-act="pay" data-n="'+o.num+'">Cobrar</button>');
-    return '<div class="order"><img class="thumb" src="'+o.photo+'" alt="Foto de la moto '+o.num+'"><div class="info"><div class="n">#'+String(o.num).padStart(3,"0")+' · '+esc(o.placa)+'</div><div class="svc">'+esc(o.modelo||"")+(o.modelo?" · ":"")+esc(names(o))+'</div><div class="svc">'+esc(cliName(o))+' · '+fmtTel(o.tel)+'</div><div class="svc">'+o.time+' · Lavador: '+esc(o.lav||"")+(o.tipo&&o.tipo!=="normal"?' · '+(o.tipo==="garantia"?"Garantía":"Lavado autorizado"):"")+'</div>'+(o.nota?'<div class="svc">Pago pendiente: '+esc(o.nota)+'</div>':"")+discPill(o)+(o.ticket?' <span class="pill mut">Ticket enviado</span>':'')+'</div><div class="side"><b class="num">'+usd(total(o))+'</b>'+side+'</div></div>';
+    return '<div class="order"><img class="thumb" src="'+o.photo+'" alt="Foto de la moto '+o.num+'"><div class="info"><div class="n">#'+String(o.num).padStart(3,"0")+' · '+esc(o.placa)+'</div><div class="svc">'+esc(o.modelo||"")+(o.modelo?" · ":"")+esc(names(o))+'</div><div class="svc">'+esc(cliName(o))+' · '+fmtTel(o.tel)+'</div><div class="svc">'+o.time+' · Lavador: '+esc(o.lav||"")+(o.tipo&&o.tipo!=="normal"?' · '+(o.tipo==="garantia"?"Garantía":"Lavado autorizado"):"")+'</div>'+(o.nota?'<div class="svc">Pago pendiente: '+esc(o.nota)+'</div>':"")+(o.cruceTxt?'<div class="svc">'+esc(o.cruceTxt)+'</div>':"")+discPill(o)+(o.ticket?' <span class="pill mut">Ticket enviado</span>':'')+'</div><div class="side"><b class="num">'+usd(total(o))+'</b>'+side+'</div></div>';
   };
   var gs=groupOrders();
   $("t-list").innerHTML=gs.map(function(g){
@@ -452,12 +452,12 @@ function addOrder(pend){
   else if(pend===true&&pct)e="El pago pendiente es solo para lavados normales y sin descuento.";
   else if(pend===true&&nota.length<3)e="Escribe la nota que explica por qué el pago queda pendiente.";
   $("f-err").textContent=e; if(e)return;
-  var o={num:S.orders.length+1,time:hhmm(new Date()),placa:placa,sin:sin,tipo:tipo,modelo:$("f-modelo").value.trim(),photo:draft.photo||ph("#55606a"),svc:ids,lav:lav,tel:tel,_nombre:nombre,disc:pct?{pct:pct,motivo:motivo,status:"pending"}:null,pay:null,op:S.user,nota:pend===true?nota:""};
+  var o={num:S.orders.length+1,time:hhmm(new Date()),placa:placa,sin:sin,tipo:tipo,modelo:$("f-modelo").value.trim(),photo:draft.photo||ph("#55606a"),fotoGrande:draft.fotoGrande||null,svc:ids,lav:lav,tel:tel,_nombre:nombre,disc:pct?{pct:pct,motivo:motivo,status:"pending"}:null,pay:null,op:S.user,nota:pend===true?nota:""};
   if(pend===true){
     if(!window.__yo){$("f-err").textContent="El pago pendiente solo funciona con sesión real.";return}
     jpost("/api/ventas",{telefono:tel,cliente:nombre||"Sin nombre",placa:sin?"":placa,sinPlaca:sin,modelo:o.modelo,servicios:ids.map(function(id){return{id:id,nombre:svc(id).name,precio:svc(id).price}}),total:total(o),lavador:lav,estado:"pendiente",nota:nota}).then(function(r){
       if(!r.ok){$("f-err").textContent=r.j.error||"No se pudo guardar en el servidor.";return}
-      o.srvId=r.j.id; commitOrder(o); o.num=r.j.num||o.num; renderAll(); $("f-err").textContent="Moto #"+o.num+" registrada con el pago pendiente. Ya puede pasar al puente; ciérrala con Cobrar cuando pague.";
+      o.srvId=r.j.id; commitOrder(o); o.num=r.j.num||o.num; enviarFoto(o,r.j.id); renderAll(); $("f-err").textContent="Moto #"+o.num+" registrada con el pago pendiente. Ya puede pasar al puente; ciérrala con Cobrar cuando pague.";
     });return}
   if(pct){
     if(!window.__yo){commitOrder(o);$("f-err").textContent="Moto #"+o.num+" en espera: se pidió autorización. Se cobra cuando respondan, antes de lavar.";return}
@@ -528,11 +528,19 @@ function renderClientes(){
   $("c-cuenta").textContent=CLI.length+(CLI.length===1?" cliente":" clientes");
   $("c-rows").innerHTML=l.length?l.map(function(c){return '<tr><td>'+esc(c.nombre||"Sin nombre")+(c.frecuente?' <b style="color:var(--ok,#0a6b3d)">★ Frecuente</b>':'')+'</td><td class="num">'+esc(fmtTel(c.telefono))+'</td><td>'+c.motos.map(function(m){return '<b>'+esc(m.placa)+'</b>'+(m.modelo?' · '+esc(m.modelo):'')}).join("<br>")+'</td><td class="r num">'+c.visitas+'</td><td>'+(c.ultima?new Date(c.ultima).toLocaleDateString("es-VE"):"hoy")+'</td><td>'+esc(c.ultimoServicio||"")+'</td><td class="r num">'+usd(c.gastado)+'</td></tr>'}).join(""):'<tr><td colspan="7" class="note">'+(CLI.length?"Nadie coincide con la búsqueda.":"Todavía no hay clientes. Aparecen aquí al cobrar la primera moto.")+'</td></tr>';
 }
+/* La foto del encargado se cruza en el servidor con la moto del puente (Claude compara las dos imágenes). */
+function enviarFoto(o,id){
+  if(!window.__yo||!o.fotoGrande||!id||o.fotoEnviada)return; o.fotoEnviada=true;
+  fetch("/api/ventas/foto?id="+encodeURIComponent(id),{method:"POST",headers:{"content-type":"image/jpeg"},body:o.fotoGrande}).then(function(r){return r.json().catch(function(){return{}})}).then(function(j){
+    var t=j.puente?"✓ La foto coincide con la moto del "+(j.puente===5?"área fuera del puente":"puente "+j.puente)+(j.por==="placa"?" (también por la placa)":"")+".":j.ambigua?"La foto se parece a varias motos de los puentes; el dueño la verá en Vigilante.":j.misma===false?"⚠ La foto NO coincide con ninguna moto de los puentes. Revisa que sea la moto correcta.":j.pendiente?"Foto guardada. Se cruzará cuando la cámara vea la moto en un puente.":"";
+    if(t){o.cruceTxt=t;$("f-err").textContent="Moto #"+o.num+": "+t;renderAll()}
+  }).catch(function(){});
+}
 function saveSale(o,sigue){
   if(!window.__yo){sigue();return} var a=paidAmt(o);
   if(o.srvId){jpost("/api/ventas/cobrar",{id:o.srvId,metodo:o.pay.method,ref:o.pay.ref,moneda:a.cur,monto:a.val,esperado:o.pay.esp,tasa:o.pay.tasa}).then(function(r){if(!r.ok)$("f-err").textContent="Ojo: el cobro de la moto #"+o.num+" no se guardó en el servidor ("+(r.j.error||"error")+"). Avisa al dueño.";sigue(r.ok?o.num:null)}).catch(function(){$("f-err").textContent="Ojo: sin conexión, el cobro de la moto #"+o.num+" no se guardó.";sigue(null)});return}
   fetch("/api/ventas",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({telefono:o.tel,cliente:cliName(o),placa:o.sin?"":o.placa,sinPlaca:!!o.sin,modelo:o.modelo,servicios:o.svc.map(function(id){return{id:id,nombre:svc(id).name,precio:svc(id).price}}),total:total(o),descuento:o.disc&&o.disc.status==="approved"?o.disc.pct+"%":"",lavador:o.lav,metodo:o.pay.method,ref:o.pay.ref,moneda:a.cur,monto:a.val,esperado:o.pay.esp,tasa:o.pay.tasa})})
-  .then(function(r){return r.json().then(function(j){if(!r.ok)$("f-err").textContent="Ojo: la moto #"+o.num+" no se guardó en el servidor. Avisa al dueño.";sigue(r.ok?j.num:null)})}).catch(function(){$("f-err").textContent="Ojo: sin conexión, la moto #"+o.num+" no se guardó en el servidor.";sigue(null)});
+  .then(function(r){return r.json().then(function(j){if(!r.ok)$("f-err").textContent="Ojo: la moto #"+o.num+" no se guardó en el servidor. Avisa al dueño.";else enviarFoto(o,j.id);sigue(r.ok?j.num:null)})}).catch(function(){$("f-err").textContent="Ojo: sin conexión, la moto #"+o.num+" no se guardó en el servidor.";sigue(null)});
 }
 var TASA_INFO=null;
 function loadTasa(){
@@ -1026,7 +1034,7 @@ $("ph-in").addEventListener("change",function(){
       var c=document.createElement("canvas"),k=Math.min(1,480/img.width);c.width=img.width*k;c.height=img.height*k;
       c.getContext("2d").drawImage(img,0,0,c.width,c.height); draft.photo=c.toDataURL("image/jpeg",.7);
       var c2=document.createElement("canvas"),k2=Math.min(1,1280/img.width);c2.width=img.width*k2;c2.height=img.height*k2;
-      c2.getContext("2d").drawImage(img,0,0,c2.width,c2.height); c2.toBlob(function(b){if(b)readPhoto(b)},"image/jpeg",.85);
+      c2.getContext("2d").drawImage(img,0,0,c2.width,c2.height); c2.toBlob(function(b){if(b){draft.fotoGrande=b;readPhoto(b)}},"image/jpeg",.85);
       $("ph-prev").src=draft.photo;$("ph-prev").hidden=false;$("ph-txt").innerHTML="<b>Foto lista</b><br><span class=\"note\">Toca para cambiarla.</span>";$("f-err").textContent="";
     }; img.src=r.result;
   }; r.readAsDataURL(f);

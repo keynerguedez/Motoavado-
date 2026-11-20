@@ -842,7 +842,7 @@ function renderVigilanteReal(){
   P.forEach(function(b){if(b.estado==="libre"){delete IMGU[b.n];delete IMGD[b.n]}});
   swapImgs($("g-bridges"),P.map(function(b){
     var head='<div class="row"><h2>'+(b.n===5?"Fuera del puente":"Puente "+b.n)+'</h2>';
-    if(b.estado==="libre")return '<div class="card bridge">'+head+'<span class="pill mut" style="margin-left:auto">Libre</span></div><div class="cam">Sin moto</div></div>';
+    if(b.estado==="libre")return '<div class="card bridge">'+head+'<span class="pill mut" style="margin-left:auto">Libre</span></div><div class="cam">Sin moto</div>'+(b.revL?'<span class="note">Última revisión hace '+hace(b.revL.t)+': '+(b.revL.h===true?"hay moto (leyendo…)":b.revL.h===false?"sin moto":"sin respuesta")+'</span>':"")+'</div>';
     var m=mins(new Date(b.desde).getTime()), pl=b.placa?'Placa '+esc(b.placa):b.parcial?'Placa parcial '+esc(b.parcial):'Placa no legible';
     var pill=b.estado==="alerta"?'<span class="pill bad" style="margin-left:auto">Sin factura</span>':b.estado==="ok"?'<span class="pill ok" style="margin-left:auto">Coincide con #'+String(b.num).padStart(3,"0")+'</span>':b.estado==="lavando"?'<span class="pill warn" style="margin-left:auto">En lavado · sin factura</span>':'<span class="pill warn" style="margin-left:auto">Esperando registro</span>';
     var img=b.foto?'<img src="'+bridgeSrc(b)+'" alt="Moto en el puente '+b.n+'"><span class="live">Hace '+hace(IMGV[b.n]||b.visto)+'</span><span class="box'+(b.estado==="alerta"?' bad':'')+'">'+pl+'</span>':'Sin imagen';

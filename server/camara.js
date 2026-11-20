@@ -359,6 +359,22 @@ function crear(ctx) {
     S.cruces = S.cruces.filter(c => c.id !== v.id); guardar(); return { ok: true };
   }
 
+  // Una moto que llega a un puente justo después de que bajó otra NO es "la misma" por estar en el mismo puente: se reabre la fila anterior solo si la placa leída es compatible
+  // con la de esa fila (o, si no hay placa que comparar, si Claude dice que la foto es de la misma moto).
+  function compatibles(a, b) {
+    if (!a.includes('?') && !b.includes('?')) return cerca(a, b);
+    let mal = 0; for (let i = 0; i < Math.min(a.length, b.length); i++) if (a[i] !== '?' && b[i] !== '?' && a[i] !== b[i]) mal++;
+    return mal <= 1;
+  }
+  async function otraMoto(n, r, jpeg) {
+    let ult = null; for (let i = H.length - 1; i >= 0; i--) if (H[i].puente === n) { ult = H[i]; break; }
+    if (!ult || !ult.salida || ult.noReusar || Date.now() - Date.parse(ult.salida) >= MISMA_MOTO_MS || ult.dia !== ctx.fechaCaracas(new Date())) return false; // no se reabriría: ya será una fila nueva
+    const viejo = ult.placa || ult.parcial, nuevo = r.placa || r.parcial;
+    if (viejo && nuevo) return !compatibles(viejo, nuevo);
+    const f = fotoHist(ult.id); if (!f) return false;
+    const c = await comparar(f, jpeg); return c.misma === false && c.confianza !== 'baja';
+  }
+
   // ---------- comparación con lo registrado hoy ----------
   function registrada(placa) {
     if (!placa) return null;

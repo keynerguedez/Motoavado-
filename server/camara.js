@@ -49,7 +49,7 @@ function crear(ctx) {
   const MISMA_MOTO_MS = 10 * 60e3;
   function hAbrir(p, jpeg) {
     let ult = null; for (let i = H.length - 1; i >= 0; i--) if (H[i].puente === p.n) { ult = H[i]; break; }
-    if (ult && ult.salida && Date.now() - Date.parse(ult.salida) < MISMA_MOTO_MS && ult.dia === ctx.fechaCaracas(new Date())) {
+    if (ult && ult.salida && !ult.noReusar && Date.now() - Date.parse(ult.salida) < MISMA_MOTO_MS && ult.dia === ctx.fechaCaracas(new Date())) {
       ult.salida = null; hSucio = true; p.hid = ult.id;
       p.desde = ult.llegada; p.placa = ult.placa || ''; p.parcial = ult.parcial || ''; if (ult.sinPlaca) { /* se vuelve a emparejar solo */ }
       hFoto(p, jpeg); return true;
@@ -328,6 +328,22 @@ function crear(ctx) {
     return { ok: true, tipo, puente: tipo === 'duda' ? null : m.p.n, comparadas: comps.length };
   }
 
+  // Una moto que llega a un puente justo después de que bajó otra NO es "la misma" por estar en el mismo puente: se reabre la fila anterior solo si la placa leída es compatible
+  // con la de esa fila (o, si no hay placa que comparar, si Claude dice que la foto es de la misma moto).
+  function compatibles(a, b) {
+    if (!a.includes('?') && !b.includes('?')) return cerca(a, b);
+    let mal = 0; for (let i = 0; i < Math.min(a.length, b.length); i++) if (a[i] !== '?' && b[i] !== '?' && a[i] !== b[i]) mal++;
+    return mal <= 1;
+  }
+  async function otraMoto(n, r, jpeg) {
+    let ult = null; for (let i = H.length - 1; i >= 0; i--) if (H[i].puente === n) { ult = H[i]; break; }
+    if (!ult || !ult.salida || ult.noReusar || Date.now() - Date.parse(ult.salida) >= MISMA_MOTO_MS || ult.dia !== ctx.fechaCaracas(new Date())) return false; // no se reabriría: ya será una fila nueva
+    const viejo = ult.placa || ult.parcial, nuevo = r.placa || r.parcial;
+    if (viejo && nuevo) return !compatibles(viejo, nuevo);
+    const f = fotoHist(ult.id); if (!f) return false;
+    const c = await comparar(f, jpeg); return c.misma === false && c.confianza !== 'baja';
+  }
+
   // ---------- comparación con lo registrado hoy ----------
   function registrada(placa) {
     if (!placa) return null;
@@ -358,6 +374,8 @@ function crear(ctx) {
       const cerca1 = ctx.ventasDeHoy().filter(x => x.placa && !tomadas.has(x.num) && limpiarPlaca(x.placa) !== p.placa && cerca(limpiarPlaca(x.placa), p.placa));
       if (cerca1.length === 1) { v = cerca1[0]; aprox = true; }
     }
+    // Estaba enlazada a una factura y la lectura ya no encaja (cambió la moto o se corrigió la lectura): vuelve a "esperando" y se reevalúa.
+    if (!v && p.estado === 'ok' && p.num != null && !p.sinPlacaId) { avisar('info', nombre(p.n) + ': la moto ya no coincide con la factura #' + p.num + '; se vuelve a evaluar.'); p.estado = 'esperando'; delete p.num; delete p.aprox; }
     if (v) {
       if (p.estado !== 'ok') avisar('ok', nombre(p.n) + ': ' + (aprox ? 'la lectura ' + (p.placa || p.parcial) + ' casi coincide con la moto ' + limpiarPlaca(v.placa) : 'se registró la moto ' + p.placa) + ' (#' + v.num + ').');
       p.estado = 'ok'; p.num = v.num; if (aprox) p.aprox = limpiarPlaca(v.placa); else delete p.aprox; return;
@@ -414,7 +432,7 @@ function crear(ctx) {
         if (rapida.moto !== true) { guardar(); return { ok: true, estado: 'libre', revision: 'sin-moto' }; }
         const r = await leer(jpeg); // hay moto: la placa se lee con el modelo bueno
         if (r.moto !== true) { guardar(); return { ok: true, estado: 'libre', revision: 'sin-moto' }; }
-        llegada(r, 'revision'); evaluar(p); guardar();
+        llegada(r, 'revision', await otraMoto(n, r, jpeg)); evaluar(p); guardar();
         return { ok: true, estado: p.estado, placa: p.placa || null, revision: 'moto-encontrada' };
       }
       // Ya marcada por una revisión anterior: si deja de verse dos veces seguidas, se libera.
@@ -465,7 +483,7 @@ function crear(ctx) {
       if (opc.previo) { const rapida = await leer(jpeg, modeloBarato); if (rapida.moto !== true) { guardar(); return { ok: true, estado: 'libre', motivo: 'no-hay-moto' }; } }
       const r = await leer(jpeg);
       if (r.moto === false) { guardar(); return { ok: true, estado: 'libre', motivo: 'no-hay-moto' }; } // persona, cubeta, manguera…
-      llegada(r, opc.origen || 'movimiento');
+      llegada(r, opc.origen || 'movimiento', await otraMoto(n, r, jpeg));
     } else {
       guardarFoto();
       const toca = p.intentos < MAX_REINTENTOS_LECTURA || (p.intentos < MAX_LECTURAS_LENTAS && Date.now() - (p.leidoT || 0) >= CADA_LECTURA_LENTA);
@@ -487,7 +505,8 @@ function crear(ctx) {
     n = Number(n); if (!Number.isInteger(n) || n < 1 || n > PUENTES) return false;
     const p = S.puentes[n - 1]; if (p.estado === 'libre') return true;
     avisar('info', nombre(n) + ': liberado a mano por ' + quien + ' (la moto ' + (p.placa || p.parcial || 'sin placa leída') + ').');
-    hSalida(p); S.puentes[n - 1] = { n, estado: 'libre' }; S.vistas = Math.max(0, S.vistas - 1); enfriar[n] = 0; guardar(); return true;
+    hSalida(p); const eh = p.hid && H.find(x => x.id === p.hid); if (eh) { eh.noReusar = true; hSucio = true; }
+    S.puentes[n - 1] = { n, estado: 'libre' }; S.vistas = Math.max(0, S.vistas - 1); enfriar[n] = 0; guardar(); return true;
   }
 
   // ---------- eventos que manda el agente (RTSP desde un equipo del local) ----------

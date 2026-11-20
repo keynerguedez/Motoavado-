@@ -274,3 +274,28 @@ test('un cruce bueno (o la validación a ojo) deja la factura marcada como valid
   await distinta.c.cruzar(v, Buffer.alloc(2000, 1));
   assert.ok(!marcadas.some(x => x[0] === 'NO'), 'un cruce "distinta" no valida la factura');
 });
+
+// ---------- fuera del puente: solo se registra con placa legible ----------
+test('fuera del puente: una moto sin placa legible no se registra ni guarda foto; con placa (o parcial) sí', async () => {
+  const sin = montar({ leer: haiku(() => ({ moto: true, placa: '', parcial: '', motivo: 'ilegible' })) });
+  await sin.ev(5, { revision: true });
+  assert.equal(sin.pub(5).estado, 'libre'); assert.equal(sin.filas().length, 0);
+  await sin.ev(5); // por aviso del agente/cámara
+  assert.equal(sin.pub(5).estado, 'libre'); assert.equal(sin.filas().length, 0);
+  assert.deepEqual(fs.readdirSync(path.join(sin.dir, 'fotos/hist')), [], 'no se guardó ninguna foto en el historial');
+  const conPlaca = montar({ leer: haiku(() => ({ moto: true, placa: 'AB1C23D' })) });
+  await conPlaca.ev(5, { revision: true });
+  assert.equal(conPlaca.pub(5).estado, 'esperando'); assert.equal(conPlaca.filas().length, 1);
+  const parcial = montar({ leer: haiku(() => ({ moto: true, placa: '', parcial: 'AB1C??', motivo: 'parcial' })) });
+  await parcial.ev(5, { revision: true });
+  assert.equal(parcial.pub(5).estado, 'esperando');
+  // en un puente normal una moto sin placa legible SÍ se registra (como siempre)
+  const normal = montar({ leer: haiku(() => ({ moto: true, placa: '', parcial: '', motivo: 'ilegible' })) });
+  await normal.ev(1, { revision: true });
+  assert.equal(normal.pub(1).estado, 'esperando');
+});
+
+test('el historial no muestra las filas antiguas de fuera del puente que no tienen placa', () => {
+  const t = montar({ historial: [{ id: 'mwo1fuera01', puente: 5 }, { id: 'mwo1fuera02', puente: 5, parcial: 'AB1C??' }, { id: 'mwo1norml03', puente: 2 }] });
+  assert.deepEqual(t.filas().map(f => f.id).sort(), ['mwo1fuera02', 'mwo1norml03']);
+});

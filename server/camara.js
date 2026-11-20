@@ -101,7 +101,8 @@ function crear(ctx) {
   function historial(dia) {
     try { hTarde(); hGuardar(); } catch (e) {}
     const hoy = ctx.fechaCaracas(new Date()), d = /^\d{4}-\d{2}-\d{2}$/.test(dia || '') ? dia : hoy;
-    const items = H.filter(e => e.dia === d).slice().reverse();
+    // Fuera del puente solo cuentan las motos con placa legible (formato de placa); lo que se guardó antes sin placa en esa zona no se muestra.
+    const items = H.filter(e => e.dia === d && !(e.puente === EXTRA && !e.placa && !e.parcial)).slice().reverse();
     const r = { total: items.length, completa: 0, parcial: 0, ilegible: 0, verificadas: 0, sinFactura: 0, tarde: 0, espera: 0, esperando: 0, conReal: 0, aciertos: 0 };
     items.forEach(e => {
       if (e.placa) r.completa++; else if (e.parcial) r.parcial++; else r.ilegible++;
@@ -465,7 +466,7 @@ function crear(ctx) {
       if (p.estado === 'libre') {
         if (rapida.moto !== true) { guardar(); return { ok: true, estado: 'libre', revision: 'sin-moto' }; }
         const r = await leer(jpeg); // hay moto: la placa se lee con el modelo bueno
-        if (r.moto !== true) { guardar(); return { ok: true, estado: 'libre', revision: 'sin-moto' }; }
+        if (r.moto !== true || (n === EXTRA && !(r.placa || r.parcial))) { guardar(); return { ok: true, estado: 'libre', revision: 'sin-moto' }; } // fuera del puente: sin placa legible no se registra nada
         llegada(r, 'revision', await otraMoto(n, r, jpeg)); evaluar(p); guardar();
         return { ok: true, estado: p.estado, placa: p.placa || null, revision: 'moto-encontrada' };
       }
@@ -523,7 +524,7 @@ function crear(ctx) {
     if (p.estado === 'libre') {
       if (opc.previo) { const rapida = await leer(jpeg, modeloBarato); if (rapida.moto !== true) { guardar(); return { ok: true, estado: 'libre', motivo: 'no-hay-moto' }; } }
       const r = await leer(jpeg);
-      if (r.moto === false) { guardar(); return { ok: true, estado: 'libre', motivo: 'no-hay-moto' }; } // persona, cubeta, manguera…
+      if (r.moto === false || (n === EXTRA && !(r.placa || r.parcial))) { guardar(); return { ok: true, estado: 'libre', motivo: 'no-hay-moto' }; } // fuera del puente: sin placa legible no se registra nada (y se deja de mirar un rato) // persona, cubeta, manguera…
       llegada(r, opc.origen || 'movimiento', await otraMoto(n, r, jpeg));
     } else {
       guardarFoto();

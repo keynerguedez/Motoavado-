@@ -252,7 +252,7 @@ details.grp summary{cursor:pointer;font-weight:600;font-size:.9rem;color:var(--m
       <div class="card stack" id="a-sf-card" hidden>
         <div class="row" style="flex-wrap:wrap;gap:10px"><h3 style="margin-right:auto">Motos vistas por el vigilante que no tienen factura</h3><span class="pill mut" id="a-sf-n">–</span></div>
         <div class="tablewrap"><table style="min-width:640px"><thead><tr><th>Foto</th><th>Hora</th><th>Puente</th><th>Placa leída</th><th>Estado</th></tr></thead><tbody id="a-sf-rows"><tr><td colspan="5" class="note">Cargando…</td></tr></tbody></table></div>
-        <p class="note">Son las motos que la cámara vio montadas más de 5 minutos hoy y todavía no se enlazaron con ninguna factura: siguen en el puente sin factura, bajaron esperando que las facturen o ya pasaron los 15 minutos. Cuando se factura una, sale de esta lista.</p>
+        <p class="note">Son las motos que la cámara vio hoy y todavía no se enlazaron con ninguna factura: las que acaban de llegar al puente y esperan su factura, las que siguen en lavado sin factura, las que bajaron esperando que las facturen y las que ya pasaron los 15 minutos. Cuando se factura una, sale de esta lista.</p>
       </div>
       <div class="card stack"><h3>Motos de hoy</h3><div class="tablewrap"><table><thead><tr><th>N.º</th><th>Foto</th><th>Hora</th><th>Placa</th><th>Cliente</th><th>Servicios</th><th>Operador</th><th>Pago</th><th class="r">Monto</th></tr></thead><tbody id="a-rows"></tbody></table></div></div>
       <div class="card stack"><h3>Base de datos de clientes</h3><div class="tablewrap"><table><thead><tr><th>Cliente</th><th>Teléfono</th><th>Motos</th><th class="r">Visitas</th><th class="r">Gastó hoy</th></tr></thead><tbody id="a-cli"></tbody></table></div><p class="note">Se llena sola con cada moto que se registra en la tablet.</p></div>
@@ -754,14 +754,14 @@ function loadSinFact(){
 }
 function renderSinFact(){
   var card=$("a-sf-card"); if(!SF||!card)return; card.hidden=false;
-  var items=SF.items.filter(function(e){return e.num==null&&(e.estado==="alerta"||e.estado==="espera"||e.estado==="lavando")});
+  var items=SF.items.filter(function(e){return e.num==null&&(e.estado==="alerta"||e.estado==="espera"||e.estado==="lavando"||(e.estado==="esperando"&&!e.salida))});
   $("a-sf-n").textContent=items.length?items.length+(items.length===1?" moto":" motos"):"Ninguna";
   $("a-sf-n").className="pill "+(items.length?"bad":"ok");
   var hh=function(iso){return new Date(iso).toLocaleTimeString("es-VE",{hour:"2-digit",minute:"2-digit",timeZone:"America/Caracas"})};
   $("a-sf-rows").innerHTML=items.length?items.map(function(e){
     var pu=e.puente===5?"Fuera del puente":"Puente "+e.puente, pl=e.placa||e.parcial||"placa no legible";
     var fin=e.salida?new Date(e.salida).getTime():Date.now(), min=Math.max(0,Math.round((fin-new Date(e.llegada).getTime())/60000));
-    var est=e.estado==="lavando"?'<span class="pill warn">En lavado · sin factura</span><br><span class="note">Lleva '+min+' min en el puente</span>':e.estado==="espera"?'<span class="pill warn">Bajó · esperando factura</span><br><span class="note">Estuvo '+min+' min</span>':'<span class="pill bad">Sin factura</span><br><span class="note">'+(e.salida?"Ya bajó · estuvo ":"Lleva ")+min+' min</span>';
+    var est=e.estado==="esperando"?'<span class="pill warn">Esperando factura</span><br><span class="note">Llegó hace '+min+' min · está en el puente</span>':e.estado==="lavando"?'<span class="pill warn">En lavado · sin factura</span><br><span class="note">Lleva '+min+' min en el puente</span>':e.estado==="espera"?'<span class="pill warn">Bajó · esperando factura</span><br><span class="note">Estuvo '+min+' min</span>':'<span class="pill bad">Sin factura</span><br><span class="note">'+(e.salida?"Ya bajó · estuvo ":"Lleva ")+min+' min</span>';
     return '<tr><td><img class="thumb" style="width:96px;height:72px;object-fit:cover;cursor:zoom-in" loading="lazy" src="'+esc(e.foto)+'" alt="Ampliar" data-act="foto" data-src="'+esc(e.foto)+'" data-t="'+esc(pu+" · "+hh(e.llegada)+" · "+pl)+'"></td><td class="num">'+hh(e.llegada)+(e.salida?'<br><span class="note">salió '+hh(e.salida)+'</span>':"")+'</td><td>'+pu+'</td><td><b>'+esc(pl)+'</b></td><td>'+est+'</td></tr>';
   }).join(""):'<tr><td colspan="5"><span class="pill ok">Todas las motos vistas por la cámara tienen factura</span></td></tr>';
 }

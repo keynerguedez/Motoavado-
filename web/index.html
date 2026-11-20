@@ -769,7 +769,7 @@ function renderHist(){
   items=items.slice().sort(function(a,b){return (ahoraIds[b.id]?1:0)-(ahoraIds[a.id]?1:0)});
   swapImgs($("h-rows"),items.length?items.map(function(e){
     var leida=e.placa?'<b>'+esc(e.placa)+'</b>':e.parcial?'<b>'+esc(e.parcial)+'</b> <span class="note">parcial</span>':'<span class="note">No legible'+(e.sinPlaca?" (factura sin placa)":"")+'</span>';
-    var est=e.estado==="ok"?'<span class="pill ok">Con factura #'+esc(e.num)+(e.aprox?" · "+esc(e.aprox):"")+'</span>':e.estado==="alerta"?'<span class="pill bad">Sin factura</span>':e.estado==="espera"?'<span class="pill warn">Bajó · esperando factura</span>':e.estado==="tarde"?'<span class="pill warn">Facturada después #'+esc(e.num)+'</span>':'<span class="pill warn">Esperando</span>';
+    var est=e.estado==="ok"?'<span class="pill ok">Con factura #'+esc(e.num)+(e.aprox?" · "+esc(e.aprox):"")+'</span>':e.estado==="alerta"?'<span class="pill bad">Sin factura</span>':e.estado==="espera"?'<span class="pill warn">Bajó · esperando factura</span>':e.estado==="descartada"?'<span class="pill mut">Lectura descartada</span>':e.estado==="tarde"?'<span class="pill warn">Facturada después #'+esc(e.num)+'</span>':'<span class="pill warn">Esperando</span>';
     var hora=new Date(e.llegada).toLocaleTimeString("es-VE",{hour:"2-digit",minute:"2-digit",timeZone:"America/Caracas"});
     var real=e.real?'<b>'+esc(e.real)+'</b>':"";
     var ahora=ahoraIds[e.id]?'<span class="pill ok" style="margin-top:4px">En el puente ahora</span>':"";

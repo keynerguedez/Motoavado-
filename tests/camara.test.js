@@ -338,3 +338,18 @@ test('puente 1 ocupado sin placa que en realidad es un trozo de moto cortado se 
   await entera.ev(1, { revision: true }); await conHora(60e3, async () => { await entera.ev(1, { revision: true }); });
   assert.equal(entera.pub(1).estado, 'lavando');
 });
+
+test('la vista en vivo se renueva con cada foto que llega, como mucho una cada CAMARA_VISTA_MS', async () => {
+  process.env.CAMARA_VISTA_MS = '300';
+  try {
+    const t = montar();
+    const foto = path.join(t.dir, 'foto.jpg'); fs.writeFileSync(foto, Buffer.alloc(3000, 5));
+    t.c.fotoRecibida('a.jpg', foto); await ESPERA(120);
+    const t1 = t.c.publico().vista && t.c.publico().vista.t;
+    assert.ok(t1, 'la primera foto genera la vista');
+    t.c.fotoRecibida('b.jpg', foto); await ESPERA(120); // dentro del intervalo: no cambia
+    assert.equal(t.c.publico().vista.t, t1);
+    await ESPERA(300); t.c.fotoRecibida('c.jpg', foto); await ESPERA(150); // pasado el intervalo: se renueva
+    assert.notEqual(t.c.publico().vista.t, t1);
+  } finally { delete process.env.CAMARA_VISTA_MS; }
+});

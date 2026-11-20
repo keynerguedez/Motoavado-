@@ -248,10 +248,10 @@ function crear(ctx) {
   fs.mkdirSync(CFOTOS, { recursive: true });
   let C = []; try { C = JSON.parse(fs.readFileSync(CRU, 'utf8')); if (!Array.isArray(C)) C = []; } catch (e) {}
   function cGuardar() { try { const tmp = CRU + '.tmp'; fs.writeFileSync(tmp, JSON.stringify(C), { mode: 0o600 }); fs.renameSync(tmp, CRU); } catch (e) { console.error('camara cruces:', e.message); } }
-  function cNuevo(v, origen, comps, tipo, puente) {
+  function cNuevo(v, origen, comps, tipo, puente, extra) {
     const id = Date.now().toString(36) + crypto.randomBytes(3).toString('hex');
     const cs = comps.map(x => { const nf = id + '-p' + x.p.n + '.jpg'; try { fs.writeFileSync(path.join(CFOTOS, nf), x.foto, { mode: 0o600 }); } catch (e) {} return { puente: x.p.n, misma: x.r.misma, confianza: x.r.confianza || null, motivo: x.r.motivo || '', foto: nf }; });
-    C.unshift({ id, t: new Date().toISOString(), origen, venta: { id: v.id, num: v.num, placa: v.placa || '', sinPlaca: !!v.sinPlaca }, comps: cs, tipo, puente: puente || null, valido: null });
+    C.unshift(Object.assign({ id, t: new Date().toISOString(), origen, venta: { id: v.id, num: v.num, placa: v.placa || '', sinPlaca: !!v.sinPlaca }, comps: cs, tipo, puente: puente || null, valido: null }, extra || {}));
     while (C.length > 100) { const x = C.pop(); x.comps.forEach(k => { try { fs.unlinkSync(path.join(CFOTOS, k.foto)); } catch (e) {} }); }
     cGuardar();
   }
@@ -314,39 +314,47 @@ function crear(ctx) {
     return false;
   }
 
-  // Revalida una factura de hoy: compara la foto del encargado con las filas del historial de hoy cuya placa sea igual, casi igual, parcial compatible o ya enlazada a esa factura.
+  // Revalida una factura de hoy. 1) Compara la foto del encargado con las lecturas del historial de hoy cuya placa sea igual, casi igual (también con caracteres parecidos), parcial compatible
+  // o ya enlazada a esa factura. 2) Si no hay ninguna o ninguna coincide, busca entre TODAS las fotos de la cámara guardadas hoy (historial y cruces), por si la fila de esa moto se reescribió.
+  function vincularFila(e, v) {
+    if (e && (e.num == null || e.num === v.num)) { e.num = v.num; if (e.estado === 'alerta' || e.estado === 'espera') e.estado = e.salida ? 'tarde' : 'ok'; hSucio = true; hGuardar(); }
+  }
   async function revalidar(v) {
     const jpeg = fotoVenta(v.id); if (!jpeg) return { error: 'Esa factura no tiene foto del encargado.' };
-    const placa = limpiarPlaca(v.placa); if (!placa) return { error: 'La factura no tiene placa: no hay con qué emparejar.' };
+    const placa = limpiarPlaca(v.placa);
     const hoy = ctx.fechaCaracas(new Date());
-    const filas = H.filter(e => e.dia === hoy && (e.num === v.num || (e.placa && cercaSuave(limpiarPlaca(e.placa), placa)) || (!e.placa && e.parcial && parcialSuave(e.parcial, placa)))).reverse().slice(0, 3);
-    if (!filas.length) return { error: 'La cámara no tiene ninguna lectura de hoy con esa placa.' };
-    const comps = (await Promise.all(filas.map(async e => { const f = fotoHist(e.id); return f ? { e, p: { n: e.puente }, r: await comparar(jpeg, f), foto: f } : null; }))).filter(Boolean);
-    if (!comps.length) return { error: 'Esas lecturas no tienen foto.' };
-    const si = comps.filter(x => buena(x.r)), no = comps.filter(x => x.r && x.r.misma === false && x.r.confianza !== 'baja');
-    const tipo = si.length ? 'coincide' : no.length ? 'distinta' : 'duda', m = (si[0] || no[0] || comps[0]);
-    cNuevo(v, 'revalidación', comps, tipo, tipo === 'duda' ? null : m.p.n);
-    if (tipo === 'coincide') {
-      if (m.e.num == null || m.e.num === v.num) { m.e.num = v.num; if (m.e.estado === 'alerta' || m.e.estado === 'espera') m.e.estado = m.e.salida ? 'tarde' : 'ok'; hSucio = true; hGuardar(); }
-      S.cruces = S.cruces.filter(c => c.id !== v.id); guardar();
+    const filas = placa ? H.filter(e => e.dia === hoy && (e.num === v.num || (e.placa && cercaSuave(limpiarPlaca(e.placa), placa)) || (!e.placa && e.parcial && parcialSuave(e.parcial, placa)))).reverse().slice(0, 3) : [];
+    const vistas = new Set(); let comparadas = 0, prev = [];
+    if (filas.length) {
+      const comps = (await Promise.all(filas.map(async e => { const f = fotoHist(e.id); vistas.add(e.id); return f ? { e, p: { n: e.puente }, r: await comparar(jpeg, f), foto: f } : null; }))).filter(Boolean);
+      comparadas += comps.length; prev = comps;
+      const si = comps.filter(x => buena(x.r));
+      if (si.length) { const m = si[0]; cNuevo(v, 'revalidación', comps, 'coincide', m.p.n); vincularFila(m.e, v); S.cruces = S.cruces.filter(c => c.id !== v.id); guardar(); return { ok: true, tipo: 'coincide', puente: m.p.n, comparadas }; }
     }
-    return { ok: true, tipo, puente: tipo === 'duda' ? null : m.p.n, comparadas: comps.length };
+    // 2) todas las fotos de hoy
+    const cand = H.filter(e => e.dia === hoy && !vistas.has(e.id)).reverse().map(e => ({ e, p: { n: e.puente }, leer: () => fotoHist(e.id) }));
+    const vf = new Set();
+    C.filter(x => ctx.fechaCaracas(new Date(x.t)) === hoy).forEach(x => x.comps.forEach(k => { if (!vf.has(k.foto)) { vf.add(k.foto); cand.push({ p: { n: k.puente }, leer: () => fotoCruce(k.foto) }); } }));
+    const lista = cand.slice(0, 20); let m = null;
+    for (let i = 0; i < lista.length && !m; i += 4) {
+      const lote = (await Promise.all(lista.slice(i, i + 4).map(async c => { const f = c.leer(); return f ? Object.assign({ foto: f }, c, { r: await comparar(jpeg, f) }) : null; }))).filter(Boolean);
+      comparadas += lote.length;
+      m = lote.find(x => buena(x.r) && x.r.confianza === 'alta') || null;
+    }
+    if (m) {
+      cNuevo(v, 'revalidación (todas las fotos)', [m], 'coincide', m.p.n); vincularFila(m.e, v);
+      S.cruces = S.cruces.filter(c => c.id !== v.id); guardar(); return { ok: true, tipo: 'coincide', puente: m.p.n, comparadas };
+    }
+    const no = prev.filter(x => x.r && x.r.misma === false && x.r.confianza !== 'baja');
+    if (no.length) { cNuevo(v, 'revalidación', prev, 'distinta', no[0].p.n); return { ok: true, tipo: 'distinta', puente: no[0].p.n, comparadas }; }
+    if (!comparadas) return { error: 'La cámara no tiene fotos de hoy para comparar.' };
+    return { ok: true, tipo: 'ninguna', comparadas };
   }
-
-  // Una moto que llega a un puente justo después de que bajó otra NO es "la misma" por estar en el mismo puente: se reabre la fila anterior solo si la placa leída es compatible
-  // con la de esa fila (o, si no hay placa que comparar, si Claude dice que la foto es de la misma moto).
-  function compatibles(a, b) {
-    if (!a.includes('?') && !b.includes('?')) return cerca(a, b);
-    let mal = 0; for (let i = 0; i < Math.min(a.length, b.length); i++) if (a[i] !== '?' && b[i] !== '?' && a[i] !== b[i]) mal++;
-    return mal <= 1;
-  }
-  async function otraMoto(n, r, jpeg) {
-    let ult = null; for (let i = H.length - 1; i >= 0; i--) if (H[i].puente === n) { ult = H[i]; break; }
-    if (!ult || !ult.salida || ult.noReusar || Date.now() - Date.parse(ult.salida) >= MISMA_MOTO_MS || ult.dia !== ctx.fechaCaracas(new Date())) return false; // no se reabriría: ya será una fila nueva
-    const viejo = ult.placa || ult.parcial, nuevo = r.placa || r.parcial;
-    if (viejo && nuevo) return !compatibles(viejo, nuevo);
-    const f = fotoHist(ult.id); if (!f) return false;
-    const c = await comparar(f, jpeg); return c.misma === false && c.confianza !== 'baja';
+  // El dueño valida a ojo una factura cuando la cámara no guardó una foto de esa moto: queda registrado con su nombre y una nota.
+  function validarManual(v, nota, quien) {
+    nota = String(nota || '').trim().slice(0, 200); if (nota.length < 3) return { error: 'Escribe una nota (por qué la validas a ojo).' };
+    cNuevo(v, 'manual', [], 'manual', null, { nota, por: quien, valido: true });
+    S.cruces = S.cruces.filter(c => c.id !== v.id); guardar(); return { ok: true };
   }
 
   // ---------- comparación con lo registrado hoy ----------
@@ -705,7 +713,7 @@ function crear(ctx) {
   }
   function foto(n) { try { return fs.readFileSync(path.join(FOTOS, 'camara-puente-' + Number(n) + '.jpg')); } catch (e) { return null; } }
 
-  return { revalidar, liberarPuente, cruces, validarCruce, fotoCruce, fotoVentaId, cruzar, leerFoto, evento, vista, fotoVista, publico, foto, historial, marcarReal, fotoHist, alarma, fotoRecibida, leerPlaca, FOTOS4K, PUENTES };
+  return { validarManual, revalidar, liberarPuente, cruces, validarCruce, fotoCruce, fotoVentaId, cruzar, leerFoto, evento, vista, fotoVista, publico, foto, historial, marcarReal, fotoHist, alarma, fotoRecibida, leerPlaca, FOTOS4K, PUENTES };
 }
 
 module.exports = { crear };

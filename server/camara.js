@@ -332,10 +332,12 @@ function crear(ctx) {
       if (si.length) { const m = si[0]; cNuevo(v, 'revalidación', comps, 'coincide', m.p.n); vincularFila(m.e, v); S.cruces = S.cruces.filter(c => c.id !== v.id); guardar(); return { ok: true, tipo: 'coincide', puente: m.p.n, comparadas }; }
     }
     // 2) todas las fotos de hoy
-    const cand = H.filter(e => e.dia === hoy && !vistas.has(e.id)).reverse().map(e => ({ e, p: { n: e.puente }, leer: () => fotoHist(e.id) }));
+    const cand = H.filter(e => e.dia === hoy && !vistas.has(e.id)).map(e => ({ t: Date.parse(e.salida || e.llegada), e, p: { n: e.puente }, leer: () => fotoHist(e.id) }));
     const vf = new Set();
-    C.filter(x => ctx.fechaCaracas(new Date(x.t)) === hoy).forEach(x => x.comps.forEach(k => { if (!vf.has(k.foto)) { vf.add(k.foto); cand.push({ p: { n: k.puente }, leer: () => fotoCruce(k.foto) }); } }));
-    const lista = cand.slice(0, 20); let m = null;
+    C.filter(x => ctx.fechaCaracas(new Date(x.t)) === hoy).forEach(x => x.comps.forEach(k => { if (!vf.has(k.foto)) { vf.add(k.foto); cand.push({ t: Date.parse(x.t), p: { n: k.puente }, leer: () => fotoCruce(k.foto) }); } }));
+    // Las más cercanas en el tiempo a la factura primero: la moto estaba en el puente cuando la facturaron.
+    const t0 = Date.parse(v.fecha) || Date.now(); cand.sort((a, b) => Math.abs(a.t - t0) - Math.abs(b.t - t0));
+    const lista = cand.slice(0, 24); let m = null;
     for (let i = 0; i < lista.length && !m; i += 4) {
       const lote = (await Promise.all(lista.slice(i, i + 4).map(async c => { const f = c.leer(); return f ? Object.assign({ foto: f }, c, { r: await comparar(jpeg, f) }) : null; }))).filter(Boolean);
       comparadas += lote.length;

@@ -475,6 +475,13 @@ async function api(req, res, ruta) {
     if (!puede(yo, 'vigilante')) return json(res, 403, { error: 'No tienes permiso.' });
     return camara.liberarPuente(d.n, yo.nombre) ? json(res, 200, { ok: true }) : json(res, 400, { error: 'Puente no válido.' });
   }
+  if (ruta === '/api/camara/cruces/revalidar') {
+    if (!puede(yo, 'vigilante')) return json(res, 403, { error: 'No tienes permiso.' });
+    const v = diaDeHoy().ventas.find(x => x.id === String(d.id || ''));
+    if (!v) return json(res, 404, { error: 'No se encontró la factura de hoy.' });
+    const r = await camara.revalidar(v);
+    return json(res, r.error ? 400 : 200, r);
+  }
   if (ruta === '/api/camara/cruces/validar') {
     if (!puede(yo, 'vigilante')) return json(res, 403, { error: 'No tienes permiso.' });
     return camara.validarCruce(d.id, d.ok) ? json(res, 200, { ok: true }) : json(res, 404, { error: 'No se encontró el cruce.' });

@@ -565,7 +565,7 @@ function loadDia(){
       var ids=v.servicios.map(function(x){return x.id}).filter(function(id){return svc(id)}); if(!ids.length)return;
       var pct=parseFloat(v.descuento)||0;
       S.clients[v.telefono]={nombre:v.cliente||"Sin nombre",prev:(d.previas&&d.previas[v.telefono])||0};
-      S.orders.push({placaPor:v.placaPor||"",num:v.num,time:hhmm(new Date(v.fecha)),placa:v.placa,modelo:v.modelo,photo:ph(cols[i%cols.length]),svc:ids,lav:v.lavador,tel:v.telefono,disc:pct?{pct:pct,motivo:"",status:"approved"}:null,pay:v.estado==="pendiente"?null:{method:v.metodo,ref:v.ref,tasa:v.tasa||S.tasa,cur:v.moneda,val:v.monto},op:v.usuario,ticket:true,ejemplo:!!v.ejemplo,srvId:v.id,sin:!!v.sinPlaca,tipo:v.tipo||"normal",nota:v.nota||""});
+      S.orders.push({validada:!!v.validada,placaPor:v.placaPor||"",num:v.num,time:hhmm(new Date(v.fecha)),placa:v.placa,modelo:v.modelo,photo:ph(cols[i%cols.length]),svc:ids,lav:v.lavador,tel:v.telefono,disc:pct?{pct:pct,motivo:"",status:"approved"}:null,pay:v.estado==="pendiente"?null:{method:v.metodo,ref:v.ref,tasa:v.tasa||S.tasa,cur:v.moneda,val:v.monto},op:v.usuario,ticket:true,ejemplo:!!v.ejemplo,srvId:v.id,sin:!!v.sinPlaca,tipo:v.tipo||"normal",nota:v.nota||""});
       if(v.sinPlaca)S.orders[S.orders.length-1].placa="SIN PLACA";
     });
     loc.forEach(function(o){o.num=S.orders.length+1;if(!S.clients[o.tel])S.clients[o.tel]=oldC[o.tel]||{nombre:"Sin nombre",prev:0};S.orders.push(o)});
@@ -630,6 +630,12 @@ function confirmPay(){
 }
 
 /* ---------- Admin ---------- */
+/* Una factura cobrada solo queda cerrada cuando su foto se cruzó con la cámara (o el dueño la validó a ojo); si no, está "pendiente por validación". */
+function validadaO(o){
+  if(o.validada)return true; if(!XR)return false;
+  return XR.items.some(function(x){return x.venta.id===o.srvId&&(x.tipo==="coincide"||x.tipo==="enlazada"||x.tipo==="manual")&&x.valido!==false});
+}
+function pendientesValidacion(){return window.__yo?S.orders.filter(function(o){return o.pay&&o.srvId&&!validadaO(o)}):[]}
 function renderAdmin(){
   var paid=S.orders.filter(function(o){return o.pay}), unpaid=S.orders.filter(function(o){return !o.pay});
   var ing=paid.reduce(function(a,o){return a+total(o)},0), porCobrar=unpaid.reduce(function(a,o){return a+total(o)},0);
@@ -637,7 +643,7 @@ function renderAdmin(){
   $("a-date").textContent=new Date().toLocaleDateString("es-VE",{weekday:"long",day:"numeric",month:"long"});
   $("a-kpis").innerHTML=[
     [S.orders.length,"Motos atendidas"],[usd(ing),"Cobrado · "+bs(ing)],[usd(paid.length?ing/paid.length:0),"Promedio por moto"],[usd(porCobrar),unpaid.length+" por cobrar"]
-  ].map(function(k){return '<div class="card kpi"><b class="num">'+k[0]+'</b><span>'+k[1]+'</span></div>'}).join("");
+  ].concat(window.__yo?[[paid.filter(function(o){return o.srvId&&validadaO(o)}).length+" de "+paid.length,"Facturas validadas · "+pendientesValidacion().length+" pendientes por validación"]]:[]).map(function(k){return '<div class="card kpi"><b class="num">'+k[0]+'</b><span>'+k[1]+'</span></div>'}).join("");
   var pa=window.__yo?[]:pendingAuth();
   $("a-auth").innerHTML=pa.length?pa.map(function(o){
     var s=subtotal(o);
@@ -646,6 +652,7 @@ function renderAdmin(){
   var arow=function(o){
     var pago=o.pay?'<span class="pill ok">'+esc(o.pay.method)+(paidAmt(o).cur!=="$"?" · "+paidAmt(o).txt:"")+(o.pay.ref?" · "+esc(o.pay.ref):"")+'</span>':(o.disc&&o.disc.status==="pending"?'<span class="pill warn">Espera autorización</span>':'<span class="pill bad">Por cobrar</span>');
     var d=o.disc&&o.disc.status==="approved"?' <span class="pill mut">-'+o.disc.pct+'%</span>':"";
+    if(window.__yo&&o.pay&&o.srvId)pago+=validadaO(o)?'<br><span class="pill ok">Validada con la cámara</span>':'<br><span class="pill warn">Pendiente por validación</span>';
     return '<tr><td class="num">#'+String(o.num).padStart(3,"0")+'</td><td><img class="thumb" style="width:56px;height:42px" src="'+o.photo+'" alt=""></td><td class="num">'+o.time+'</td><td>'+(o.placa?esc(o.placa):'<span class="note">Sin placa</span>')+(o.placaPor?'<br><span class="note">'+(o.placaPor==="cámara"?"completada por la cámara":"corregida por "+esc(o.placaPor))+'</span>':"")+(window.__yo&&window.__yo.rol==="dueno"&&o.srvId?'<br><button class="btn sm" data-act="fixplaca" data-n="'+o.num+'">Corregir placa</button>':"")+'</td><td>'+esc(cliName(o))+'<br><span class="note num">'+fmtTel(o.tel)+'</span></td><td>'+esc(names(o))+d+'</td><td>'+esc(o.op)+'</td><td>'+pago+'</td><td class="r num"><b>'+usd(total(o))+'</b></td></tr>';
   };
   $("a-rows").innerHTML=groupOrders().map(function(g){
@@ -688,6 +695,7 @@ function cierreText(){
   L.push("","Gastos autorizados: "+usd(gt)+" ("+go_.length+")"); go_.forEach(function(g){L.push("  "+g.desc+": "+usd(gAmt(g))+" · "+g.pago+(g.status==="done"?(g.aceptado?" · diferencia aceptada (autorizado "+usd(g.monto)+")":" · factura coincide"):g.status==="approved"?" · FALTA REGISTRAR LA COMPRA":" · NO COINCIDE (autorizado "+usd(g.monto)+")"))});
   L.push("Neto del día (cobrado menos gastos): "+usd(ing-gt));
   L.push("","Descuentos autorizados: "+usd(desc));
+  var pv=pendientesValidacion(); if(pv.length)L.push("","⚠ PENDIENTES POR VALIDACIÓN (foto sin cruzar con la cámara): "+pv.length+" ("+pv.map(function(o){return "#"+o.num+" "+o.placa}).join(", ")+")");
   L.push("Por cobrar: "+unpaid.length+(unpaid.length?" ("+unpaid.map(function(o){return "#"+o.num+" "+o.placa+" "+usd(total(o))}).join(", ")+")":""));
   var byS={}; S.orders.forEach(function(o){o.svc.forEach(function(id){byS[id]=(byS[id]||0)+1})});
   L.push("","Meta del día: "+S.orders.length+" de "+S.meta+" motos"+(S.orders.length>=S.meta?" (cumplida)":""));
@@ -740,6 +748,7 @@ function loadCruces(){
 }
 function renderCruces(){
   if(!XR||!$("x-rows"))return; var r=XR.resumen;
+  var sig=S.orders.map(function(o){return o.srvId&&o.pay?(validadaO(o)?1:0):"-"}).join(""); if(window.__sigVal!==undefined&&window.__sigVal!==sig)renderAdmin(); window.__sigVal=sig;
   $("x-res").textContent=r.total+" cruces · "+(r.validados?r.acertó+" de "+r.validados+" validados bien":"sin validar");
   // Facturas de hoy con foto que todavía no tienen un cruce que coincida: se pueden revalidar contra las lecturas de hoy.
   var okIds={}; XR.items.forEach(function(x){if(x.tipo==="coincide"||x.tipo==="enlazada"||x.tipo==="manual")okIds[x.venta.id]=1});

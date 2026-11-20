@@ -37,7 +37,7 @@ function montar(o = {}) {
   const c = crear({
     DATA: dir, json: () => {}, fechaCaracas: () => HOY,
     ventasDeHoy: () => (typeof o.ventas === 'function' ? o.ventas() : o.ventas) || [],
-    completarPlaca: o.completarPlaca,
+    completarPlaca: o.completarPlaca, marcarValidada: o.marcarValidada,
     leerPlaca: async (j, m, opc) => { llamadas.leer.push(opc && opc.placaSolo ? 'zoom' : /haiku/.test(m || '') ? 'haiku' : 'full'); return (o.leer || (() => ({ moto: true, placa: '', parcial: '', motivo: 'ilegible' })))(j, m, opc || {}); },
     compararFotos: async (a, b) => { llamadas.comparar.push(String(b)); return (o.comparar || (() => ({ misma: true, confianza: 'alta', motivo: 'igual' })))(String(a), String(b)); },
   });
@@ -255,4 +255,22 @@ test('fuera del puente: el movimiento de menos de un minuto se ignora y uno sost
     const antes = visto.length; await conHora(65e3, alarma); await ESPERA(100);
     assert.ok(!visto.slice(antes).some(x => /se ignora/.test(x)), 'pasado el minuto ya no se ignora');
   } finally { console.log = consola; delete process.env.CAMARA_DEPURAR; }
+});
+
+// ---------- facturas validadas / pendientes por validación ----------
+test('un cruce bueno (o la validación a ojo) deja la factura marcada como validada; marcar "No" la quita', async () => {
+  const marcadas = [];
+  const v = { id: 'abc123def456', num: 7, placa: 'AJ002E' };
+  const t = montar({ puentes: PUENTES_CRUCE, ventas: [v], marcarValidada: (id, info) => { marcadas.push([id, info.tipo]); } }); fotosPuentes(t.dir);
+  await t.c.cruzar(v, Buffer.alloc(2000, 1));
+  assert.deepEqual(marcadas, [['abc123def456', 'coincide']]);
+  assert.ok(t.c.ventasValidadas().has('abc123def456'));
+  t.c.validarCruce(t.c.cruces().items[0].id, false); // el dueño dice que Claude se equivocó
+  assert.ok(!t.c.ventasValidadas().has('abc123def456'));
+  const m = montar({ ventas: [{ id: 'ffffffffffff', num: 9, placa: 'XX1' }], marcarValidada: (id, info) => marcadas.push([id, info.tipo, info.por]) });
+  m.c.validarManual({ id: 'ffffffffffff', num: 9, placa: 'XX1' }, 'misma moto a simple vista', 'Raúl');
+  assert.deepEqual(marcadas[1], ['ffffffffffff', 'manual', 'Raúl']);
+  const distinta = montar({ puentes: PUENTES_CRUCE, ventas: [v], comparar: () => ({ misma: false, confianza: 'alta' }), marcarValidada: id => marcadas.push(['NO', id]) }); fotosPuentes(distinta.dir);
+  await distinta.c.cruzar(v, Buffer.alloc(2000, 1));
+  assert.ok(!marcadas.some(x => x[0] === 'NO'), 'un cruce "distinta" no valida la factura');
 });

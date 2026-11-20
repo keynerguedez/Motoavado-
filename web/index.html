@@ -302,7 +302,7 @@ details.grp summary{cursor:pointer;font-weight:600;font-size:.9rem;color:var(--m
         <p class="note">Cada moto que la cámara detecta queda aquí con la foto que se usó para leer la placa. Escribe la placa real para medir los aciertos. Se guardan las últimas 600 lecturas.</p>
       </div>
       <div class="card stack" id="x-card">
-        <div class="row" style="flex-wrap:wrap;gap:10px"><h3 style="margin-right:auto">Cruce de fotos: la del encargado contra la de la cámara</h3><span class="pill mut" id="x-res">–</span></div>
+        <div class="row" style="flex-wrap:wrap;gap:10px"><h3 style="margin-right:auto">Cruce de fotos: la del encargado contra la de la cámara</h3><label class="row note" style="gap:6px"><input type="checkbox" id="x-todos" style="width:auto"> Mostrar también los que no coinciden</label><span class="pill mut" id="x-res">–</span></div>
         <div class="tablewrap"><table style="min-width:760px"><thead><tr><th>Hora</th><th>Factura</th><th>Foto del encargado</th><th>Foto del puente</th><th>Lo que dijo Claude</th><th>Resultado</th><th>¿Acertó?</th></tr></thead><tbody id="x-rows"><tr><td colspan="7" class="note">Cargando…</td></tr></tbody></table></div>
         <p class="note">Cuando el encargado registra una moto con foto, Claude la compara solo con la moto del puente que tiene la misma placa. Aquí ves las dos fotos, lo que respondió y por qué. Marca si acertó para medir la fiabilidad. Se guardan los últimos 100 cruces.</p>
       </div>
@@ -741,14 +741,18 @@ function renderCruces(){
   if(!XR||!$("x-rows"))return; var r=XR.resumen;
   $("x-res").textContent=r.total+" cruces · "+(r.validados?r.acertó+" de "+r.validados+" validados bien":"sin validar");
   var TIPO={"coincide":'<span class="pill ok">Misma moto</span>',"distinta":'<span class="pill bad">Otra moto con la misma placa</span>',"duda":'<span class="pill warn">Sin certeza</span>',"enlazada":'<span class="pill ok">Enlazada al puente</span>',"sin-coincidencia":'<span class="pill bad">No coincide</span>',"ambigua":'<span class="pill warn">Dudosa: varias</span>'};
-  $("x-rows").innerHTML=XR.items.length?XR.items.map(function(x){
+  // Por defecto solo se muestra el cruce que coincide (uno por factura); los intentos que no coinciden se ocultan para no confundir.
+  var todos=$("x-todos").checked, items=XR.items, ocultos=0;
+  if(!todos){var vistos={};items=XR.items.filter(function(x){var ok=(x.tipo==="coincide"||x.tipo==="enlazada")&&!vistos[x.venta.id];if(ok)vistos[x.venta.id]=1;return ok});ocultos=XR.items.length-items.length}
+  $("x-res").textContent+=ocultos?" · "+ocultos+" sin coincidencia ocultos":"";
+  $("x-rows").innerHTML=items.length?items.map(function(x){
     var hora=new Date(x.t).toLocaleTimeString("es-VE",{hour:"2-digit",minute:"2-digit",timeZone:"America/Caracas"});
     var ph=function(src,t){return '<img class="thumb" style="width:110px;height:82px;object-fit:cover;cursor:zoom-in" loading="lazy" src="'+esc(src)+'" alt="Ampliar" data-act="foto" data-src="'+esc(src)+'" data-t="'+esc(t)+'">'};
     var tit="Factura #"+x.venta.num+" · "+(x.venta.placa||"sin placa");
     var pu=x.comps.map(function(c){var d=c.misma===true?"misma":c.misma===false?"distinta":"no sabe";return '<div style="display:inline-block;margin:0 6px 6px 0;vertical-align:top">'+ph(c.url,(c.puente===5?"Fuera del puente":"Puente "+c.puente)+" · "+d)+'<div class="note">'+(c.puente===5?"Fuera":"Puente "+c.puente)+' · '+d+(c.confianza?' ('+c.confianza+')':'')+'</div></div>'}).join("");
     var mot=x.comps.map(function(c){return '<div class="note"><b>'+(c.puente===5?"Fuera":"P"+c.puente)+':</b> '+esc(c.motivo||"–")+'</div>'}).join("");
     var v=x.valido, bt=function(val,txt,cls){return '<button class="btn sm'+(v===val?' '+cls:'')+'" data-act="xval" data-id="'+esc(x.id)+'" data-v="'+(val?1:0)+'">'+txt+'</button>'};
-    return '<tr><td class="num">'+hora+'<br><span class="note">'+esc(x.origen)+'</span></td><td><b>'+esc(tit)+'</b></td><td>'+ph(x.fotoVenta,tit)+'</td><td>'+pu+'</td><td>'+mot+'</td><td>'+(TIPO[x.tipo]||esc(x.tipo))+(x.puente?'<br><span class="note">'+(x.puente===5?"Fuera del puente":"Puente "+x.puente)+'</span>':"")+'</td><td><div class="row" style="gap:4px;flex-wrap:wrap">'+bt(true,"Sí","ok")+bt(false,"No","bad")+'</div></td></tr>'}).join(""):'<tr><td colspan="7" class="note">Todavía no hay cruces. Aparecen cuando el encargado registra una moto con foto.</td></tr>';
+    return '<tr><td class="num">'+hora+'<br><span class="note">'+esc(x.origen)+'</span></td><td><b>'+esc(tit)+'</b></td><td>'+ph(x.fotoVenta,tit)+'</td><td>'+pu+'</td><td>'+mot+'</td><td>'+(TIPO[x.tipo]||esc(x.tipo))+(x.puente?'<br><span class="note">'+(x.puente===5?"Fuera del puente":"Puente "+x.puente)+'</span>':"")+'</td><td><div class="row" style="gap:4px;flex-wrap:wrap">'+bt(true,"Sí","ok")+bt(false,"No","bad")+'</div></td></tr>'}).join(""):'<tr><td colspan="7" class="note">'+(XR.items.length?"Ningún cruce coincide todavía. Marca \"Mostrar también los que no coinciden\" para verlos.":"Todavía no hay cruces. Aparecen cuando el encargado registra una moto con foto.")+'</td></tr>';
 }
 function renderHist(){
   if(!HIST)return; var a=document.activeElement; if(a&&a.id&&a.id.indexOf("hr-")===0)return;
@@ -1114,6 +1118,7 @@ document.addEventListener("input",function(ev){
   else if(t.dataset&&t.dataset.greal){var gr=S.gastos.filter(function(x){return x.id===+t.dataset.greal})[0], rr=parseFloat(t.value);gr.real=rr>=0?rr:null}
   else if(t.id==="a-meta"){var mv=parseInt(t.value,10);if(mv>0){S.meta=mv;renderMeta()}}
   else if(t.id==="p-monto")montoDif();
+  else if(t.id==="x-todos")renderCruces();
   else if(t.id==="a-tasa"){var x=parseFloat(t.value);if(x>0){S.tasa=x;draftTotal();renderAll()}}
 });
 $("c-buscar").addEventListener("input",renderClientes);

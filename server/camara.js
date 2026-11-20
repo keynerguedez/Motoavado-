@@ -601,6 +601,7 @@ function crear(ctx) {
   const enCurso = {}, enfriar = {}, ultimaFoto = {}; // por puente
   const fuera = { ini: 0, ult: 0 };
   let vistaT = 0;
+  const VISTA_MS = Number(process.env.CAMARA_VISTA_MS) || 2000;
 
   // Zonas de los puentes (fracciones de la imagen). Por defecto 4 tiras verticales; se ajustan en data/camara-zonas.json.
   function zonas() {
@@ -636,8 +637,8 @@ function crear(ctx) {
   function fotoRecibida(nombre, ruta) {
     cambioDeDia(); S.contacto = new Date().toISOString();
     fotos4k.push({ t: Date.now(), nombre, ruta }); while (fotos4k.length > 12) fotos4k.shift();
-    // La pantalla de Puentes usa la misma foto, reducida, como vista en vivo (como mucho una cada 8 s).
-    if (Date.now() - vistaT >= 8000) {
+    // La pantalla de Puentes usa la misma foto, reducida, como vista en vivo (como mucho una cada VISTA_MS; 2 s por defecto, cambia con CAMARA_VISTA_MS).
+    if (Date.now() - vistaT >= VISTA_MS) {
       vistaT = Date.now();
       fs.readFile(ruta, (e, b) => { if (e) return; ffmpegJpeg(b, 'scale=1280:-2').then(j => { if (!j) return; try { fs.writeFileSync(path.join(FOTOS, 'camara-vista.jpg'), j, { mode: 0o600 }); } catch (x) {} S.vistaT = new Date().toISOString(); S.zonas = zonas(); guardar(); }); });
     }

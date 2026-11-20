@@ -135,6 +135,12 @@ function crear(ctx) {
     });
   }
 
+  // Consumo de la API: cada respuesta trae `usage` (tokens); se registra con la función que hizo la llamada (ver server/consumo.js).
+  function usoApi(funcion, modelo, texto) {
+    if (!ctx.registrarUso) return;
+    try { let j = null; try { j = JSON.parse(texto); } catch (e) {} ctx.registrarUso({ funcion, modelo: (j && j.model) || modelo, usage: (j && j.usage) || null }); } catch (e) {}
+  }
+
   // ---------- lectura de la imagen: ¿hay moto? ¿qué placa? ----------
   // moto: true/false lo dice el modelo; null = no se pudo saber (sin clave o error), y entonces se confía en el agente.
   // Una placa completa del modelo bueno solo se acepta si una segunda lectura de la misma foto da exactamente lo mismo;
@@ -207,6 +213,7 @@ function crear(ctx) {
         headers: { 'content-type': 'application/json', 'x-api-key': clave, 'anthropic-version': '2023-06-01', 'content-length': Buffer.byteLength(cuerpo) } }, res => {
         let t = ''; res.on('data', c => { t += c; });
         res.on('end', () => {
+          usoApi(opc.placaSolo ? 'lectura-ampliada' : /haiku/.test(modelo) ? 'moto-haiku' : 'lectura-placa', modelo, t);
           try {
             const txt = (JSON.parse(t).content || []).map(x => x.text || '').join('');
             const j = JSON.parse(/\{[\s\S]*\}/.exec(txt)[0]);
@@ -238,7 +245,7 @@ function crear(ctx) {
       const r = https.request({ hostname: 'api.anthropic.com', path: '/v1/messages', method: 'POST', timeout: 30000,
         headers: { 'content-type': 'application/json', 'x-api-key': clave, 'anthropic-version': '2023-06-01', 'content-length': Buffer.byteLength(cuerpo) } }, res => {
         let t = ''; res.on('data', c => { t += c; });
-        res.on('end', () => { try { const txt = (JSON.parse(t).content || []).map(x => x.text || '').join(''); const j = JSON.parse(/\{[\s\S]*\}/.exec(txt)[0]); ok({ misma: j.misma === true ? true : j.misma === false ? false : null, confianza: ['alta', 'media', 'baja'].includes(j.confianza) ? j.confianza : 'baja', motivo: String(j.motivo || '').slice(0, 200) }); } catch (e) { ok({ misma: null }); } });
+        res.on('end', () => { usoApi('comparar-fotos', process.env.CAMARA_MODELO || 'claude-sonnet-5-5', t); try { const txt = (JSON.parse(t).content || []).map(x => x.text || '').join(''); const j = JSON.parse(/\{[\s\S]*\}/.exec(txt)[0]); ok({ misma: j.misma === true ? true : j.misma === false ? false : null, confianza: ['alta', 'media', 'baja'].includes(j.confianza) ? j.confianza : 'baja', motivo: String(j.motivo || '').slice(0, 200) }); } catch (e) { ok({ misma: null }); } });
       });
       r.on('error', () => ok({ misma: null })); r.on('timeout', () => { r.destroy(); ok({ misma: null }); });
       r.end(cuerpo);

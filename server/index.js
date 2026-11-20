@@ -394,6 +394,10 @@ async function api(req, res, ruta) {
       const f = camara.fotoVista(); if (!f) return json(res, 404, { error: 'Sin imagen.' });
       res.writeHead(200, { 'content-type': 'image/jpeg', 'cache-control': 'no-store' }); return res.end(f);
     }
+    if (ruta === '/api/consumo') {
+      if (!puede(yo, 'admin')) return json(res, 403, { error: 'No tienes permiso.' });
+      return json(res, 200, consumo.resumen(new URL(req.url, 'http://localhost').searchParams.get('dia') || ''));
+    }
     if (ruta === '/api/camara/cruces') return puede(yo, 'vigilante') ? json(res, 200, camara.cruces()) : json(res, 403, { error: 'No tienes permiso.' });
     const cm = /^\/api\/camara\/(cruce|cruce-venta)\/([a-z0-9.-]+)$/.exec(ruta);
     if (cm) {
@@ -600,7 +604,8 @@ async function api(req, res, ruta) {
   return json(res, 404, { error: 'No encontrado.' });
 }
 
-const camara = require('./camara').crear({ DATA, json, fechaCaracas, ventasDeHoy: () => diaDeHoy().ventas, completarPlaca: (id, placa) => !corregirPlaca(id, placa, 'cámara', true).error, marcarValidada });
+const consumo = require('./consumo').crear({ DATA, fechaCaracas });
+const camara = require('./camara').crear({ DATA, json, fechaCaracas, registrarUso: consumo.registrar, ventasDeHoy: () => diaDeHoy().ventas, completarPlaca: (id, placa) => !corregirPlaca(id, placa, 'cámara', true).error, marcarValidada });
 // FTP para las fotos 4K de la cámara. Solo arranca si hay clave en vault/.env (CAMARA_FTP_CLAVE); no lleva nada más: la carpeta es propia y solo acepta subir .jpg.
 // CAMARA_FTP_USUARIO (por defecto "camara"), CAMARA_FTP_PUERTO (2121), CAMARA_FTP_PASIVO ("30000-30009"), CAMARA_FTP_IP (IP pública del servidor; si falta se usa la de la conexión).
 // Solo para pruebas locales: con CAMARA_PRUEBA=1 y sin clave acepta usuario anónimo.

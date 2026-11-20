@@ -303,6 +303,7 @@ details.grp summary{cursor:pointer;font-weight:600;font-size:.9rem;color:var(--m
       </div>
       <div class="card stack" id="x-card">
         <div class="row" style="flex-wrap:wrap;gap:10px"><h3 style="margin-right:auto">Cruce de fotos: la del encargado contra la de la cámara</h3><label class="row note" style="gap:6px"><input type="checkbox" id="x-todos" style="width:auto"> Mostrar también los que no coinciden</label><span class="pill mut" id="x-res">–</span></div>
+        <div id="x-pend" class="row" style="flex-wrap:wrap;gap:6px"></div><div class="note" id="x-msg"></div>
         <div class="tablewrap"><table style="min-width:760px"><thead><tr><th>Hora</th><th>Factura</th><th>Foto del encargado</th><th>Foto del puente</th><th>Lo que dijo Claude</th><th>Resultado</th><th>¿Acertó?</th></tr></thead><tbody id="x-rows"><tr><td colspan="7" class="note">Cargando…</td></tr></tbody></table></div>
         <p class="note">Cuando el encargado registra una moto con foto, Claude la compara solo con la moto del puente que tiene la misma placa. Aquí ves las dos fotos, lo que respondió y por qué. Marca si acertó para medir la fiabilidad. Se guardan los últimos 100 cruces.</p>
       </div>
@@ -740,6 +741,10 @@ function loadCruces(){
 function renderCruces(){
   if(!XR||!$("x-rows"))return; var r=XR.resumen;
   $("x-res").textContent=r.total+" cruces · "+(r.validados?r.acertó+" de "+r.validados+" validados bien":"sin validar");
+  // Facturas de hoy con foto que todavía no tienen un cruce que coincida: se pueden revalidar contra las lecturas de hoy.
+  var okIds={}; XR.items.forEach(function(x){if(x.tipo==="coincide"||x.tipo==="enlazada")okIds[x.venta.id]=1});
+  var pend=S.orders.filter(function(o){return o.srvId&&!o.sin&&o.placa&&!okIds[o.srvId]});
+  $("x-pend").innerHTML=pend.length?'<span class="note">Sin cruce que coincida:</span>'+pend.map(function(o){return '<button class="btn sm" data-act="xrev" data-id="'+esc(o.srvId)+'" data-n="'+o.num+'">#'+o.num+' '+esc(o.placa)+' · Revalidar</button>'}).join(""):"";
   var TIPO={"coincide":'<span class="pill ok">Misma moto</span>',"distinta":'<span class="pill bad">Otra moto con la misma placa</span>',"duda":'<span class="pill warn">Sin certeza</span>',"enlazada":'<span class="pill ok">Enlazada al puente</span>',"sin-coincidencia":'<span class="pill bad">No coincide</span>',"ambigua":'<span class="pill warn">Dudosa: varias</span>'};
   // Por defecto solo se muestra el cruce que coincide (uno por factura); los intentos que no coinciden se ocultan para no confundir.
   var todos=$("x-todos").checked, items=XR.items, ocultos=0;
@@ -1008,6 +1013,7 @@ document.addEventListener("click",function(ev){
   else if(a==="foto"){$("ov-foto-img").src=t.dataset.src;$("ov-foto-t").textContent=t.dataset.t||"";$("ov-foto").classList.add("on")}
   else if(a==="closefoto")$("ov-foto").classList.remove("on");
   else if(a==="liberar"){if(window.confirm("¿Liberar "+(t.dataset.b==="5"?"la zona fuera del puente":"el puente "+t.dataset.b)+"? La próxima detección lo vuelve a leer desde cero."))jpost("/api/camara/puente/liberar",{n:+t.dataset.b}).then(function(){loadCam()})}
+  else if(a==="xrev"){t.disabled=true;$("x-msg").textContent="Comparando la foto de la factura #"+t.dataset.n+"…";jpost("/api/camara/cruces/revalidar",{id:t.dataset.id}).then(function(r){t.disabled=false;$("x-msg").textContent="Factura #"+t.dataset.n+": "+(r.ok?(r.j.tipo==="coincide"?"coincide con la moto del "+(r.j.puente===5?"área fuera del puente":"puente "+r.j.puente)+".":r.j.tipo==="distinta"?"NO coincide con las lecturas de hoy con esa placa.":"Claude no pudo confirmarlo."):(r.j.error||"no se pudo revalidar."));loadCruces();loadHist()})}
   else if(a==="xval"){jpost("/api/camara/cruces/validar",{id:t.dataset.id,ok:t.dataset.v==="1"}).then(function(){loadCruces()})}
   else if(a==="hreal"){var hi=$("hr-"+t.dataset.id);if(hi)jpost("/api/camara/historial/real",{id:t.dataset.id,real:hi.value}).then(function(){hi.blur();loadHist()})}
   else if(a==="aprobar"||a==="negar")decidir(t.dataset.aid,a==="aprobar");

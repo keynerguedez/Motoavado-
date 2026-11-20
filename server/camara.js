@@ -285,6 +285,25 @@ function crear(ctx) {
     return false;
   }
 
+  // Revalida una factura de hoy: compara la foto del encargado con las filas del historial de hoy cuya placa sea igual, casi igual, parcial compatible o ya enlazada a esa factura.
+  async function revalidar(v) {
+    const jpeg = fotoVenta(v.id); if (!jpeg) return { error: 'Esa factura no tiene foto del encargado.' };
+    const placa = limpiarPlaca(v.placa); if (!placa) return { error: 'La factura no tiene placa: no hay con qué emparejar.' };
+    const hoy = ctx.fechaCaracas(new Date());
+    const filas = H.filter(e => e.dia === hoy && (e.num === v.num || (e.placa && cerca(limpiarPlaca(e.placa), placa)) || (!e.placa && e.parcial && coincideParcial(e.parcial, placa)))).reverse().slice(0, 3);
+    if (!filas.length) return { error: 'La cámara no tiene ninguna lectura de hoy con esa placa.' };
+    const comps = (await Promise.all(filas.map(async e => { const f = fotoHist(e.id); return f ? { e, p: { n: e.puente }, r: await comparar(jpeg, f), foto: f } : null; }))).filter(Boolean);
+    if (!comps.length) return { error: 'Esas lecturas no tienen foto.' };
+    const si = comps.filter(x => buena(x.r)), no = comps.filter(x => x.r && x.r.misma === false && x.r.confianza !== 'baja');
+    const tipo = si.length ? 'coincide' : no.length ? 'distinta' : 'duda', m = (si[0] || no[0] || comps[0]);
+    cNuevo(v, 'revalidación', comps, tipo, tipo === 'duda' ? null : m.p.n);
+    if (tipo === 'coincide') {
+      if (m.e.num == null || m.e.num === v.num) { m.e.num = v.num; if (m.e.estado === 'alerta' || m.e.estado === 'espera') m.e.estado = m.e.salida ? 'tarde' : 'ok'; hSucio = true; hGuardar(); }
+      S.cruces = S.cruces.filter(c => c.id !== v.id); guardar();
+    }
+    return { ok: true, tipo, puente: tipo === 'duda' ? null : m.p.n, comparadas: comps.length };
+  }
+
   // ---------- comparación con lo registrado hoy ----------
   function registrada(placa) {
     if (!placa) return null;
@@ -625,7 +644,7 @@ function crear(ctx) {
   }
   function foto(n) { try { return fs.readFileSync(path.join(FOTOS, 'camara-puente-' + Number(n) + '.jpg')); } catch (e) { return null; } }
 
-  return { liberarPuente, cruces, validarCruce, fotoCruce, fotoVentaId, cruzar, leerFoto, evento, vista, fotoVista, publico, foto, historial, marcarReal, fotoHist, alarma, fotoRecibida, leerPlaca, FOTOS4K, PUENTES };
+  return { revalidar, liberarPuente, cruces, validarCruce, fotoCruce, fotoVentaId, cruzar, leerFoto, evento, vista, fotoVista, publico, foto, historial, marcarReal, fotoHist, alarma, fotoRecibida, leerPlaca, FOTOS4K, PUENTES };
 }
 
 module.exports = { crear };

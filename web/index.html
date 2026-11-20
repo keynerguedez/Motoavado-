@@ -571,7 +571,7 @@ function loadTasa(){
 }
 function loadDia(){
   return fetch("/api/dia").then(function(r){return r.ok?r.json():null}).then(function(d){
-    if(!d)return; var cols=["#2f3b46","#a8443c","#2b5f9e","#8a9aa5","#6b7780","#3f7a52"];
+    if(!d)return; window.__firmaDia=firmaDia(d); var cols=["#2f3b46","#a8443c","#2b5f9e","#8a9aa5","#6b7780","#3f7a52"];
     var loc=S.orders.filter(function(o){return !o.srvId&&!o.pay}), oldC=S.clients;
     S.orders=[];S.clients={};
     d.ventas.forEach(function(v,i){
@@ -782,6 +782,19 @@ var HIST=null;
 function loadHist(){
   if(!window.__yo||$("v-vigilante").classList.contains("on")===false&&HIST)return;
   var d=$("h-dia").value; fetch("/api/camara/historial"+(d?"?dia="+d:"")).then(function(r){return r.ok?r.json():null}).then(function(j){if(!j)return;HIST=j;if(!$("h-dia").value)$("h-dia").value=j.hoy;renderHist()}).catch(function(){});
+}
+/* Mantiene al día las motos y las validaciones: cada 10 s mira si cambió algo en el servidor (facturas nuevas, cobros, validaciones, placas) y solo entonces vuelve a cargar el día.
+   Si el usuario está escribiendo en un campo, espera al siguiente ciclo para no molestarlo. */
+function firmaDia(d){return d.ventas.map(function(v){return [v.id,v.estado,v.placa,v.sinPlaca?1:0,v.validada?1:0,v.metodo,v.monto,v.placaPor||"",v.tipo||""].join(",")}).join("|")+"#"+(d.gastos||[]).length}
+function refrescarDia(){
+  if(!window.__yo||document.hidden)return;
+  fetch("/api/dia").then(function(r){return r.ok?r.json():null}).then(function(d){
+    if(!d)return; var f=firmaDia(d);
+    if(window.__firmaDia===undefined){window.__firmaDia=f;return}
+    if(f===window.__firmaDia)return;
+    var a=document.activeElement; if(a&&/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName))return;
+    window.__firmaDia=f; loadDia();
+  }).catch(function(){});
 }
 var CO=null;
 function usd4(n){return "$"+(n<1?n.toFixed(4):n.toFixed(2))}
@@ -1242,7 +1255,7 @@ if(location.protocol!=="file:"&&window.fetch){fetch("/api/yo").then(function(r){
   if(u.permisos.indexOf("usuarios")>=0)$("lnk-usuarios").hidden=false; if(u.rol==="dueno")$("lnk-wa").hidden=false; if(u.rol!=="dueno"){$("role").value="enc";$("role-lbl").style.display="none"}
   $("btn-reset").hidden=true; applyRole(); renderAll();
   loadTasa(); setInterval(loadTasa,30*60*1000);
-  loadDia().then(ejemploDesdeEnlace); loadAuts(); setInterval(loadAuts,5000);
+  loadDia().then(ejemploDesdeEnlace); loadAuts(); setInterval(loadAuts,5000); setInterval(refrescarDia,10000);
   if(u.permisos.indexOf("vigilante")>=0){loadCam();setInterval(loadCam,4000);loadHist();setInterval(loadHist,10000);loadCruces();setInterval(loadCruces,10000);loadSinFact();setInterval(loadSinFact,10000);loadConsumo();setInterval(loadConsumo,30000);$("h-dia").addEventListener("change",function(){HIST=null;loadHist()});$("h-ahora").addEventListener("change",renderHist)}
 }).catch(function(){})}
  $("a-meta").value=S.meta; renderRules(); setInterval(function(){renderVigilante();renderMeta()},30000);

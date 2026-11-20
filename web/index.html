@@ -139,6 +139,7 @@ details.grp summary{cursor:pointer;font-weight:600;font-size:.9rem;color:var(--m
   </div>
   <a class="btn sm" id="lnk-usuarios" href="/usuarios" hidden>Usuarios</a>
   <a class="btn sm" id="lnk-wa" href="/whatsapp" hidden>WhatsApp</a>
+  <span class="pill ok" id="live-pill" title="Todas las pantallas se actualizan solas. Si dice que no hay conexión, revisa el internet o vuelve a entrar." hidden>En vivo</span>
   <button class="btn sm" id="btn-salir" data-act="salir" hidden>Salir</button>
   <label class="row note" id="role-lbl" style="gap:6px">Ver como<select id="role" style="width:auto"><option value="dueno">Dueño (ve todo)</option><option value="enc">Encargado de tienda</option></select></label>
   <button class="btn sm" id="btn-reset" data-act="reset">Vaciar el día</button>
@@ -798,7 +799,7 @@ function refrescarDia(){
     if(!d)return; var f=firmaDia(d);
     if(window.__firmaDia===undefined){window.__firmaDia=f;return}
     if(f===window.__firmaDia)return;
-    var a=document.activeElement; if(a&&/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName))return;
+    var a=document.activeElement; if(a&&/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)&&a.closest&&a.closest("#v-tablet,#v-gastos"))return;
     window.__firmaDia=f; loadDia();
   }).catch(function(){});
 }
@@ -828,6 +829,32 @@ function abrirVivo(){
 }
 function cerrarVivo(){VV.on=false;clearInterval(VV.timer);VV.timer=null;$("ov-vivo").classList.remove("on");$("vv-img").removeAttribute("src")}
 document.addEventListener("keydown",function(e){if(e.key==="Escape"&&VV.on)cerrarVivo()});
+/* Estado de la conexión: todas las lecturas (GET /api/...) apuntan cuándo fue la última que llegó bien; si pasa mucho tiempo sin ninguna, la cabecera avisa en vez de dejar datos viejos como si fueran actuales. */
+var LV={ok:Date.now(),exp:false};
+(function(){var f0=window.fetch; if(!f0)return; window.fetch=function(u,o){
+  var p=f0.apply(this,arguments), url=typeof u==="string"?u:"", get=!o||!o.method||o.method==="GET";
+  if(/^\/api\//.test(url)&&get)p.then(function(r){if(r.ok){LV.ok=Date.now();LV.exp=false}else if(r.status===401)LV.exp=true},function(){});
+  return p;
+}})();
+function pintarLive(){
+  var p=$("live-pill"); if(!p||!window.__yo)return; p.hidden=false;
+  var s=Math.round((Date.now()-LV.ok)/1000);
+  if(LV.exp){p.className="pill bad";p.textContent="Sesión vencida · vuelve a entrar"}
+  else if(s<=15){p.className="pill ok";p.textContent="En vivo"}
+  else if(s<=45){p.className="pill warn";p.textContent="Actualizando… hace "+s+" s"}
+  else{p.className="pill bad";p.textContent="Sin conexión con el servidor · hace "+(s<90?s+" s":Math.round(s/60)+" min")}
+}
+function refrescarYa(){
+  if(!window.__yo||document.hidden)return;
+  var vig=window.__yo.permisos&&window.__yo.permisos.indexOf("vigilante")>=0;
+  refrescarDia(); loadAuts();
+  if(vig){loadCam();loadHist();loadHoyH();loadCruces();loadSinFact()}
+  if($("v-clientes").classList.contains("on"))loadClientes();
+}
+function iniciarEnVivo(){
+  setInterval(pintarLive,1000); pintarLive();
+  document.addEventListener("visibilitychange",refrescarYa); window.addEventListener("focus",refrescarYa); window.addEventListener("online",refrescarYa);
+}
 var CO=null;
 function usd4(n){return "$"+(n<1?n.toFixed(4):n.toFixed(2))}
 function loadConsumo(){
@@ -1303,8 +1330,8 @@ if(location.protocol!=="file:"&&window.fetch){fetch("/api/yo").then(function(r){
   if(u.permisos.indexOf("usuarios")>=0)$("lnk-usuarios").hidden=false; if(u.rol==="dueno")$("lnk-wa").hidden=false; if(u.rol!=="dueno"){$("role").value="enc";$("role-lbl").style.display="none"}
   $("btn-reset").hidden=true; applyRole(); renderAll();
   loadTasa(); setInterval(loadTasa,30*60*1000);
-  loadDia().then(ejemploDesdeEnlace); loadAuts(); setInterval(loadAuts,5000); setInterval(refrescarDia,10000);
-  if(u.permisos.indexOf("vigilante")>=0){loadCam();setInterval(loadCam,4000);loadHist();setInterval(loadHist,10000);loadCruces();setInterval(loadCruces,10000);loadHoyH();setInterval(loadHoyH,10000);loadSinFact();setInterval(loadSinFact,10000);loadConsumo();setInterval(loadConsumo,30000);$("h-dia").addEventListener("change",function(){HIST=null;loadHist()});$("h-ahora").addEventListener("change",renderHist)}
+  loadDia().then(ejemploDesdeEnlace); loadAuts(); setInterval(loadAuts,5000); setInterval(refrescarDia,5000); setInterval(function(){if($("v-clientes").classList.contains("on"))loadClientes()},15000); iniciarEnVivo();
+  if(u.permisos.indexOf("vigilante")>=0){loadCam();setInterval(loadCam,2000);loadHist();setInterval(loadHist,5000);loadCruces();setInterval(loadCruces,5000);loadHoyH();setInterval(loadHoyH,5000);loadSinFact();setInterval(loadSinFact,5000);loadConsumo();setInterval(loadConsumo,30000);$("h-dia").addEventListener("change",function(){HIST=null;loadHist()});$("h-ahora").addEventListener("change",renderHist)}
 }).catch(function(){})}
  $("a-meta").value=S.meta; renderRules(); setInterval(function(){renderVigilante();renderMeta()},30000);
 })();

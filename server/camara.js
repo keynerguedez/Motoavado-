@@ -81,7 +81,7 @@ function crear(ctx) {
   function ventaDeFila(e, vs, usadas) {
     const desde = vs.filter(x => String(x.fecha || '') >= e.llegada && !usadas.has(x.num));
     if (e.placa) return desde.find(x => limpiarPlaca(x.placa) === limpiarPlaca(e.placa)) || null;
-    if (e.parcial) { const m = desde.filter(x => coincideParcial(e.parcial, limpiarPlaca(x.placa))); return m.length === 1 ? m[0] : null; }
+    if (e.parcial) { const m = desde.filter(x => parcialSuave(e.parcial, limpiarPlaca(x.placa))); return m.length === 1 ? m[0] : null; }
     return desde.find(x => x.sinPlaca) || null;
   }
   // Una moto que bajó sin factura y se factura después queda "facturada después"; si pasan ESPERA_BAJADA_MIN minutos sin factura, salta la alerta.
@@ -271,7 +271,12 @@ function crear(ctx) {
     let i = 0; while (i < a.length && i < b.length && a[i] === b[i]) i++;
     return a.slice(i + 1) === b.slice(i + 1) || a.slice(i + 1) === b.slice(i) || a.slice(i) === b.slice(i + 1);
   };
-  const encajaVenta = (p, placa, v) => p.estado !== 'libre' && ((p.estado === 'ok' && v && p.num === v.num) || (p.placa && cerca(p.placa, placa)) || (!p.placa && p.parcial && coincideParcial(p.parcial, placa)));
+  // Caracteres que la cámara confunde entre sí (0/O/D/Q, 1/I/L, 5/S, 8/B, 2/Z, 6/G): solo para decidir qué lecturas se comparan con una factura; las fotos validan después.
+  const PARECIDOS = { O: '0', Q: '0', D: '0', I: '1', L: '1', S: '5', B: '8', Z: '2', G: '6' };
+  const suave = x => [...String(x)].map(c => PARECIDOS[c] || c).join('');
+  const cercaSuave = (a, b) => cerca(suave(a), suave(b));
+  const parcialSuave = (parcial, placa) => coincideParcial(suave(parcial), suave(placa));
+  const encajaVenta = (p, placa, v) => p.estado !== 'libre' && ((p.estado === 'ok' && v && p.num === v.num) || (p.placa && cercaSuave(p.placa, placa)) || (!p.placa && p.parcial && parcialSuave(p.parcial, placa)));
   // Compara las dos fotos y lo registra: 'coincide' (misma moto), 'distinta' (misma placa pero otra moto: alerta) o 'duda'.
   async function verificar(v, jpeg, cands, origen) {
     const comps = (await Promise.all(cands.map(async p => { const f = fotoPuente(p.n); return f ? { p, r: await comparar(jpeg, f), foto: f } : null; }))).filter(Boolean);
@@ -314,7 +319,7 @@ function crear(ctx) {
     const jpeg = fotoVenta(v.id); if (!jpeg) return { error: 'Esa factura no tiene foto del encargado.' };
     const placa = limpiarPlaca(v.placa); if (!placa) return { error: 'La factura no tiene placa: no hay con qué emparejar.' };
     const hoy = ctx.fechaCaracas(new Date());
-    const filas = H.filter(e => e.dia === hoy && (e.num === v.num || (e.placa && cerca(limpiarPlaca(e.placa), placa)) || (!e.placa && e.parcial && coincideParcial(e.parcial, placa)))).reverse().slice(0, 3);
+    const filas = H.filter(e => e.dia === hoy && (e.num === v.num || (e.placa && cercaSuave(limpiarPlaca(e.placa), placa)) || (!e.placa && e.parcial && parcialSuave(e.parcial, placa)))).reverse().slice(0, 3);
     if (!filas.length) return { error: 'La cámara no tiene ninguna lectura de hoy con esa placa.' };
     const comps = (await Promise.all(filas.map(async e => { const f = fotoHist(e.id); return f ? { e, p: { n: e.puente }, r: await comparar(jpeg, f), foto: f } : null; }))).filter(Boolean);
     if (!comps.length) return { error: 'Esas lecturas no tienen foto.' };

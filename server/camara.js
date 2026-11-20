@@ -200,7 +200,7 @@ function crear(ctx) {
       model: modelo, max_tokens: 1500,
       messages: [{ role: 'user', content: [
         { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: jpeg.toString('base64') } },
-        { type: 'text', text: opc.placaSolo ? 'Esta imagen es un recorte ampliado de la placa de una moto venezolana. Responde solo JSON: {"placa":"ABC123","segura":true}. "placa" son los 6 a 8 letras y números de la placa; si no estás seguro de cada carácter, deja "placa":"" y "segura":false, y en "parcial" escribe los que sí distingues con "?" en los dudosos (ejemplo: {"placa":"","segura":false,"parcial":"AR8U65?"}). Fíjate bien en M/H, 8/B, 0/O/D, 5/S, 1/I y 2/Z. Nunca inventes un carácter que no se vea.' : (process.env.CAMARA_PRUEBA === '1' ? 'MODO DE PRUEBA: un cartón o papel con una placa escrita cuenta como la moto (moto:true). ' : '') + 'Es una foto de una rampa de un lavadero de motos. Responde solo JSON: {"moto":true,"placa":"ABC123","segura":true}. "moto" es true solo si ves una moto sobre la rampa (aunque esté a medias, mojada o sin placa visible); es false si solo hay personas, cubetas, mangueras, herramientas, el piso o la rampa vacía. "placa" es la placa venezolana (6 a 8 letras y números); si no se ve completa o no estás seguro de cada carácter, deja "placa":"" y "segura":false, y en "parcial" escribe los caracteres que sí distingues, en su posición, con "?" en cada uno que no ves o no estás seguro (ejemplo: {"moto":true,"placa":"","segura":false,"parcial":"AB1C??"}). Nunca inventes un carácter que no se vea. Si la moto no tiene placa o está tapada, deja "placa":"" y "parcial":""; no tomes números de otras motos, cascos, carteles, ropa o calcomanías. Además añade "caja": el rectángulo donde está la placa, como fracciones del ancho y alto de la imagen, {"x":0.42,"y":0.55,"w":0.12,"h":0.05} (x e y son la esquina superior izquierda), o null si no la ves.' }] }],
+        { type: 'text', text: opc.placaSolo ? 'Esta imagen es un recorte ampliado de la placa de una moto venezolana. Responde solo JSON: {"placa":"ABC123","segura":true}. "placa" son los 6 a 8 letras y números de la placa; si no estás seguro de cada carácter, deja "placa":"" y "segura":false, y en "parcial" escribe los que sí distingues con "?" en los dudosos (ejemplo: {"placa":"","segura":false,"parcial":"AR8U65?"}). Fíjate bien en M/H, 8/B, 0/O/D, 5/S, 1/I y 2/Z. Nunca inventes un carácter que no se vea.' : (process.env.CAMARA_PRUEBA === '1' ? 'MODO DE PRUEBA: un cartón o papel con una placa escrita cuenta como la moto (moto:true). ' : '') + 'Es una foto de una rampa de un lavadero de motos. Responde solo JSON: {"moto":true,"placa":"ABC123","segura":true}. "moto" es true solo si ves una moto sobre la rampa (aunque esté a medias, mojada o sin placa visible); es false si solo hay personas, cubetas, mangueras, herramientas, el piso o la rampa vacía. "placa" es la placa venezolana (6 a 8 letras y números); si no se ve completa o no estás seguro de cada carácter, deja "placa":"" y "segura":false, y en "parcial" escribe los caracteres que sí distingues, en su posición, con "?" en cada uno que no ves o no estás seguro (ejemplo: {"moto":true,"placa":"","segura":false,"parcial":"AB1C??"}). Nunca inventes un carácter que no se vea. Si la moto no tiene placa o está tapada, deja "placa":"" y "parcial":""; no tomes números de otras motos, cascos, carteles, ropa o calcomanías. Además añade "caja": el rectángulo donde está la placa, como fracciones del ancho y alto de la imagen, {"x":0.42,"y":0.55,"w":0.12,"h":0.05} (x e y son la esquina superior izquierda), o null si no la ves. Añade también "cortada": true si lo que ves de la moto está cortado por el borde de la imagen (solo un trozo de una moto que está fuera de la rampa), o false si la moto aparece entera sobre la rampa.' }] }],
     }, /haiku/.test(modelo) ? { thinking: { type: 'disabled' } } : {}));
     return new Promise(ok => {
       const r = https.request({ hostname: 'api.anthropic.com', path: '/v1/messages', method: 'POST', timeout: 20000,
@@ -211,11 +211,12 @@ function crear(ctx) {
             const txt = (JSON.parse(t).content || []).map(x => x.text || '').join('');
             const j = JSON.parse(/\{[\s\S]*\}/.exec(txt)[0]);
             const placa = limpiarPlaca(j.placa), moto = opc.placaSolo ? true : j.moto === true ? true : j.moto === false ? false : null;
+            const cortada = j.cortada === true;
             const cj = j.caja, caja = cj && [cj.x, cj.y, cj.w, cj.h].every(v => typeof v === 'number' && v >= 0 && v <= 1) && cj.w > 0.01 && cj.h > 0.01 ? { x: cj.x, y: cj.y, w: cj.w, h: cj.h } : null;
             if (moto === false) return ok({ moto: false, placa: '', motivo: 'no-hay-moto' });
-            if (j.segura === true && /^[A-Z0-9]{5,8}$/.test(placa)) return ok({ moto, placa, caja });
+            if (j.segura === true && /^[A-Z0-9]{5,8}$/.test(placa)) return ok({ moto, placa, caja, cortada });
             const parcial = limpiarParcial(j.parcial);
-            ok({ moto, placa: '', parcial, motivo: parcial ? 'parcial' : 'ilegible', caja });
+            ok({ moto, placa: '', parcial, motivo: parcial ? 'parcial' : 'ilegible', caja, cortada });
           } catch (e) { ok({ moto: null, placa: '', motivo: 'error' }); }
         });
       });
@@ -432,6 +433,9 @@ function crear(ctx) {
     if (r.parcial && conocidos(r.parcial) >= conocidos(p.parcial)) { if (r.parcial !== p.parcial) avisar('info', nombre(p.n) + ': placa leída en parte: ' + r.parcial + '.'); p.parcial = r.parcial; }
   }
 
+  // El puente 1 está pegado a la zona de fuera del puente: una moto que se lava ahí aparece cortada en el borde del recorte del puente 1 y sin placa. Eso no es una moto del puente 1.
+  const cortada1 = (n, r) => n === 1 && r.moto === true && r.cortada === true && !(r.placa || r.parcial);
+
   // ---------- núcleo: una imagen de un puente, venga del agente o de la cámara directa ----------
   // opc: { revision: es una revisión de zona quieta, previo: pregunta primero al modelo barato si hay moto, origen: de dónde vino }
   // Devuelve el cuerpo de la respuesta.
@@ -467,7 +471,7 @@ function crear(ctx) {
         p.revL = { t: ahora, h: rapida.moto }; // para que el panel muestre que el puente libre se está revisando
         if (rapida.moto !== true) { guardar(); return { ok: true, estado: 'libre', revision: 'sin-moto' }; }
         const r = await leer(jpeg); // hay moto: la placa se lee con el modelo bueno
-        if (r.moto !== true || (n === EXTRA && !(r.placa || r.parcial))) { guardar(); return { ok: true, estado: 'libre', revision: 'sin-moto' }; } // fuera del puente: sin placa legible no se registra nada
+        if (r.moto !== true || (n === EXTRA && !(r.placa || r.parcial)) || cortada1(n, r)) { guardar(); return { ok: true, estado: 'libre', revision: 'sin-moto' }; } // fuera del puente: sin placa legible no se registra nada
         llegada(r, 'revision', await otraMoto(n, r, jpeg)); evaluar(p); guardar();
         return { ok: true, estado: p.estado, placa: p.placa || null, revision: 'moto-encontrada' };
       }
@@ -525,7 +529,7 @@ function crear(ctx) {
     if (p.estado === 'libre') {
       if (opc.previo) { const rapida = await leer(jpeg, modeloBarato); if (rapida.moto !== true) { guardar(); return { ok: true, estado: 'libre', motivo: 'no-hay-moto' }; } }
       const r = await leer(jpeg);
-      if (r.moto === false || (n === EXTRA && !(r.placa || r.parcial))) { guardar(); return { ok: true, estado: 'libre', motivo: 'no-hay-moto' }; } // fuera del puente: sin placa legible no se registra nada (y se deja de mirar un rato) // persona, cubeta, manguera…
+      if (r.moto === false || (n === EXTRA && !(r.placa || r.parcial)) || cortada1(n, r)) { guardar(); return { ok: true, estado: 'libre', motivo: 'no-hay-moto' }; } // fuera del puente: sin placa legible no se registra nada (y se deja de mirar un rato) // persona, cubeta, manguera…
       llegada(r, opc.origen || 'movimiento', await otraMoto(n, r, jpeg));
     } else {
       guardarFoto();

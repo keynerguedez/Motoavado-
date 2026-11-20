@@ -308,3 +308,18 @@ test('la revisión de un puente libre queda visible en el panel (última revisi�
   await con.ev(3, { revision: true });
   assert.equal(con.pub(3).estado, 'esperando');
 });
+
+test('puente 1: un trozo de moto cortado en el borde y sin placa (la moto está fuera del puente) no se registra; entera sí', async () => {
+  const cortada = montar({ leer: haiku(() => ({ moto: true, placa: '', parcial: '', motivo: 'ilegible', cortada: true })) });
+  await cortada.ev(1, { revision: true }); await cortada.ev(1);
+  assert.equal(cortada.pub(1).estado, 'libre'); assert.equal(cortada.filas().length, 0);
+  const entera = montar({ leer: haiku(() => ({ moto: true, placa: '', parcial: '', motivo: 'ilegible', cortada: false })) });
+  await entera.ev(1, { revision: true });
+  assert.equal(entera.pub(1).estado, 'esperando');
+  const conPlaca = montar({ leer: haiku(() => ({ moto: true, placa: 'AB1C23D', cortada: true })) });
+  await conPlaca.ev(1, { revision: true });
+  assert.equal(conPlaca.pub(1).estado, 'esperando', 'si se lee la placa se registra aunque salga cortada');
+  const otroPuente = montar({ leer: haiku(() => ({ moto: true, placa: '', parcial: '', motivo: 'ilegible', cortada: true })) });
+  await otroPuente.ev(2, { revision: true });
+  assert.equal(otroPuente.pub(2).estado, 'esperando', 'el resto de puentes no cambia');
+});

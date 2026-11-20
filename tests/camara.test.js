@@ -299,3 +299,12 @@ test('el historial no muestra las filas antiguas de fuera del puente que no tien
   const t = montar({ historial: [{ id: 'mwo1fuera01', puente: 5 }, { id: 'mwo1fuera02', puente: 5, parcial: 'AB1C??' }, { id: 'mwo1norml03', puente: 2 }] });
   assert.deepEqual(t.filas().map(f => f.id).sort(), ['mwo1fuera02', 'mwo1norml03']);
 });
+
+test('la revisión de un puente libre queda visible en el panel (última revisión y qué vio)', async () => {
+  const sin = montar({ leer: () => ({ moto: false, placa: '' }) });
+  await sin.ev(3, { revision: true });
+  assert.equal(sin.pub(3).estado, 'libre'); assert.equal(sin.pub(3).revL.h, false);
+  const con = montar({ leer: haiku(() => ({ moto: true, placa: 'AB1C23D' })) });
+  await con.ev(3, { revision: true });
+  assert.equal(con.pub(3).estado, 'esperando');
+});

@@ -464,6 +464,7 @@ function crear(ctx) {
       if (p.estado !== 'libre' && p.origen !== 'revision' && p.origen !== 'alarma') { guardar(); return { ok: true, estado: p.estado, revision: 'ignorada' }; } // llegó con movimiento del agente: su bajada la avisa el agente
       const rapida = await leer(jpeg, modeloBarato); // primero el modelo barato: ¿hay moto?
       if (p.estado === 'libre') {
+        p.revL = { t: ahora, h: rapida.moto }; // para que el panel muestre que el puente libre se está revisando
         if (rapida.moto !== true) { guardar(); return { ok: true, estado: 'libre', revision: 'sin-moto' }; }
         const r = await leer(jpeg); // hay moto: la placa se lee con el modelo bueno
         if (r.moto !== true || (n === EXTRA && !(r.placa || r.parcial))) { guardar(); return { ok: true, estado: 'libre', revision: 'sin-moto' }; } // fuera del puente: sin placa legible no se registra nada
@@ -696,20 +697,26 @@ function crear(ctx) {
     } catch (e) { console.error('camara alarma:', e.message); }
   }
 
-  // Revisión periódica con la última foto 4K: encuentra motos que ya estaban montadas (puentes libres, cada CAMARA_REVISION_SEG, 300 por defecto)
+  // Revisión periódica con la última foto 4K: encuentra motos que ya estaban montadas (puentes libres, cada CAMARA_REVISION_SEG, 60 por defecto)
   // y libera los puentes cuando la moto se va (puentes ocupados, cada CAMARA_REVISION_OCUPADOS_SEG, 60 por defecto; con el modelo barato).
+  const REVISION_FUERA_MS = 300000; let ultRevFuera = 0;
   async function revisar(ocupados) {
     const f = fotos4k[fotos4k.length - 1]; if (!f || Date.now() - f.t > 60000) return; // sin foto reciente no hay nada que mirar
     for (let n = 1; n <= PUENTES; n++) {
-      if (enCurso[n] || (S.puentes[n - 1].estado !== 'libre') !== ocupados) continue; enCurso[n] = true;
+      if (enCurso[n] || (S.puentes[n - 1].estado !== 'libre') !== ocupados) continue;
+      // La zona de fuera del puente (por donde pasa gente) se revisa cada REVISION_FUERA_MS; los puentes se revisan cada vez.
+      if (n === EXTRA && !ocupados) { if (Date.now() - ultRevFuera < REVISION_FUERA_MS) continue; ultRevFuera = Date.now(); }
+      enCurso[n] = true;
       try { await mirarPuente(n, f, { revision: true, origen: 'alarma' }); } catch (e) { console.error('camara revision:', e.message); } finally { enCurso[n] = false; }
     }
   }
   const segundos = (v, def) => v === undefined ? def : Number(v);
-  const revLibres = segundos(process.env.CAMARA_REVISION_SEG, 300), revOcupados = segundos(process.env.CAMARA_REVISION_OCUPADOS_SEG, 60);
+  const revLibres = segundos(process.env.CAMARA_REVISION_SEG, 60), revOcupados = segundos(process.env.CAMARA_REVISION_OCUPADOS_SEG, 60);
   setInterval(limpiar, 60000).unref();
   if (revLibres > 0) setInterval(() => revisar(false).catch(() => {}), revLibres * 1000).unref();
   if (revOcupados > 0) setInterval(() => revisar(true).catch(() => {}), revOcupados * 1000).unref();
+  // Al arrancar (por ejemplo tras un despliegue) se revisa todo en cuanto llega una foto, sin esperar al primer ciclo.
+  setTimeout(() => { revisar(false).catch(() => {}); revisar(true).catch(() => {}); }, 30000).unref();
 
   // ---------- vista de la cámara (fotograma liviano + zonas) para la pantalla ----------
   async function vista(req, res) {

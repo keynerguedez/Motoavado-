@@ -432,11 +432,15 @@ function crear(ctx) {
   const VIDA_FOTO_4K = 3 * 60 * 1000;     // las fotos 4K se borran a los 3 minutos
   const ESPERA_FOTO = 16000;              // máximo que se espera una foto 4K después de un aviso
   const ENFRIAR_LIBRE = 25000;            // si en un puente libre no había moto, no se vuelve a mirar por avisos durante este tiempo
+  // Zona "fuera del puente": por ahí pasa gente todo el rato. Solo se mira si hay movimiento sostenido FUERA_ESPERA_MS (un minuto) seguido;
+  // un hueco de más de FUERA_HUECO_MS sin movimiento reinicia la cuenta. Si al mirar no hay moto, se deja de mirar FUERA_ENFRIAR_MS.
+  const FUERA_ESPERA_MS = (Number(process.env.CAMARA_FUERA_SEG) || 60) * 1000, FUERA_HUECO_MS = 45000, FUERA_ENFRIAR_MS = 120000;
   const MAX_AVISO = 2 * 1024 * 1024;
   fs.mkdirSync(FOTOS4K, { recursive: true });
   const ffmpeg = process.env.FFMPEG || 'ffmpeg';
   const fotos4k = [];                     // más recientes: { t, nombre, ruta }
   const enCurso = {}, enfriar = {}, ultimaFoto = {}; // por puente
+  const fuera = { ini: 0, ult: 0 };
   let vistaT = 0;
 
   // Zonas de los puentes (fracciones de la imagen). Por defecto 4 tiras verticales; se ajustan en data/camara-zonas.json.
@@ -534,6 +538,10 @@ function crear(ctx) {
       if (e.estado && !/active/i.test(e.estado)) return;
       if (![e.x, e.y, e.w, e.h].every(isFinite) || e.w <= 0) return;
       const pn = puenteDe(e.x + e.w / 2, e.y + e.h / 2); dep('puente', pn); if (!pn) return;
+      if (pn === EXTRA && S.puentes[EXTRA - 1].estado === 'libre') {
+        const t = Date.now(); if (!fuera.ini || t - fuera.ult > FUERA_HUECO_MS) fuera.ini = t; fuera.ult = t;
+        if (t - fuera.ini < FUERA_ESPERA_MS) { dep('puente', pn, 'movimiento de menos de un minuto: se ignora'); return; }
+      }
       if (enCurso[pn] || Date.now() < (enfriar[pn] || 0)) { dep('puente', pn, 'ocupado o en enfriamiento'); return; } // ya se está atendiendo este puente, o hace poco no había moto
       enCurso[pn] = true;
       try {
@@ -544,7 +552,7 @@ function crear(ctx) {
         ultimaFoto[pn] = f.nombre;
         const r = await mirarPuente(pn, f, { previo: true, origen: 'alarma' });
         dep('resultado', JSON.stringify(r));
-        if (r && r.motivo === 'no-hay-moto') enfriar[pn] = Date.now() + ENFRIAR_LIBRE;
+        if (r && r.motivo === 'no-hay-moto') { enfriar[pn] = Date.now() + (pn === EXTRA ? FUERA_ENFRIAR_MS : ENFRIAR_LIBRE); if (pn === EXTRA) fuera.ini = 0; }
       } finally { enCurso[pn] = false; }
     } catch (e) { console.error('camara alarma:', e.message); }
   }

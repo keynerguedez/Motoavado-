@@ -219,8 +219,8 @@ function archivosVentas() { try { return fs.readdirSync(DATA).filter(f => /^vent
 function leerLineas(archivo) { try { return fs.readFileSync(archivo, 'utf8').split('\n').filter(Boolean).map(l => { try { return JSON.parse(l); } catch (e) { return null; } }).filter(Boolean); } catch (e) { return []; } }
 function escribirLineas(archivo, filas) { const tmp = archivo + '.tmp'; fs.writeFileSync(tmp, filas.map(f => JSON.stringify(f)).join('\n') + (filas.length ? '\n' : ''), { mode: 0o600 }); fs.renameSync(tmp, archivo); }
 const GASTOS_EJ = path.join(DATA, 'gastos-ejemplo.json');
-function diaDeHoy() {
-  const dia = fechaCaracas(new Date());
+function diaDeHoy(diaPedido) {
+  const dia = /^\d{4}-\d{2}-\d{2}$/.test(diaPedido || '') ? diaPedido : fechaCaracas(new Date()); // sin fecha, o con una no válida: hoy
   const ventas = leerLineas(path.join(DATA, 'ventas-' + dia.slice(0, 7) + '.jsonl')).filter(v => v.dia === dia);
   let gastos = []; try { gastos = JSON.parse(fs.readFileSync(GASTOS_EJ, 'utf8')).filter(g => g.dia === dia); } catch (e) {}
   const cs = leerClientes(), previas = {};
@@ -363,7 +363,9 @@ async function api(req, res, ruta) {
     if (ruta === '/api/tasa') return yo ? json(res, 200, tasa) : json(res, 401, { error: 'Sin sesión.' });
     if (ruta === '/api/dia') {
       if (!puede(yo, 'tablet')) return json(res, 403, { error: 'No tienes permiso.' });
-      const dia = diaDeHoy(), val = camara.ventasValidadas();
+      const pedido = new URL(req.url, 'http://localhost').searchParams.get('dia') || '';
+      if (pedido && pedido !== fechaCaracas(new Date()) && !puede(yo, 'admin')) return json(res, 403, { error: 'Solo Administración puede ver otros días.' });
+      const dia = diaDeHoy(pedido), val = camara.ventasValidadas();
       dia.ventas = dia.ventas.map(v => Object.assign({}, v, { validada: !!(v.validada || val.has(v.id)) })); // validada: la factura ya cruzó su foto con la cámara
       return json(res, 200, dia);
     }

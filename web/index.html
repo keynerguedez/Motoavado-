@@ -242,7 +242,9 @@ details.grp summary{cursor:pointer;font-weight:600;font-size:.9rem;color:var(--m
 
   <section class="view" id="v-admin">
     <div class="stack" style="gap:16px">
-      <div class="row"><h2 style="margin-right:auto">Hoy, <span id="a-date"></span></h2>
+      <div class="row" style="flex-wrap:wrap;gap:10px"><h2 style="margin-right:auto"><span id="a-tit">Hoy</span>, <span id="a-date"></span></h2>
+        <span class="pill warn" id="a-hist" hidden>Otro día · solo lectura</span>
+        <label class="row note" style="gap:6px">Fecha<input id="a-dia" type="date" style="width:150px"></label><button class="btn sm" data-act="adiahoy">Hoy</button>
         <span class="pill ok num" id="a-tasa-pill" style="white-space:normal"></span>
         <label class="row note" style="gap:6px">Meta diaria de motos<input id="a-meta" type="number" min="1" step="1" style="width:80px"></label>
         <button class="btn pri" data-act="cierre">Hacer cierre del día</button></div>
@@ -641,7 +643,36 @@ function validadaO(o){
   return XR.items.some(function(x){return x.venta.id===o.srvId&&(x.tipo==="coincide"||x.tipo==="enlazada"||x.tipo==="manual")&&x.valido!==false});
 }
 function pendientesValidacion(){return window.__yo?S.orders.filter(function(o){return o.pay&&o.srvId&&!validadaO(o)}):[]}
+/* Filtro de fecha de Administración: se muestra otro día intercambiando por un momento los datos (S.orders, S.clients, S.gastos) solo mientras se dibuja esa pantalla; la tablet y lo demás siguen con los de hoy. */
+var ADIA="", ADATA=null;
+function hoyCaracas(){return new Date().toLocaleDateString("en-CA",{timeZone:"America/Caracas"})}
+function construirDia(d){
+  var cols=["#2f3b46","#a8443c","#2b5f9e","#8a9aa5","#6b7780","#3f7a52"], R={orders:[],clients:{},gastos:[]};
+  d.ventas.forEach(function(v,i){
+    var ids=v.servicios.map(function(x){return x.id}).filter(function(id){return svc(id)}); if(!ids.length)return;
+    var pct=parseFloat(v.descuento)||0;
+    R.clients[v.telefono]={nombre:v.cliente||"Sin nombre",prev:(d.previas&&d.previas[v.telefono])||0};
+    var o={validada:!!v.validada,placaPor:v.placaPor||"",num:v.num,time:hhmm(new Date(v.fecha)),placa:v.sinPlaca?"SIN PLACA":v.placa,modelo:v.modelo,photo:ph(cols[i%cols.length]),svc:ids,lav:v.lavador,tel:v.telefono,disc:pct?{pct:pct,motivo:"",status:"approved"}:null,pay:v.estado==="pendiente"?null:{method:v.metodo,ref:v.ref,tasa:v.tasa||S.tasa,cur:v.moneda,val:v.monto},op:v.usuario,ticket:true,ejemplo:!!v.ejemplo,srvId:v.id,sin:!!v.sinPlaca,tipo:v.tipo||"normal",nota:v.nota||""};
+    R.orders.push(o);
+  });
+  R.gastos=d.gastos.map(function(g,i){return{id:i+1,time:"",desc:g.desc,monto:g.monto,real:g.monto,cat:"Otros",pago:g.pago,foto:ph("#6b7780"),factura:ph("#8a9aa5"),status:"done",op:g.usuario}});
+  return R;
+}
+function conDiaAdmin(fn){
+  if(!ADIA||!ADATA)return fn();
+  var o=S.orders,c=S.clients,g=S.gastos; S.orders=ADATA.orders;S.clients=ADATA.clients;S.gastos=ADATA.gastos;
+  try{return fn()}finally{S.orders=o;S.clients=c;S.gastos=g}
+}
+function elegirDiaAdmin(v){
+  if(!v||v===hoyCaracas()){ADIA="";ADATA=null;renderAdmin();loadSinFact();return}
+  fetch("/api/dia?dia="+encodeURIComponent(v)).then(function(r){return r.ok?r.json():null}).then(function(d){if(!d)return;ADIA=v;ADATA=construirDia(d);renderAdmin();loadSinFact()}).catch(function(){});
+}
 function renderAdmin(){
+  conDiaAdmin(renderAdminBase);
+  $("a-tit").textContent=ADIA?"Día":"Hoy"; $("a-hist").hidden=!ADIA; $("a-dia").value=ADIA||hoyCaracas();
+  if(ADIA)$("a-date").textContent=new Date(ADIA+"T12:00:00").toLocaleDateString("es-VE",{weekday:"long",day:"numeric",month:"long",year:"numeric"});
+}
+function renderAdminBase(){
   var paid=S.orders.filter(function(o){return o.pay}), unpaid=S.orders.filter(function(o){return !o.pay});
   var ing=paid.reduce(function(a,o){return a+total(o)},0), porCobrar=unpaid.reduce(function(a,o){return a+total(o)},0);
   $("a-tasa-pill").textContent="Tasa euro BCV de hoy: Bs "+fmtN(S.tasa)+" por $ · se actualiza sola";
@@ -658,7 +689,7 @@ function renderAdmin(){
     var pago=o.pay?'<span class="pill ok">'+esc(o.pay.method)+(paidAmt(o).cur!=="$"?" · "+paidAmt(o).txt:"")+(o.pay.ref?" · "+esc(o.pay.ref):"")+'</span>':(o.disc&&o.disc.status==="pending"?'<span class="pill warn">Espera autorización</span>':'<span class="pill bad">Por cobrar</span>');
     var d=o.disc&&o.disc.status==="approved"?' <span class="pill mut">-'+o.disc.pct+'%</span>':"";
     if(window.__yo&&o.pay&&o.srvId)pago+=validadaO(o)?'<br><span class="pill ok">Validada con la cámara</span>':'<br><span class="pill warn">Pendiente por validación</span>';
-    return '<tr><td class="num">#'+String(o.num).padStart(3,"0")+'</td><td><img class="thumb" style="width:56px;height:42px" src="'+o.photo+'" alt=""></td><td class="num">'+o.time+'</td><td>'+(o.placa?esc(o.placa):'<span class="note">Sin placa</span>')+(o.placaPor?'<br><span class="note">'+(o.placaPor==="cámara"?"completada por la cámara":"corregida por "+esc(o.placaPor))+'</span>':"")+(window.__yo&&window.__yo.rol==="dueno"&&o.srvId?'<br><button class="btn sm" data-act="fixplaca" data-n="'+o.num+'">Corregir placa</button>':"")+'</td><td>'+esc(cliName(o))+'<br><span class="note num">'+fmtTel(o.tel)+'</span></td><td>'+esc(names(o))+d+'</td><td>'+esc(o.op)+'</td><td>'+pago+'</td><td class="r num"><b>'+usd(total(o))+'</b></td></tr>';
+    return '<tr><td class="num">#'+String(o.num).padStart(3,"0")+'</td><td><img class="thumb" style="width:56px;height:42px" src="'+o.photo+'" alt=""></td><td class="num">'+o.time+'</td><td>'+(o.placa?esc(o.placa):'<span class="note">Sin placa</span>')+(o.placaPor?'<br><span class="note">'+(o.placaPor==="cámara"?"completada por la cámara":"corregida por "+esc(o.placaPor))+'</span>':"")+(window.__yo&&window.__yo.rol==="dueno"&&o.srvId&&!ADIA?'<br><button class="btn sm" data-act="fixplaca" data-n="'+o.num+'">Corregir placa</button>':"")+'</td><td>'+esc(cliName(o))+'<br><span class="note num">'+fmtTel(o.tel)+'</span></td><td>'+esc(names(o))+d+'</td><td>'+esc(o.op)+'</td><td>'+pago+'</td><td class="r num"><b>'+usd(total(o))+'</b></td></tr>';
   };
   $("a-rows").innerHTML=groupOrders().map(function(g){
     var op=!!openA[g.k];
@@ -750,7 +781,7 @@ var SF=null;
 /* Motos que la cámara vio (más de 5 min montadas) y todavía no tienen factura. */
 function loadSinFact(){
   if(!window.__yo)return;
-  fetch("/api/camara/historial").then(function(r){return r.ok?r.json():null}).then(function(j){if(!j)return;SF=j;renderSinFact()}).catch(function(){});
+  fetch("/api/camara/historial"+(ADIA?"?dia="+encodeURIComponent(ADIA):"")).then(function(r){return r.ok?r.json():null}).then(function(j){if(!j)return;SF=j;renderSinFact()}).catch(function(){});
 }
 function renderSinFact(){
   var card=$("a-sf-card"); if(!SF||!card)return; card.hidden=false;
@@ -1048,6 +1079,7 @@ document.addEventListener("click",function(ev){
   else if(a==="liberar"){if(window.confirm("¿Liberar "+(t.dataset.b==="5"?"la zona fuera del puente":"el puente "+t.dataset.b)+"? La próxima detección lo vuelve a leer desde cero."))jpost("/api/camara/puente/liberar",{n:+t.dataset.b}).then(function(){loadCam()})}
   else if(a==="xrev"){t.disabled=true;$("x-msg").textContent="Comparando la foto de la factura #"+t.dataset.n+"…";jpost("/api/camara/cruces/revalidar",{id:t.dataset.id}).then(function(r){t.disabled=false;$("x-msg").textContent="Factura #"+t.dataset.n+": "+(r.ok?(r.j.tipo==="coincide"?"coincide con la moto del "+(r.j.puente===5?"área fuera del puente":"puente "+r.j.puente)+".":r.j.tipo==="distinta"?"NO coincide con las lecturas de hoy con esa placa.":r.j.tipo==="ninguna"?"ninguna de las "+r.j.comparadas+" fotos de la cámara de hoy coincide.":"Claude no pudo confirmarlo."):(r.j.error||"no se pudo revalidar."));loadCruces();loadHist()})}
   else if(a==="xman"){var nt=window.prompt("Validar a ojo la factura #"+t.dataset.n+". Escribe una nota (por ejemplo: la foto del encargado y la cámara son de la misma moto):");if(nt)jpost("/api/camara/cruces/manual",{id:t.dataset.id,nota:nt}).then(function(r){$("x-msg").textContent=r.ok?"Factura #"+t.dataset.n+": validada a ojo.":(r.j.error||"No se pudo guardar.");loadCruces()})}
+  else if(a==="adiahoy"){$("a-dia").value=hoyCaracas();elegirDiaAdmin("")}
   else if(a==="xval"){jpost("/api/camara/cruces/validar",{id:t.dataset.id,ok:t.dataset.v==="1"}).then(function(){loadCruces()})}
   else if(a==="hreal"){var hi=$("hr-"+t.dataset.id);if(hi)jpost("/api/camara/historial/real",{id:t.dataset.id,real:hi.value}).then(function(){hi.blur();loadHist()})}
   else if(a==="aprobar"||a==="negar")decidir(t.dataset.aid,a==="aprobar");
@@ -1057,7 +1089,7 @@ document.addEventListener("click",function(ev){
   else if(a==="closepay"){pendingNew=null;$("ov-pay").classList.remove("on")}
   else if(a==="approve"){o.disc.status="approved";renderAll()}
   else if(a==="deny"){o.disc.status="rejected";renderAll()}
-  else if(a==="cierre"){$("c-text").textContent=cierreText();$("c-copy").textContent="Copiar para WhatsApp";$("ov-cierre").classList.add("on")}
+  else if(a==="cierre"){$("c-text").textContent=conDiaAdmin(cierreText);$("c-copy").textContent="Copiar para WhatsApp";$("ov-cierre").classList.add("on")}
   else if(a==="closecierre")$("ov-cierre").classList.remove("on");
   else if(a==="copycierre"){try{navigator.clipboard.writeText($("c-text").textContent).then(function(){$("c-copy").textContent="Copiado"},function(){$("c-copy").textContent="No se pudo copiar"})}catch(e){$("c-copy").textContent="No se pudo copiar"}}
   else if(a==="simok"||a==="simbad"){
@@ -1160,6 +1192,7 @@ document.addEventListener("input",function(ev){
   else if(t.id==="a-meta"){var mv=parseInt(t.value,10);if(mv>0){S.meta=mv;renderMeta()}}
   else if(t.id==="p-monto")montoDif();
   else if(t.id==="x-todos")renderCruces();
+  else if(t.id==="a-dia")elegirDiaAdmin(t.value);
   else if(t.id==="a-tasa"){var x=parseFloat(t.value);if(x>0){S.tasa=x;draftTotal();renderAll()}}
 });
 $("c-buscar").addEventListener("input",renderClientes);

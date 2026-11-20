@@ -249,6 +249,11 @@ details.grp summary{cursor:pointer;font-weight:600;font-size:.9rem;color:var(--m
       <div class="kpis" id="a-kpis"></div>
       <div class="card stack"><h3>Autorizaciones pendientes</h3><div class="stack" id="a-auth"></div>
         <p class="note">En el sistema real esta solicitud te llega al teléfono (WhatsApp o notificación) y apruebas desde ahí.</p></div>
+      <div class="card stack" id="a-sf-card" hidden>
+        <div class="row" style="flex-wrap:wrap;gap:10px"><h3 style="margin-right:auto">Motos vistas por el vigilante que no tienen factura</h3><span class="pill mut" id="a-sf-n">–</span></div>
+        <div class="tablewrap"><table style="min-width:640px"><thead><tr><th>Foto</th><th>Hora</th><th>Puente</th><th>Placa leída</th><th>Estado</th></tr></thead><tbody id="a-sf-rows"><tr><td colspan="5" class="note">Cargando…</td></tr></tbody></table></div>
+        <p class="note">Son las motos que la cámara vio montadas más de 5 minutos hoy y todavía no se enlazaron con ninguna factura: siguen en el puente sin factura, bajaron esperando que las facturen o ya pasaron los 15 minutos. Cuando se factura una, sale de esta lista.</p>
+      </div>
       <div class="card stack"><h3>Motos de hoy</h3><div class="tablewrap"><table><thead><tr><th>N.º</th><th>Foto</th><th>Hora</th><th>Placa</th><th>Cliente</th><th>Servicios</th><th>Operador</th><th>Pago</th><th class="r">Monto</th></tr></thead><tbody id="a-rows"></tbody></table></div></div>
       <div class="card stack"><h3>Base de datos de clientes</h3><div class="tablewrap"><table><thead><tr><th>Cliente</th><th>Teléfono</th><th>Motos</th><th class="r">Visitas</th><th class="r">Gastó hoy</th></tr></thead><tbody id="a-cli"></tbody></table></div><p class="note">Se llena sola con cada moto que se registra en la tablet.</p></div>
       <div class="cols">
@@ -741,6 +746,25 @@ function loadHist(){
   if(!window.__yo||$("v-vigilante").classList.contains("on")===false&&HIST)return;
   var d=$("h-dia").value; fetch("/api/camara/historial"+(d?"?dia="+d:"")).then(function(r){return r.ok?r.json():null}).then(function(j){if(!j)return;HIST=j;if(!$("h-dia").value)$("h-dia").value=j.hoy;renderHist()}).catch(function(){});
 }
+var SF=null;
+/* Motos que la cámara vio (más de 5 min montadas) y todavía no tienen factura. */
+function loadSinFact(){
+  if(!window.__yo)return;
+  fetch("/api/camara/historial").then(function(r){return r.ok?r.json():null}).then(function(j){if(!j)return;SF=j;renderSinFact()}).catch(function(){});
+}
+function renderSinFact(){
+  var card=$("a-sf-card"); if(!SF||!card)return; card.hidden=false;
+  var items=SF.items.filter(function(e){return e.num==null&&(e.estado==="alerta"||e.estado==="espera"||e.estado==="lavando")});
+  $("a-sf-n").textContent=items.length?items.length+(items.length===1?" moto":" motos"):"Ninguna";
+  $("a-sf-n").className="pill "+(items.length?"bad":"ok");
+  var hh=function(iso){return new Date(iso).toLocaleTimeString("es-VE",{hour:"2-digit",minute:"2-digit",timeZone:"America/Caracas"})};
+  $("a-sf-rows").innerHTML=items.length?items.map(function(e){
+    var pu=e.puente===5?"Fuera del puente":"Puente "+e.puente, pl=e.placa||e.parcial||"placa no legible";
+    var fin=e.salida?new Date(e.salida).getTime():Date.now(), min=Math.max(0,Math.round((fin-new Date(e.llegada).getTime())/60000));
+    var est=e.estado==="lavando"?'<span class="pill warn">En lavado · sin factura</span><br><span class="note">Lleva '+min+' min en el puente</span>':e.estado==="espera"?'<span class="pill warn">Bajó · esperando factura</span><br><span class="note">Estuvo '+min+' min</span>':'<span class="pill bad">Sin factura</span><br><span class="note">'+(e.salida?"Ya bajó · estuvo ":"Lleva ")+min+' min</span>';
+    return '<tr><td><img class="thumb" style="width:96px;height:72px;object-fit:cover;cursor:zoom-in" loading="lazy" src="'+esc(e.foto)+'" alt="Ampliar" data-act="foto" data-src="'+esc(e.foto)+'" data-t="'+esc(pu+" · "+hh(e.llegada)+" · "+pl)+'"></td><td class="num">'+hh(e.llegada)+(e.salida?'<br><span class="note">salió '+hh(e.salida)+'</span>':"")+'</td><td>'+pu+'</td><td><b>'+esc(pl)+'</b></td><td>'+est+'</td></tr>';
+  }).join(""):'<tr><td colspan="5"><span class="pill ok">Todas las motos vistas por la cámara tienen factura</span></td></tr>';
+}
 var XR=null;
 function loadCruces(){
   if(!window.__yo)return;
@@ -1167,7 +1191,7 @@ if(location.protocol!=="file:"&&window.fetch){fetch("/api/yo").then(function(r){
   $("btn-reset").hidden=true; applyRole(); renderAll();
   loadTasa(); setInterval(loadTasa,30*60*1000);
   loadDia().then(ejemploDesdeEnlace); loadAuts(); setInterval(loadAuts,5000);
-  if(u.permisos.indexOf("vigilante")>=0){loadCam();setInterval(loadCam,4000);loadHist();setInterval(loadHist,10000);loadCruces();setInterval(loadCruces,10000);$("h-dia").addEventListener("change",function(){HIST=null;loadHist()});$("h-ahora").addEventListener("change",renderHist)}
+  if(u.permisos.indexOf("vigilante")>=0){loadCam();setInterval(loadCam,4000);loadHist();setInterval(loadHist,10000);loadCruces();setInterval(loadCruces,10000);loadSinFact();setInterval(loadSinFact,10000);$("h-dia").addEventListener("change",function(){HIST=null;loadHist()});$("h-ahora").addEventListener("change",renderHist)}
 }).catch(function(){})}
  $("a-meta").value=S.meta; renderRules(); setInterval(function(){renderVigilante();renderMeta()},30000);
 })();

@@ -471,6 +471,10 @@ async function api(req, res, ruta) {
     const r = decidirAut(d, yo);
     return json(res, r.error ? 400 : 200, r);
   }
+  if (ruta === '/api/camara/puente/liberar') {
+    if (!puede(yo, 'vigilante')) return json(res, 403, { error: 'No tienes permiso.' });
+    return camara.liberarPuente(d.n, yo.nombre) ? json(res, 200, { ok: true }) : json(res, 400, { error: 'Puente no válido.' });
+  }
   if (ruta === '/api/camara/cruces/validar') {
     if (!puede(yo, 'vigilante')) return json(res, 403, { error: 'No tienes permiso.' });
     return camara.validarCruce(d.id, d.ok) ? json(res, 200, { ok: true }) : json(res, 404, { error: 'No se encontró el cruce.' });

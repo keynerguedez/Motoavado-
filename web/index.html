@@ -813,7 +813,7 @@ function renderVigilanteReal(){
       :b.estado==="ok"?'<b>Moto registrada</b><span class="note">Lleva '+m+' min montada.'+(b.aprox?' Coincidencia por lectura parcial ('+esc(b.parcial)+' → '+esc(b.aprox)+'): confírmala a ojo.':'')+'</span>'
       :b.estado==="lavando"?'<b>En lavado, sin factura todavía</b><span class="note">Lleva '+m+' min. Si el cliente paga al terminar, no pasa nada; si la moto baja y pasan 15 min sin factura, salta la alerta.</span><div class="row"><button class="btn pri sm" data-act="regnow" data-b="'+b.n+'">Registrar ahora</button></div>'
       :'<b>Moto recién llegada</b><span class="note">Lleva '+m+' min. Si no se registra pronto, salta la alerta.</span>';
-    return '<div class="card bridge'+(b.estado==="alerta"?' alerta':b.estado==="ok"?' ok':'')+'">'+head+pill+'</div><div class="cam">'+img+'</div>'+txt+rv+'</div>';
+    return '<div class="card bridge'+(b.estado==="alerta"?' alerta':b.estado==="ok"?' ok':'')+'">'+head+pill+'</div><div class="cam">'+img+'</div>'+txt+rv+(window.__yo?'<div class="row"><button class="btn sm" data-act="liberar" data-b="'+b.n+'">Liberar puente</button></div>':"")+'</div>';
   }).join(""));
   var L=CAM?CAM.log:[];
   $("g-log").innerHTML=L.length?L.map(function(l){return '<div class="logrow"><span class="num note">'+hhmm(new Date(l.t))+'</span><span class="pill '+(l.kind==="info"?"mut":l.kind)+'">'+(l.kind==="bad"?"Alerta":l.kind==="ok"?"Resuelta":"Aviso")+'</span><span>'+esc(l.txt)+'</span></div>'}).join(""):'<span class="pill ok">Sin avisos hoy</span>';
@@ -1007,6 +1007,7 @@ document.addEventListener("click",function(ev){
   else if(a==="fixplaca"){var fo=S.orders.filter(function(x){return String(x.num)===t.dataset.n})[0]; if(fo&&fo.srvId){var np=window.prompt("Placa correcta de la moto #"+fo.num+" (5 a 8 letras y números):",fo.placa||""); if(np){np=np.toUpperCase().replace(/[^A-Z0-9]/g,""); jpost("/api/ventas/placa",{id:fo.srvId,placa:np}).then(function(r){if(!r.ok){alert(r.j.error||"No se pudo corregir la placa.");return}fo.placa=r.j.placa;fo.sin=false;fo.placaPor=window.__yo.nombre;renderAll()})}}}
   else if(a==="foto"){$("ov-foto-img").src=t.dataset.src;$("ov-foto-t").textContent=t.dataset.t||"";$("ov-foto").classList.add("on")}
   else if(a==="closefoto")$("ov-foto").classList.remove("on");
+  else if(a==="liberar"){if(window.confirm("¿Liberar "+(t.dataset.b==="5"?"la zona fuera del puente":"el puente "+t.dataset.b)+"? La próxima detección lo vuelve a leer desde cero."))jpost("/api/camara/puente/liberar",{n:+t.dataset.b}).then(function(){loadCam()})}
   else if(a==="xval"){jpost("/api/camara/cruces/validar",{id:t.dataset.id,ok:t.dataset.v==="1"}).then(function(){loadCruces()})}
   else if(a==="hreal"){var hi=$("hr-"+t.dataset.id);if(hi)jpost("/api/camara/historial/real",{id:t.dataset.id,real:hi.value}).then(function(){hi.blur();loadHist()})}
   else if(a==="aprobar"||a==="negar")decidir(t.dataset.aid,a==="aprobar");

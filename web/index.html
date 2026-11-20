@@ -881,11 +881,11 @@ function precargarWa(){ // en teléfono o tablet se baja de antemano la foto de 
 }
 function descargarFotoWa(o,blob){var a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="moto-"+o.num+".jpg";document.body.appendChild(a);a.click();a.remove()}
 function compartirWa(o){
-  var texto=textoWa(o), enlace="https://wa.me/?text="+encodeURIComponent(texto);
+  var texto=textoWa(o), enlace="https://wa.me/?text="+encodeURIComponent(texto), enlaceWeb="https://web.whatsapp.com/send?text="+encodeURIComponent(texto);
   try{navigator.clipboard&&navigator.clipboard.writeText(texto)}catch(e){}
-  if(!ESMOVIL){ // computador: WhatsApp se abre ya (con el texto puesto), la foto se baja para adjuntarla al chat
-    window.open(enlace,"_blank");
-    toastWa("Se abrió WhatsApp con el texto (también quedó copiado). Elige el grupo.");
+  if(!ESMOVIL){ // computador: WhatsApp Web se abre ya con la lista de chats y el texto puesto (sin la página intermedia de wa.me); la foto se baja para adjuntarla
+    window.open(enlaceWeb,"_blank");
+    toastWa("Se abrió WhatsApp Web con el texto (también quedó copiado). Elige el grupo.");
     fotoWa(o).then(function(blob){if(blob){descargarFotoWa(o,blob);toastWa("Se abrió WhatsApp con el texto. La foto de la moto #"+o.num+" se descargó: adjúntala al chat.")}});
     return;
   }

@@ -344,6 +344,12 @@ details.grp summary{cursor:pointer;font-weight:600;font-size:.9rem;color:var(--m
   <button class="btn pri" data-act="closeticket">Listo</button>
 </div></div>
 
+<div class="overlay" id="ov-vivo" style="background:#000;align-items:stretch"><div style="display:flex;flex-direction:column;gap:8px;width:100%;height:100%;padding:10px">
+  <div class="row" style="flex-wrap:wrap;gap:10px;color:#fff"><b style="margin-right:auto;font-size:1.1rem">Cámara en vivo</b><span class="pill mut" id="vv-t" style="white-space:normal">…</span><label class="row" style="gap:6px;color:#fff;font-size:.85rem"><input type="checkbox" id="vv-z" style="width:auto"> Mostrar recuadros</label><button class="btn sm" data-act="cerrarvivo">Cerrar</button></div>
+  <div style="position:relative;flex:1;min-height:0;display:flex;align-items:center;justify-content:center"><div style="position:relative;line-height:0;max-width:100%;max-height:100%"><img id="vv-img" alt="Cámara en vivo" style="max-width:100%;max-height:calc(100vh - 90px);border-radius:8px;background:#111"><div id="vv-zonas"></div></div></div>
+  <span class="note" style="color:#aaa">Solo para mirar: no se graba ni se guarda nada. La imagen se renueva sola cada pocos segundos (la cámara manda un fotograma nuevo cada ~10 s).</span>
+</div></div>
+
 <div class="overlay" id="ov-foto" data-act="closefoto" style="cursor:zoom-out"><div style="max-width:min(96vw,900px);max-height:92vh;display:flex;flex-direction:column;gap:8px;align-items:center"><img id="ov-foto-img" alt="" style="max-width:100%;max-height:84vh;border-radius:10px;background:#000"><span id="ov-foto-t" class="pill mut" style="white-space:normal"></span></div></div>
 
 <div class="overlay" id="ov-cierre"><div class="sheet stack">
@@ -796,6 +802,32 @@ function refrescarDia(){
     window.__firmaDia=f; loadDia();
   }).catch(function(){});
 }
+/* Ver en vivo: muestra a pantalla completa el último fotograma que ya manda la cámara (sin grabar ni guardar nada nuevo) y lo cambia en cuanto llega uno nuevo. */
+var VV={on:false,timer:null,u:null,p:false};
+function zonasHtml(zs){return (zs||[]).map(function(z){return '<div style="position:absolute;left:'+z.x*100+'%;top:'+z.y*100+'%;width:'+z.w*100+'%;height:'+z.h*100+'%;border:2px solid '+(z.puente===5?"#06b6d4":"#22c55e")+';border-radius:6px;pointer-events:none"><span style="position:absolute;top:2px;left:4px;background:'+(z.puente===5?"#06b6d4":"#22c55e")+';color:#000;font-weight:700;font-size:.8rem;line-height:1.3;padding:0 6px;border-radius:4px">'+(z.puente===5?"Fuera":z.puente)+'</span></div>'}).join("")}
+function actualizarVivo(){
+  if(!VV.on)return;
+  var t=$("vv-t"), señal=CAM&&CAM.contacto?(Date.now()-new Date(CAM.contacto).getTime())/1000:null;
+  if(!CAM||!CAM.vista){t.className="pill warn";t.textContent="Todavía no ha llegado ninguna imagen";return}
+  var edad=Math.max(0,Math.round((Date.now()-new Date(CAM.vista.t).getTime())/1000));
+  if(señal==null||señal>30){t.className="pill bad";t.textContent="Sin señal de la cámara desde hace "+hace(CAM.contacto)}
+  else{t.className="pill ok";t.textContent="Fotograma de hace "+edad+" s"}
+  $("vv-zonas").innerHTML=$("vv-z").checked?zonasHtml(CAM.vista.zonas):"";
+  var vn="/api/camara/vista?v="+encodeURIComponent(CAM.vista.t);
+  if(!VV.u){VV.u=vn;$("vv-img").src=vn}
+  else if(vn!==VV.u&&!VV.p){
+    VV.p=true; var im=new Image();
+    im.onload=function(){VV.u=vn;VV.p=false;if(VV.on)$("vv-img").src=vn};
+    im.onerror=function(){VV.p=false};
+    im.src=vn;
+  }
+}
+function abrirVivo(){
+  VV.on=true;VV.u=null;VV.p=false; $("ov-vivo").classList.add("on"); loadCam(); actualizarVivo();
+  VV.timer=setInterval(function(){loadCam();setTimeout(actualizarVivo,700)},3000);
+}
+function cerrarVivo(){VV.on=false;clearInterval(VV.timer);VV.timer=null;$("ov-vivo").classList.remove("on");$("vv-img").removeAttribute("src")}
+document.addEventListener("keydown",function(e){if(e.key==="Escape"&&VV.on)cerrarVivo()});
 var CO=null;
 function usd4(n){return "$"+(n<1?n.toFixed(4):n.toFixed(2))}
 function loadConsumo(){
@@ -882,7 +914,7 @@ function renderVigilanteReal(){
   if(CAM&&CAM.vista){
     gv.style.display="";
     if(!$("g-vista-img")){
-      gv.innerHTML='<div class="row"><h3 style="margin-right:auto">Vista de la cámara</h3><span class="note">Se actualiza cada 30 s · última foto de hace <b id="g-vista-t"></b> · los recuadros verdes son la zona de cada puente</span></div><div style="position:relative;line-height:0"><img id="g-vista-img" alt="Vista de la cámara" style="width:100%;border-radius:10px"><div id="g-vista-z"></div></div>';
+      gv.innerHTML='<div class="row"><h3 style="margin-right:auto">Vista de la cámara</h3><button class="btn sm pri" data-act="vivo">Ver en vivo</button><span class="note">Se actualiza cada 30 s · última foto de hace <b id="g-vista-t"></b> · los recuadros verdes son la zona de cada puente</span></div><div style="position:relative;line-height:0"><img id="g-vista-img" alt="Vista de la cámara" style="width:100%;border-radius:10px"><div id="g-vista-z"></div></div>';
       VIMG={u:null,t:0,v:null,p:false};
     }
     var zj=JSON.stringify(CAM.vista.zonas||[]);
@@ -1111,6 +1143,8 @@ document.addEventListener("click",function(ev){
   else if(a==="liberar"){if(window.confirm("¿Liberar "+(t.dataset.b==="5"?"la zona fuera del puente":"el puente "+t.dataset.b)+"? La próxima detección lo vuelve a leer desde cero."))jpost("/api/camara/puente/liberar",{n:+t.dataset.b}).then(function(){loadCam()})}
   else if(a==="xrev"){t.disabled=true;$("x-msg").textContent="Comparando la foto de la factura #"+t.dataset.n+"…";jpost("/api/camara/cruces/revalidar",{id:t.dataset.id}).then(function(r){t.disabled=false;$("x-msg").textContent="Factura #"+t.dataset.n+": "+(r.ok?(r.j.tipo==="coincide"?"coincide con la moto del "+(r.j.puente===5?"área fuera del puente":"puente "+r.j.puente)+".":r.j.tipo==="distinta"?"NO coincide con las lecturas de hoy con esa placa.":r.j.tipo==="ninguna"?"ninguna de las "+r.j.comparadas+" fotos de la cámara de hoy coincide.":"Claude no pudo confirmarlo."):(r.j.error||"no se pudo revalidar."));loadCruces();loadHist()})}
   else if(a==="xman"){var nt=window.prompt("Validar a ojo la factura #"+t.dataset.n+". Escribe una nota (por ejemplo: la foto del encargado y la cámara son de la misma moto):");if(nt)jpost("/api/camara/cruces/manual",{id:t.dataset.id,nota:nt}).then(function(r){$("x-msg").textContent=r.ok?"Factura #"+t.dataset.n+": validada a ojo.":(r.j.error||"No se pudo guardar.");loadCruces()})}
+  else if(a==="vivo")abrirVivo();
+  else if(a==="cerrarvivo")cerrarVivo();
   else if(a==="adiahoy"){$("a-dia").value=hoyCaracas();elegirDiaAdmin("")}
   else if(a==="xval"){jpost("/api/camara/cruces/validar",{id:t.dataset.id,ok:t.dataset.v==="1"}).then(function(){loadCruces()})}
   else if(a==="hreal"){var hi=$("hr-"+t.dataset.id);if(hi)jpost("/api/camara/historial/real",{id:t.dataset.id,real:hi.value}).then(function(){hi.blur();loadHist()})}
@@ -1225,6 +1259,7 @@ document.addEventListener("input",function(ev){
   else if(t.id==="p-monto")montoDif();
   else if(t.id==="x-todos")renderCruces();
   else if(t.id==="a-dia")elegirDiaAdmin(t.value);
+  else if(t.id==="vv-z")actualizarVivo();
   else if(t.id==="a-tasa"){var x=parseFloat(t.value);if(x>0){S.tasa=x;draftTotal();renderAll()}}
 });
 $("c-buscar").addEventListener("input",renderClientes);

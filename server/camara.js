@@ -238,41 +238,42 @@ function crear(ctx) {
   const fotoVenta = id => { try { return fs.readFileSync(path.join(FOTOS, 'venta', id + '.jpg')); } catch (e) { return null; } };
   const fotoPuente = n => { try { return fs.readFileSync(path.join(FOTOS, 'camara-puente-' + n + '.jpg')); } catch (e) { return null; } };
   const buena = r => r && r.misma === true && r.confianza !== 'baja';
-  function enlazar(p, v) {
-    p.cruceId = v.id; p.cruce = true; p.estado = 'ok'; p.num = v.num; delete p.alertado; delete p.aprox;
-    S.cruces = S.cruces.filter(c => c.id !== v.id);
-    avisar('ok', nombre(p.n) + ': la foto del encargado coincide con la moto del puente (#' + v.num + ').'); guardar();
-  }
   const pendiente = v => { S.cruces = S.cruces.filter(c => c.id !== v.id); S.cruces.unshift({ id: v.id, num: v.num, placa: v.placa || '', t: Date.now() }); S.cruces.length = Math.min(S.cruces.length, 5); guardar(); };
-  // Al registrar una moto: se guarda su foto y se compara con la moto de cada puente que aún no tiene factura.
+  // La foto del encargado SOLO se compara con la moto del puente cuya placa coincide con la de la factura (placa completa o lectura parcial compatible).
+  const encajaVenta = (p, placa) => p.estado !== 'libre' && ((p.placa && p.placa === placa) || (!p.placa && p.parcial && coincideParcial(p.parcial, placa)));
+  // Compara las dos fotos y lo registra: 'coincide' (misma moto), 'distinta' (misma placa pero otra moto: alerta) o 'duda'.
+  async function verificar(v, jpeg, cands, origen) {
+    const comps = (await Promise.all(cands.map(async p => { const f = fotoPuente(p.n); return f ? { p, r: await comparar(jpeg, f), foto: f } : null; }))).filter(Boolean);
+    if (!comps.length) return null;
+    const si = comps.filter(x => buena(x.r)), no = comps.filter(x => x.r && x.r.misma === false && x.r.confianza !== 'baja');
+    const tipo = si.length ? 'coincide' : no.length ? 'distinta' : 'duda', p = (si[0] || no[0] || comps[0]).p;
+    cNuevo(v, origen, comps, tipo, tipo === 'duda' ? null : p.n);
+    if (tipo === 'coincide') { p.cruce = true; avisar('ok', nombre(p.n) + ': la foto del encargado coincide con la moto del puente (#' + v.num + ').'); }
+    else if (tipo === 'distinta') avisar('bad', nombre(p.n) + ': la foto de la factura #' + v.num + ' (' + (v.placa || '') + ') NO coincide con la moto del puente, aunque la placa es la misma.');
+    if (tipo !== 'duda') S.cruces = S.cruces.filter(c => c.id !== v.id);
+    guardar();
+    return { puente: p.n, misma: tipo === 'coincide' ? true : tipo === 'distinta' ? false : null };
+  }
+  // Al registrar una moto: se guarda su foto y, si ya hay un puente con esa placa, se comparan las dos fotos; si no, queda pendiente.
   async function cruzar(v, jpeg) {
     cambioDeDia();
     try { fs.mkdirSync(path.join(FOTOS, 'venta'), { recursive: true }); fs.writeFileSync(path.join(FOTOS, 'venta', v.id + '.jpg'), jpeg, { mode: 0o600 }); } catch (e) {}
-    const ya = S.puentes.find(p => p.estado === 'ok' && (p.cruceId === v.id || (p.num === v.num && v.placa && p.placa === v.placa)));
-    if (ya) return { puente: ya.n, misma: true, por: ya.cruceId === v.id ? 'foto' : 'placa' };
-    const cands = S.puentes.filter(p => (p.estado === 'esperando' || p.estado === 'lavando' || p.estado === 'alerta') && !p.cruceId);
-    if (!cands.length) { pendiente(v); return { puente: null, pendiente: true }; }
-    const res = await Promise.all(cands.map(async p => { const f = fotoPuente(p.n); return f ? { p, r: await comparar(jpeg, f), foto: f } : null; }));
-    const comps = res.filter(Boolean);
-    const si = res.filter(x => x && buena(x.r)).sort((a, b) => (b.r.confianza === 'alta') - (a.r.confianza === 'alta'));
-    const unico = si.length === 1 || (si.length > 1 && si[0].r.confianza === 'alta' && si[1].r.confianza !== 'alta');
-    if (unico && S.puentes[si[0].p.n - 1] === si[0].p && si[0].p.estado !== 'libre') { cNuevo(v, 'registro', comps, 'enlazada', si[0].p.n); enlazar(si[0].p, v); return { puente: si[0].p.n, misma: true, por: 'foto' }; }
-    pendiente(v);
-    if (comps.length) cNuevo(v, 'registro', comps, si.length > 1 ? 'ambigua' : 'sin-coincidencia', null);
-    if (si.length > 1) { avisar('bad', 'La foto de la moto #' + v.num + ' encaja con varias motos de los puentes; no se pudo elegir una.'); return { puente: null, ambigua: true }; }
-    avisar('bad', 'La foto de la moto #' + v.num + (v.placa ? ' (' + v.placa + ')' : '') + ' no coincide con ninguna moto de los puentes (' + cands.map(p => nombre(p.n)).join(', ') + ').');
-    return { puente: null, misma: false, comparadas: cands.map(p => p.n) };
+    const placa = limpiarPlaca(v.placa);
+    if (!placa) return { puente: null, sinPlaca: true };
+    const cands = S.puentes.filter(p => encajaVenta(p, placa));
+    const r = cands.length ? await verificar(v, jpeg, cands, 'registro') : null;
+    if (r) return r;
+    pendiente(v); return { puente: null, pendiente: true };
   }
-  // Cada revisión de un puente sin factura: si hay fotos de encargado sin cruzar, se prueban contra la moto del puente.
+  // Cada revisión de un puente con placa leída: si hay fotos de encargado pendientes con esa placa, se comparan con la moto del puente.
   async function cruzarPuente(p, jpeg) {
     const lim = Date.now() - 3 * 3600e3;
-    S.cruces = S.cruces.filter(c => c.t > lim && !S.puentes.some(x => x.estado === 'ok' && (x.cruceId === c.id || x.num === c.num)));
+    S.cruces = S.cruces.filter(c => c.t > lim);
     p.cruceT = Date.now();
     for (const c of S.cruces.slice(0, 3)) {
-      const v = ctx.ventasDeHoy().find(x => x.id === c.id), f = fotoVenta(c.id); if (!v || !f) continue;
-      const r = await comparar(f, jpeg), ok = buena(r) && S.puentes[p.n - 1] === p && p.estado !== 'libre';
-      if (ok) { cNuevo(v, 'revisión', [{ p, r, foto: jpeg }], 'enlazada', p.n); enlazar(p, v); return true; }
-      if (r && r.misma !== null && !C.some(x => x.venta.id === v.id && x.comps.some(k => k.puente === p.n) && Date.now() - Date.parse(x.t) < 30 * 60e3)) cNuevo(v, 'revisión', [{ p, r, foto: jpeg }], 'sin-coincidencia', null);
+      const v = ctx.ventasDeHoy().find(x => x.id === c.id), f = fotoVenta(c.id), placa = v && limpiarPlaca(v.placa);
+      if (!v || !f || !placa || !encajaVenta(p, placa)) continue;
+      const r = await verificar(v, f, [p], 'revisión'); if (r) return true;
     }
     return false;
   }
@@ -385,7 +386,7 @@ function crear(ctx) {
           if (p.dudas >= 2) { avisar('info', nombre(n) + ': la placa ' + p.placa + ' no se pudo confirmar y se descartó.'); const eh = p.hid && H.find(x => x.id === p.hid); if (eh) { eh.placa = ''; eh.parcial = ''; hSucio = true; } p.placa = ''; p.parcial = ''; p.motivo = 'ilegible'; delete p.aprox; delete p.num; if (p.estado === 'ok') p.estado = 'esperando'; p.desde = p.desde || ahora; p.dudas = 0; }
         }
       }
-      if (hayMoto && (p.estado === 'esperando' || p.estado === 'lavando' || p.estado === 'alerta') && S.cruces.length && Date.now() - (p.cruceT || 0) >= 2 * 60e3) await cruzarPuente(p, jpeg);
+      if (hayMoto && (p.placa || p.parcial) && S.cruces.length && Date.now() - (p.cruceT || 0) >= 2 * 60e3) await cruzarPuente(p, jpeg);
       // Mientras siga sin placa completa, la revisión también sirve de intento de lectura.
       if (!p.placa && p.intentos < MAX_LECTURAS_LENTAS && rapida.moto !== false) { p.intentos++; p.leidoT = Date.now(); guardarLectura(p, await leer(jpeg)); guardarFoto(); }
       evaluar(p); guardar();

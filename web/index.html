@@ -304,7 +304,7 @@ details.grp summary{cursor:pointer;font-weight:600;font-size:.9rem;color:var(--m
       <div class="card stack" id="x-card">
         <div class="row" style="flex-wrap:wrap;gap:10px"><h3 style="margin-right:auto">Cruce de fotos: la del encargado contra la de la cámara</h3><span class="pill mut" id="x-res">–</span></div>
         <div class="tablewrap"><table style="min-width:760px"><thead><tr><th>Hora</th><th>Factura</th><th>Foto del encargado</th><th>Foto del puente</th><th>Lo que dijo Claude</th><th>Resultado</th><th>¿Acertó?</th></tr></thead><tbody id="x-rows"><tr><td colspan="7" class="note">Cargando…</td></tr></tbody></table></div>
-        <p class="note">Cada vez que el encargado registra una moto con foto, Claude la compara con la moto de cada puente sin factura. Aquí ves las dos fotos, lo que respondió y por qué. Marca si acertó para medir la fiabilidad. Se guardan los últimos 100 cruces.</p>
+        <p class="note">Cuando el encargado registra una moto con foto, Claude la compara solo con la moto del puente que tiene la misma placa. Aquí ves las dos fotos, lo que respondió y por qué. Marca si acertó para medir la fiabilidad. Se guardan los últimos 100 cruces.</p>
       </div>
     </div>
   </section>
@@ -538,7 +538,7 @@ function renderClientes(){
 function enviarFoto(o,id){
   if(!window.__yo||!o.fotoGrande||!id||o.fotoEnviada)return; o.fotoEnviada=true;
   fetch("/api/ventas/foto?id="+encodeURIComponent(id),{method:"POST",headers:{"content-type":"image/jpeg"},body:o.fotoGrande}).then(function(r){return r.json().catch(function(){return{}})}).then(function(j){
-    var t=j.puente?"✓ La foto coincide con la moto del "+(j.puente===5?"área fuera del puente":"puente "+j.puente)+(j.por==="placa"?" (también por la placa)":"")+".":j.ambigua?"La foto se parece a varias motos de los puentes; el dueño la verá en Vigilante.":j.misma===false?"⚠ La foto NO coincide con ninguna moto de los puentes. Revisa que sea la moto correcta.":j.pendiente?"Foto guardada. Se cruzará cuando la cámara vea la moto en un puente.":"";
+    var pn=j.puente===5?"área fuera del puente":"puente "+j.puente;var t=j.sinPlaca?"Foto guardada. Sin placa no se cruza con la cámara.":j.puente&&j.misma===true?"✓ La foto coincide con la moto del "+pn+" (misma placa).":j.puente&&j.misma===false?"⚠ La foto NO coincide con la moto del "+pn+", que tiene esa misma placa. Revisa.":j.puente?"Foto guardada. Claude no pudo confirmar si es la misma moto del "+pn+"; el dueño la revisará.":j.pendiente?"Foto guardada. Se comparará cuando la cámara lea esa placa en un puente.":"";
     if(t){o.cruceTxt=t;$("f-err").textContent="Moto #"+o.num+": "+t;renderAll()}
   }).catch(function(){});
 }
@@ -740,7 +740,7 @@ function loadCruces(){
 function renderCruces(){
   if(!XR||!$("x-rows"))return; var r=XR.resumen;
   $("x-res").textContent=r.total+" cruces · "+(r.validados?r.acertó+" de "+r.validados+" validados bien":"sin validar");
-  var TIPO={"enlazada":'<span class="pill ok">Enlazada al puente</span>',"sin-coincidencia":'<span class="pill bad">No coincide</span>',"ambigua":'<span class="pill warn">Dudosa: varias</span>'};
+  var TIPO={"coincide":'<span class="pill ok">Misma moto</span>',"distinta":'<span class="pill bad">Otra moto con la misma placa</span>',"duda":'<span class="pill warn">Sin certeza</span>',"enlazada":'<span class="pill ok">Enlazada al puente</span>',"sin-coincidencia":'<span class="pill bad">No coincide</span>',"ambigua":'<span class="pill warn">Dudosa: varias</span>'};
   $("x-rows").innerHTML=XR.items.length?XR.items.map(function(x){
     var hora=new Date(x.t).toLocaleTimeString("es-VE",{hour:"2-digit",minute:"2-digit",timeZone:"America/Caracas"});
     var ph=function(src,t){return '<img class="thumb" style="width:110px;height:82px;object-fit:cover;cursor:zoom-in" loading="lazy" src="'+esc(src)+'" alt="Ampliar" data-act="foto" data-src="'+esc(src)+'" data-t="'+esc(t)+'">'};

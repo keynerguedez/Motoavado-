@@ -437,6 +437,7 @@ function groupOrders(){
   return gs;
 }
 function renderTablet(){
+  precargarWa();
   $("who").textContent=S.user;
   $("t-count").textContent=S.orders.length+" motos";
   if(!S.orders.length){$("t-list").innerHTML='<p class="note">Todavía no hay motos facturadas hoy.</p>';return}
@@ -863,27 +864,41 @@ function textoWa(o){
   return ["*Moto #"+o.num+" · "+(o.placa||"SIN PLACA")+"*","Cliente: "+cliName(o),"Servicio: "+names(o),"Monto: "+monto,"Pago: "+pago,"Atendió "+o.op+" · "+o.time].join("\n");
 }
 function esc0(x){return String(x==null?"":x)}
+var ESMOVIL=/Android|iPhone|iPad|iPod/i.test(navigator.userAgent)||(navigator.maxTouchPoints>1&&/Macintosh/.test(navigator.userAgent)), WAB={};
+function toastWa(m){
+  var t=document.getElementById("toast-wa"); if(!t){t=document.createElement("div");t.id="toast-wa";t.style.cssText="position:fixed;left:50%;bottom:24px;transform:translateX(-50%);max-width:min(92vw,520px);background:#0b0b0b;color:#fff;padding:12px 16px;border-radius:10px;font-size:.95rem;z-index:50;box-shadow:0 4px 18px rgba(0,0,0,.35)";document.body.appendChild(t)}
+  t.textContent=m; t.style.display=""; clearTimeout(t._h); t._h=setTimeout(function(){t.style.display="none"},7000);
+}
+function fotoWa(o){
+  if(o.fotoGrande)return Promise.resolve(o.fotoGrande);
+  if(!o.srvId)return Promise.resolve(null);
+  if(WAB[o.srvId])return Promise.resolve(WAB[o.srvId]);
+  return fetch("/api/ventas/foto/"+o.srvId+".jpg").then(function(r){return r.ok?r.blob():null}).then(function(b){if(b)WAB[o.srvId]=b;return b}).catch(function(){return null});
+}
+function precargarWa(){ // en teléfono o tablet se baja de antemano la foto de las últimas motos, para que el menú de compartir se abra al primer toque
+  if(!ESMOVIL||!window.__yo)return;
+  S.orders.slice(-8).forEach(function(o){if(o.srvId&&!WAB[o.srvId]&&!o.fotoGrande)fotoWa(o)});
+}
+function descargarFotoWa(o,blob){var a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="moto-"+o.num+".jpg";document.body.appendChild(a);a.click();a.remove()}
 function compartirWa(o){
-  var texto=textoWa(o), msg=function(m){$("f-err").textContent=m};
-  var conFoto=o._waBlob?Promise.resolve(o._waBlob):o.fotoGrande?Promise.resolve(o.fotoGrande):(o.srvId?fetch("/api/ventas/foto/"+o.srvId+".jpg").then(function(r){return r.ok?r.blob():null}).catch(function(){return null}):Promise.resolve(null));
-  conFoto.then(function(blob){
-    if(blob)o._waBlob=blob;
-    try{navigator.clipboard&&navigator.clipboard.writeText(texto)}catch(e){}
+  var texto=textoWa(o), enlace="https://wa.me/?text="+encodeURIComponent(texto);
+  try{navigator.clipboard&&navigator.clipboard.writeText(texto)}catch(e){}
+  if(!ESMOVIL){ // computador: WhatsApp se abre ya (con el texto puesto), la foto se baja para adjuntarla al chat
+    window.open(enlace,"_blank");
+    toastWa("Se abrió WhatsApp con el texto (también quedó copiado). Elige el grupo.");
+    fotoWa(o).then(function(blob){if(blob){descargarFotoWa(o,blob);toastWa("Se abrió WhatsApp con el texto. La foto de la moto #"+o.num+" se descargó: adjúntala al chat.")}});
+    return;
+  }
+  var enviar=function(blob){
     var file=blob&&window.File?new File([blob],"moto-"+o.num+".jpg",{type:"image/jpeg"}):null;
-    var plan=function(){ // sin menú de compartir (computador): se baja la foto, queda el texto copiado y se abre WhatsApp para elegir el chat
-      if(blob){var a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="moto-"+o.num+".jpg";document.body.appendChild(a);a.click();a.remove()}
-      window.open("https://wa.me/?text="+encodeURIComponent(texto),"_blank");
-      msg("Texto copiado"+(blob?" y foto descargada":"")+". Elige el grupo en WhatsApp y pega el texto"+(blob?" junto con la foto":"")+".");
-    };
-    if(file&&navigator.canShare&&navigator.canShare({files:[file]})){
-      navigator.share({files:[file],text:texto,title:"Moto #"+o.num}).then(function(){msg("Moto #"+o.num+" compartida.")}).catch(function(e){
-        if(e&&e.name==="AbortError")return;
-        if(e&&e.name==="NotAllowedError"){msg("Foto lista. Vuelve a tocar Compartir por WhatsApp para enviarla.");return}
-        plan();
-      });
-    }else if(navigator.share&&!file){navigator.share({text:texto}).then(function(){msg("Moto #"+o.num+" compartida (sin foto).")}).catch(function(e){if(!(e&&e.name==="AbortError"))plan()})}
+    var plan=function(){window.open(enlace,"_blank");toastWa("Texto copiado y WhatsApp abierto. Elige el grupo y pega el texto.")};
+    var fin=function(e){if(e&&e.name==="AbortError")return;plan()};
+    if(file&&navigator.canShare&&navigator.canShare({files:[file]}))navigator.share({files:[file],text:texto,title:"Moto #"+o.num}).then(function(){toastWa("Moto #"+o.num+" compartida.")}).catch(fin);
+    else if(navigator.share)navigator.share({text:texto}).then(function(){toastWa("Moto #"+o.num+" compartida (sin foto).")}).catch(fin);
     else plan();
-  });
+  };
+  var ya=o.fotoGrande||(o.srvId&&WAB[o.srvId]);
+  if(ya)enviar(ya); else fotoWa(o).then(enviar); // con la foto ya descargada se comparte al primer toque; si no, se baja y se comparte enseguida
 }
 var CO=null;
 function usd4(n){return "$"+(n<1?n.toFixed(4):n.toFixed(2))}

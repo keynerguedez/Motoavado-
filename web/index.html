@@ -444,7 +444,7 @@ function renderTablet(){
     var blocked=o.disc&&o.disc.status==="pending";
     var side=o.pay?'<span class="pill ok">Cobrada · '+esc(o.pay.method)+'</span>'
       :(blocked?'<span class="pill warn">No cobrar todavía</span>':'<button class="btn pri sm" data-act="pay" data-n="'+o.num+'">Cobrar</button>');
-    return '<div class="order"><img class="thumb" src="'+o.photo+'" alt="Foto de la moto '+o.num+'"><div class="info"><div class="n">#'+String(o.num).padStart(3,"0")+' · '+esc(o.placa)+'</div><div class="svc">'+esc(o.modelo||"")+(o.modelo?" · ":"")+esc(names(o))+'</div><div class="svc">'+esc(cliName(o))+' · '+fmtTel(o.tel)+'</div><div class="svc">'+o.time+' · Lavador: '+esc(o.lav||"")+(o.tipo&&o.tipo!=="normal"?' · '+(o.tipo==="garantia"?"Garantía":"Lavado autorizado"):"")+'</div>'+(o.nota?'<div class="svc">Pago pendiente: '+esc(o.nota)+'</div>':"")+(o.cruceTxt?'<div class="svc">'+esc(o.cruceTxt)+'</div>':"")+discPill(o)+(o.ticket?' <span class="pill mut">Ticket enviado</span>':'')+'</div><div class="side"><b class="num">'+usd(total(o))+'</b>'+side+'</div></div>';
+    return '<div class="order"><img class="thumb" src="'+o.photo+'" alt="Foto de la moto '+o.num+'"><div class="info"><div class="n">#'+String(o.num).padStart(3,"0")+' · '+esc(o.placa)+'</div><div class="svc">'+esc(o.modelo||"")+(o.modelo?" · ":"")+esc(names(o))+'</div><div class="svc">'+esc(cliName(o))+' · '+fmtTel(o.tel)+'</div><div class="svc">'+o.time+' · Lavador: '+esc(o.lav||"")+(o.tipo&&o.tipo!=="normal"?' · '+(o.tipo==="garantia"?"Garantía":"Lavado autorizado"):"")+'</div>'+(o.nota?'<div class="svc">Pago pendiente: '+esc(o.nota)+'</div>':"")+(o.cruceTxt?'<div class="svc">'+esc(o.cruceTxt)+'</div>':"")+discPill(o)+(o.ticket?' <span class="pill mut">Ticket enviado</span>':'')+'</div><div class="side"><b class="num">'+usd(total(o))+'</b>'+side+'<button class="btn sm" data-act="wa" data-n="'+o.num+'">Compartir por WhatsApp</button></div></div>';
   };
   var gs=groupOrders();
   $("t-list").innerHTML=gs.map(function(g){
@@ -855,6 +855,36 @@ function iniciarEnVivo(){
   setInterval(pintarLive,1000); pintarLive();
   document.addEventListener("visibilitychange",refrescarYa); window.addEventListener("focus",refrescarYa); window.addEventListener("online",refrescarYa);
 }
+/* Compartir por WhatsApp: la foto de la moto con un texto (cliente, servicio, monto, pago y referencia) para que el encargado lo mande al grupo sin escribirlo otra vez. */
+function textoWa(o){
+  var tasa=(o.pay&&o.pay.tasa)||S.tasa, a=o.pay?paidAmt(o):null, monto=usd(total(o));
+  if(!o.pay||a.cur==="Bs"||a.cur==="USDT")monto+=" · "+(a&&a.cur==="Bs"?a.txt:"Bs "+fmtN(total(o)*tasa));
+  var pago=o.pay?esc0(o.pay.method)+(o.pay.ref?" · ref. "+o.pay.ref:""):(o.disc&&o.disc.status==="pending"?"pendiente de autorización":"pendiente"+(o.nota?" · "+o.nota:""));
+  return ["*Moto #"+o.num+" · "+(o.placa||"SIN PLACA")+"*","Cliente: "+cliName(o),"Servicio: "+names(o),"Monto: "+monto,"Pago: "+pago,"Atendió "+o.op+" · "+o.time].join("\n");
+}
+function esc0(x){return String(x==null?"":x)}
+function compartirWa(o){
+  var texto=textoWa(o), msg=function(m){$("f-err").textContent=m};
+  var conFoto=o._waBlob?Promise.resolve(o._waBlob):o.fotoGrande?Promise.resolve(o.fotoGrande):(o.srvId?fetch("/api/ventas/foto/"+o.srvId+".jpg").then(function(r){return r.ok?r.blob():null}).catch(function(){return null}):Promise.resolve(null));
+  conFoto.then(function(blob){
+    if(blob)o._waBlob=blob;
+    try{navigator.clipboard&&navigator.clipboard.writeText(texto)}catch(e){}
+    var file=blob&&window.File?new File([blob],"moto-"+o.num+".jpg",{type:"image/jpeg"}):null;
+    var plan=function(){ // sin menú de compartir (computador): se baja la foto, queda el texto copiado y se abre WhatsApp para elegir el chat
+      if(blob){var a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="moto-"+o.num+".jpg";document.body.appendChild(a);a.click();a.remove()}
+      window.open("https://wa.me/?text="+encodeURIComponent(texto),"_blank");
+      msg("Texto copiado"+(blob?" y foto descargada":"")+". Elige el grupo en WhatsApp y pega el texto"+(blob?" junto con la foto":"")+".");
+    };
+    if(file&&navigator.canShare&&navigator.canShare({files:[file]})){
+      navigator.share({files:[file],text:texto,title:"Moto #"+o.num}).then(function(){msg("Moto #"+o.num+" compartida.")}).catch(function(e){
+        if(e&&e.name==="AbortError")return;
+        if(e&&e.name==="NotAllowedError"){msg("Foto lista. Vuelve a tocar Compartir por WhatsApp para enviarla.");return}
+        plan();
+      });
+    }else if(navigator.share&&!file){navigator.share({text:texto}).then(function(){msg("Moto #"+o.num+" compartida (sin foto).")}).catch(function(e){if(!(e&&e.name==="AbortError"))plan()})}
+    else plan();
+  });
+}
 var CO=null;
 function usd4(n){return "$"+(n<1?n.toFixed(4):n.toFixed(2))}
 function loadConsumo(){
@@ -1183,6 +1213,7 @@ document.addEventListener("click",function(ev){
   else if(a==="liberar"){if(window.confirm("¿Liberar "+(t.dataset.b==="5"?"la zona fuera del puente":"el puente "+t.dataset.b)+"? La próxima detección lo vuelve a leer desde cero."))jpost("/api/camara/puente/liberar",{n:+t.dataset.b}).then(function(){loadCam()})}
   else if(a==="xrev"){t.disabled=true;$("x-msg").textContent="Comparando la foto de la factura #"+t.dataset.n+"…";jpost("/api/camara/cruces/revalidar",{id:t.dataset.id}).then(function(r){t.disabled=false;$("x-msg").textContent="Factura #"+t.dataset.n+": "+(r.ok?(r.j.tipo==="coincide"?"coincide con la moto del "+(r.j.puente===5?"área fuera del puente":"puente "+r.j.puente)+".":r.j.tipo==="distinta"?"NO coincide con las lecturas de hoy con esa placa.":r.j.tipo==="ninguna"?"ninguna de las "+r.j.comparadas+" fotos de la cámara de hoy coincide.":"Claude no pudo confirmarlo."):(r.j.error||"no se pudo revalidar."));loadCruces();loadHist()})}
   else if(a==="xman"){var nt=window.prompt("Validar a ojo la factura #"+t.dataset.n+". Escribe una nota (por ejemplo: la foto del encargado y la cámara son de la misma moto):");if(nt)jpost("/api/camara/cruces/manual",{id:t.dataset.id,nota:nt}).then(function(r){$("x-msg").textContent=r.ok?"Factura #"+t.dataset.n+": validada a ojo.":(r.j.error||"No se pudo guardar.");loadCruces()})}
+  else if(a==="wa"){var wo=S.orders.filter(function(x){return String(x.num)===t.dataset.n})[0]; if(wo)compartirWa(wo)}
   else if(a==="vivo")abrirVivo();
   else if(a==="cerrarvivo")cerrarVivo();
   else if(a==="adiahoy"){$("a-dia").value=hoyCaracas();elegirDiaAdmin("")}

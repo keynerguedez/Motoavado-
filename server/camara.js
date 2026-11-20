@@ -454,7 +454,7 @@ function crear(ctx) {
     // La foto del historial es la que se usó para leer la placa (no se pisa con las revisiones); la del puente en vivo sí se renueva.
     const guardarFoto = (hist) => { p.visto = ahora; if (hist) hFoto(p, jpeg); try { fs.writeFileSync(path.join(FOTOS, 'camara-puente-' + n + '.jpg'), jpeg, { mode: 0o600 }); } catch (e) {} };
     const llegada = (r, origen, nueva) => {
-      Object.assign(p, { estado: 'esperando', desde: ahora, placa: '', parcial: '', intentos: 1, leidoT: Date.now(), relT: Date.now(), sinMoto: 0, origen }); delete p.num; delete p.otraMoto; delete p.cruceId; delete p.cruce; delete p.cruceT; delete p.confirmada; delete p.dudas; delete p.alertado; delete p.motivo; delete p.aprox; delete p.sinPlacaId;
+      Object.assign(p, { estado: 'esperando', desde: ahora, placa: '', parcial: '', intentos: 1, leidoT: Date.now(), relT: Date.now(), sinMoto: 0, origen }); delete p.num; delete p.otraMoto; delete p.cortadas; delete p.cortT; delete p.cruceId; delete p.cruce; delete p.cruceT; delete p.confirmada; delete p.dudas; delete p.alertado; delete p.motivo; delete p.aprox; delete p.sinPlacaId;
       S.vistas++; avisar('info', nombre(n) + (origen === 'revision' ? ': se encontró una moto ya montada.' : ': llegó una moto.'));
       if (nueva) hNuevo(p, jpeg); else hAbrir(p, jpeg);
       guardarLectura(p, r);
@@ -521,6 +521,14 @@ function crear(ctx) {
         }
       }
       if (hayMoto && (p.placa || p.parcial) && S.cruces.length && Date.now() - (p.cruceT || 0) >= 2 * 60e3) await cruzarPuente(p, jpeg);
+      // Puente 1 ocupado sin placa: si lo que hay es un trozo de moto cortado en el borde (la moto está fuera del puente), dos veces seguidas se libera y la fila queda descartada.
+      if (hayMoto && n === 1 && !p.placa && !p.parcial && Date.now() - (p.cortT || 0) >= 55000) {
+        p.cortT = Date.now(); const rc = await leer(jpeg);
+        if (cortada1(n, rc)) {
+          p.cortadas = (p.cortadas || 0) + 1;
+          if (p.cortadas >= 2) { avisar('info', nombre(n) + ': lo que se veía era un trozo de moto fuera del puente; se descartó.'); const eh = p.hid && H.find(x => x.id === p.hid); hSalida(p); if (eh) { eh.estado = 'descartada'; hSucio = true; } return libera(); }
+        } else if (rc.moto === true) p.cortadas = 0;
+      }
       // Mientras siga sin placa completa, la revisión también sirve de intento de lectura.
       if (!p.placa && p.intentos < MAX_LECTURAS_LENTAS && rapida.moto !== false) { p.intentos++; p.leidoT = Date.now(); guardarLectura(p, await leer(jpeg)); guardarFoto(true); }
       evaluar(p); guardar();

@@ -323,3 +323,18 @@ test('puente 1: un trozo de moto cortado en el borde y sin placa (la moto está 
   await otroPuente.ev(2, { revision: true });
   assert.equal(otroPuente.pub(2).estado, 'esperando', 'el resto de puentes no cambia');
 });
+
+test('puente 1 ocupado sin placa que en realidad es un trozo de moto cortado se libera y su fila queda descartada', async () => {
+  const t = montar({ puentes: { 1: { estado: 'lavando', origen: 'revision', placa: '', parcial: '', intentos: 9, sinMoto: 0, hid: 'mwo88888gg', desde: new Date(Date.now() - 300e3).toISOString() } },
+    historial: [{ id: 'mwo88888gg', puente: 1, estado: 'lavando' }], leer: haiku(() => ({ moto: true, placa: '', parcial: '', motivo: 'ilegible', cortada: true })) });
+  await t.ev(1, { revision: true });
+  assert.equal(t.pub(1).estado, 'lavando', 'a la primera revisión todavía no');
+  t.c.publico(); await conHora(60e3, async () => { await t.ev(1, { revision: true }); });
+  assert.equal(t.pub(1).estado, 'libre');
+  assert.equal(t.filas()[0].estado, 'descartada');
+  // una moto entera con la placa ilegible NO se libera
+  const entera = montar({ puentes: { 1: { estado: 'lavando', origen: 'revision', placa: '', parcial: '', intentos: 9, sinMoto: 0, hid: 'mwo99999hh', desde: new Date(Date.now() - 300e3).toISOString() } },
+    historial: [{ id: 'mwo99999hh', puente: 1, estado: 'lavando' }], leer: haiku(() => ({ moto: true, placa: '', parcial: '', motivo: 'ilegible', cortada: false })) });
+  await entera.ev(1, { revision: true }); await conHora(60e3, async () => { await entera.ev(1, { revision: true }); });
+  assert.equal(entera.pub(1).estado, 'lavando');
+});

@@ -394,6 +394,12 @@ async function api(req, res, ruta) {
       const f = camara.fotoVista(); if (!f) return json(res, 404, { error: 'Sin imagen.' });
       res.writeHead(200, { 'content-type': 'image/jpeg', 'cache-control': 'no-store' }); return res.end(f);
     }
+    const fv = /^\/api\/ventas\/foto\/([a-f0-9]{6,20})\.jpg$/.exec(ruta); // la foto que el encargado tomó de la moto (para compartirla)
+    if (fv) {
+      if (!puede(yo, 'tablet')) return json(res, 403, { error: 'No tienes permiso.' });
+      const f = camara.fotoVentaId(fv[1]); if (!f) return json(res, 404, { error: 'Sin foto.' });
+      res.writeHead(200, { 'content-type': 'image/jpeg', 'cache-control': 'private, max-age=600' }); return res.end(f);
+    }
     if (ruta === '/api/consumo') {
       if (!puede(yo, 'admin')) return json(res, 403, { error: 'No tienes permiso.' });
       return json(res, 200, consumo.resumen(new URL(req.url, 'http://localhost').searchParams.get('dia') || ''));

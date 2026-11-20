@@ -470,7 +470,14 @@ function crear(ctx) {
         if (r.moto === true && p.placa && r.placa === p.placa) { p.confirmada = true; p.dudas = 0; }
         else if (r.moto === true && p.placa && !r.placa && !p.confirmada) {
           p.dudas = (p.dudas || 0) + 1;
-          if (p.dudas >= 2) { avisar('info', nombre(n) + ': la placa ' + p.placa + ' no se pudo confirmar y se descartó.'); const eh = p.hid && H.find(x => x.id === p.hid); if (eh) { eh.placa = ''; eh.parcial = ''; hSucio = true; } p.placa = ''; p.parcial = ''; p.motivo = 'ilegible'; delete p.aprox; delete p.num; if (p.estado === 'ok') p.estado = 'esperando'; p.desde = p.desde || ahora; p.dudas = 0; }
+          if (p.dudas >= 2) {
+            // La placa no se pudo confirmar: se conserva su fila en el historial (marcada "descartada") y la moto sigue en una fila nueva sin placa; así una fila nunca cambia de moto ni pierde su lectura original.
+            avisar('info', nombre(n) + ': la placa ' + p.placa + ' no se pudo confirmar y se descartó.');
+            const eh = p.hid && H.find(x => x.id === p.hid); hSalida(p); if (eh) { eh.estado = 'descartada'; hSucio = true; }
+            S.vistas = Math.max(0, S.vistas - 1);
+            llegada({ moto: true, placa: '', parcial: '', motivo: 'ilegible' }, 'revision', true); evaluar(p); guardar();
+            return { ok: true, estado: p.estado, placa: null, revision: 'placa-descartada' };
+          }
         }
       }
       if (hayMoto && (p.placa || p.parcial) && S.cruces.length && Date.now() - (p.cruceT || 0) >= 2 * 60e3) await cruzarPuente(p, jpeg);

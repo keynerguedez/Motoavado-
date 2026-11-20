@@ -144,10 +144,32 @@ function crear(ctx) {
     if (r2 && r2.placa && r2.placa.length === r.placa.length) parcial = limpiarParcial([...r.placa].map((c, i) => c === r2.placa[i] ? c : '?').join(''));
     return { moto: r.moto, placa: '', parcial, motivo: parcial ? 'parcial' : 'ilegible' };
   }
+  // Recorte de la placa (con margen) ampliado, para que se vean mejor los caracteres. Sin ffmpeg o sin caja devuelve null.
+  async function ampliar(jpeg, caja) {
+    if (!caja) return null;
+    const x = Math.max(0, caja.x - caja.w * 0.35), y = Math.max(0, caja.y - caja.h * 0.6), w = Math.min(1 - x, caja.w * 1.7), h = Math.min(1 - y, caja.h * 2.2);
+    return ffmpegJpeg(jpeg, 'crop=iw*' + w.toFixed(4) + ':ih*' + h.toFixed(4) + ':iw*' + x.toFixed(4) + ':ih*' + y.toFixed(4) + ',scale=min(1000\\,iw*6):-2:flags=lanczos,unsharp=5:5:0.8');
+  }
+  // Lectura con el modelo bueno: la placa se confirma con OTRA vista (el recorte ampliado de la placa), no con la misma imagen leída dos veces.
+  async function leerConfirmada(jpeg, f) {
+    const a = await f(jpeg);
+    if (!a || a.moto !== true) return a;
+    const zoom = a.caja ? await ampliar(jpeg, a.caja) : null, solo = { placaSolo: true };
+    if (a.placa) return confirmar(a, await (zoom ? f(zoom, undefined, solo) : f(jpeg)));
+    if (!zoom) return a;
+    const b = await f(zoom, undefined, solo);
+    if (b && b.placa) {
+      if (a.parcial && coincideParcial(a.parcial, b.placa)) return { moto: true, placa: b.placa }; // lo que se veía a medias encaja con lo ampliado
+      const c = await f(zoom, undefined, solo); // sin parcial previo: dos lecturas del recorte ampliado
+      return c && c.placa === b.placa ? { moto: true, placa: b.placa } : confirmar({ moto: true, placa: b.placa }, c || {});
+    }
+    const mejor = b && b.parcial && conocidos(b.parcial) > conocidos(a.parcial) ? b.parcial : a.parcial;
+    return { moto: true, placa: '', parcial: mejor || '', motivo: mejor ? 'parcial' : 'ilegible' };
+  }
   const leer = async (jpeg, modelo) => {
-    const f = ctx.leerPlaca || leerPlaca, r = await f(jpeg, modelo);
-    if (modelo || !r || !r.placa) return r;
-    return confirmar(r, await f(jpeg, modelo));
+    const f = ctx.leerPlaca || leerPlaca;
+    if (modelo) return f(jpeg, modelo);
+    return leerConfirmada(jpeg, f);
   };
   // ¿Esta placa completa encaja con la placa (o lectura parcial) que ya tiene el puente?
   function encajaPuente(pl, p) {
@@ -166,7 +188,8 @@ function crear(ctx) {
     const t = !s.includes('?') && s.length >= 5 && s.length <= 7 ? s + '?' : s;
     return /^[A-Z0-9?]{5,8}$/.test(t) && conocidos(t) >= 4 && conocidos(t) < t.length ? t : '';
   }
-  function leerPlaca(jpeg, modeloForzado) {
+  function leerPlaca(jpeg, modeloForzado, opc) {
+    opc = opc || {};
     const clave = process.env.ANTHROPIC_API_KEY;
     if (!clave) return Promise.resolve({ moto: null, placa: '', motivo: 'sin-lector' });
     const modelo = modeloForzado || process.env.CAMARA_MODELO || 'claude-sonnet-5-5';
@@ -176,7 +199,7 @@ function crear(ctx) {
       model: modelo, max_tokens: 1500,
       messages: [{ role: 'user', content: [
         { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: jpeg.toString('base64') } },
-        { type: 'text', text: (process.env.CAMARA_PRUEBA === '1' ? 'MODO DE PRUEBA: un cartón o papel con una placa escrita cuenta como la moto (moto:true). ' : '') + 'Es una foto de una rampa de un lavadero de motos. Responde solo JSON: {"moto":true,"placa":"ABC123","segura":true}. "moto" es true solo si ves una moto sobre la rampa (aunque esté a medias, mojada o sin placa visible); es false si solo hay personas, cubetas, mangueras, herramientas, el piso o la rampa vacía. "placa" es la placa venezolana (6 a 8 letras y números); si no se ve completa o no estás seguro de cada carácter, deja "placa":"" y "segura":false, y en "parcial" escribe los caracteres que sí distingues, en su posición, con "?" en cada uno que no ves o no estás seguro (ejemplo: {"moto":true,"placa":"","segura":false,"parcial":"AB1C??"}). Nunca inventes un carácter que no se vea. Si la moto no tiene placa o está tapada, deja "placa":"" y "parcial":""; no tomes números de otras motos, cascos, carteles, ropa o calcomanías.' }] }],
+        { type: 'text', text: opc.placaSolo ? 'Esta imagen es un recorte ampliado de la placa de una moto venezolana. Responde solo JSON: {"placa":"ABC123","segura":true}. "placa" son los 6 a 8 letras y números de la placa; si no estás seguro de cada carácter, deja "placa":"" y "segura":false, y en "parcial" escribe los que sí distingues con "?" en los dudosos (ejemplo: {"placa":"","segura":false,"parcial":"AR8U65?"}). Fíjate bien en M/H, 8/B, 0/O/D, 5/S, 1/I y 2/Z. Nunca inventes un carácter que no se vea.' : (process.env.CAMARA_PRUEBA === '1' ? 'MODO DE PRUEBA: un cartón o papel con una placa escrita cuenta como la moto (moto:true). ' : '') + 'Es una foto de una rampa de un lavadero de motos. Responde solo JSON: {"moto":true,"placa":"ABC123","segura":true}. "moto" es true solo si ves una moto sobre la rampa (aunque esté a medias, mojada o sin placa visible); es false si solo hay personas, cubetas, mangueras, herramientas, el piso o la rampa vacía. "placa" es la placa venezolana (6 a 8 letras y números); si no se ve completa o no estás seguro de cada carácter, deja "placa":"" y "segura":false, y en "parcial" escribe los caracteres que sí distingues, en su posición, con "?" en cada uno que no ves o no estás seguro (ejemplo: {"moto":true,"placa":"","segura":false,"parcial":"AB1C??"}). Nunca inventes un carácter que no se vea. Si la moto no tiene placa o está tapada, deja "placa":"" y "parcial":""; no tomes números de otras motos, cascos, carteles, ropa o calcomanías. Además añade "caja": el rectángulo donde está la placa, como fracciones del ancho y alto de la imagen, {"x":0.42,"y":0.55,"w":0.12,"h":0.05} (x e y son la esquina superior izquierda), o null si no la ves.' }] }],
     }, /haiku/.test(modelo) ? { thinking: { type: 'disabled' } } : {}));
     return new Promise(ok => {
       const r = https.request({ hostname: 'api.anthropic.com', path: '/v1/messages', method: 'POST', timeout: 20000,
@@ -186,11 +209,12 @@ function crear(ctx) {
           try {
             const txt = (JSON.parse(t).content || []).map(x => x.text || '').join('');
             const j = JSON.parse(/\{[\s\S]*\}/.exec(txt)[0]);
-            const placa = limpiarPlaca(j.placa), moto = j.moto === true ? true : j.moto === false ? false : null;
+            const placa = limpiarPlaca(j.placa), moto = opc.placaSolo ? true : j.moto === true ? true : j.moto === false ? false : null;
+            const cj = j.caja, caja = cj && [cj.x, cj.y, cj.w, cj.h].every(v => typeof v === 'number' && v >= 0 && v <= 1) && cj.w > 0.01 && cj.h > 0.01 ? { x: cj.x, y: cj.y, w: cj.w, h: cj.h } : null;
             if (moto === false) return ok({ moto: false, placa: '', motivo: 'no-hay-moto' });
-            if (j.segura === true && /^[A-Z0-9]{5,8}$/.test(placa)) return ok({ moto, placa });
+            if (j.segura === true && /^[A-Z0-9]{5,8}$/.test(placa)) return ok({ moto, placa, caja });
             const parcial = limpiarParcial(j.parcial);
-            ok({ moto, placa: '', parcial, motivo: parcial ? 'parcial' : 'ilegible' });
+            ok({ moto, placa: '', parcial, motivo: parcial ? 'parcial' : 'ilegible', caja });
           } catch (e) { ok({ moto: null, placa: '', motivo: 'error' }); }
         });
       });
@@ -328,8 +352,14 @@ function crear(ctx) {
     }
     let v = registrada(p.placa) || (vid && ctx.ventasDeHoy().find(x => x.id === vid)) || null, aprox = false;
     if (!v && !p.placa && p.parcial) { v = registradaParcial(p.parcial); aprox = !!v; }
+    // Placa completa que difiere en un solo carácter de UNA sola factura de hoy (la cámara confunde M/H, 0/O…) y que ningún otro puente tiene asignada: se da por registrada como aproximada.
+    if (!v && p.placa) {
+      const tomadas = new Set(S.puentes.filter(x => x !== p && x.estado === 'ok' && x.num != null).map(x => x.num));
+      const cerca1 = ctx.ventasDeHoy().filter(x => x.placa && !tomadas.has(x.num) && limpiarPlaca(x.placa) !== p.placa && cerca(limpiarPlaca(x.placa), p.placa));
+      if (cerca1.length === 1) { v = cerca1[0]; aprox = true; }
+    }
     if (v) {
-      if (p.estado !== 'ok') avisar('ok', nombre(p.n) + ': ' + (aprox ? 'la lectura parcial ' + p.parcial + ' coincide con la moto ' + limpiarPlaca(v.placa) : 'se registró la moto ' + p.placa) + ' (#' + v.num + ').');
+      if (p.estado !== 'ok') avisar('ok', nombre(p.n) + ': ' + (aprox ? 'la lectura ' + (p.placa || p.parcial) + ' casi coincide con la moto ' + limpiarPlaca(v.placa) : 'se registró la moto ' + p.placa) + ' (#' + v.num + ').');
       p.estado = 'ok'; p.num = v.num; if (aprox) p.aprox = limpiarPlaca(v.placa); else delete p.aprox; return;
     }
     // Moto sin placa legible: si hoy hay una factura marcada "sin placa" que ningún otro puente tiene asignada, se da por registrada.

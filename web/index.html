@@ -841,6 +841,14 @@ function renderConsumo(){
   $("a-co-kpis").innerHTML=[[usd4(d.costo)+(d.sinPrecio?"+":""),"Costo "+nom+" · "+d.llamadas+" llamadas"],[usd4(m.costo)+(m.sinPrecio?"+":""),"Costo del mes "+CO.mes+" · "+m.llamadas+" llamadas"],[CO.proyeccion!=null?usd4(CO.proyeccion):"–","Proyección del mes al ritmo actual"]].map(function(k){return '<div class="card kpi"><b class="num">'+k[0]+'</b><span>'+k[1]+'</span></div>'}).join("");
   $("a-co-rows").innerHTML=d.filas.length?d.filas.map(function(f){return '<tr><td>'+esc(f.etiqueta)+'</td><td class="note">'+esc(f.modelo)+'</td><td class="r num">'+f.llamadas+'</td><td class="r num">'+f.entrada.toLocaleString("es-VE")+' / '+f.salida.toLocaleString("es-VE")+'</td><td class="r num"><b>'+(f.sinPrecio?"sin precio":usd4(f.costo))+'</b></td></tr>'}).join(""):'<tr><td colspan="5" class="note">Todavía no hay llamadas registradas este día. Se empiezan a contar desde que se despliega esta versión.</td></tr>';
 }
+var HH=null;
+/* Una moto "real" de la cámara: no es una lectura descartada ni un falso positivo de pocos minutos; "sin factura": ninguna factura enlazada y sigue en el puente, bajó esperando o ya alertó. */
+function motoReal(e){return e.estado!=="descartada"&&!(e.estado==="esperando"&&e.salida)}
+function sinFactura(e){return e.num==null&&(e.estado==="alerta"||e.estado==="espera"||e.estado==="lavando"||(e.estado==="esperando"&&!e.salida))}
+function loadHoyH(){
+  if(!window.__yo)return;
+  fetch("/api/camara/historial").then(function(r){return r.ok?r.json():null}).then(function(j){if(!j)return;HH=j;renderVigilante()}).catch(function(){});
+}
 var SF=null;
 /* Motos que la cámara vio (más de 5 min montadas) y todavía no tienen factura. */
 function loadSinFact(){
@@ -849,7 +857,7 @@ function loadSinFact(){
 }
 function renderSinFact(){
   var card=$("a-sf-card"); if(!SF||!card)return; card.hidden=false;
-  var items=SF.items.filter(function(e){return e.num==null&&(e.estado==="alerta"||e.estado==="espera"||e.estado==="lavando"||(e.estado==="esperando"&&!e.salida))});
+  var items=SF.items.filter(sinFactura);
   $("a-sf-n").textContent=items.length?items.length+(items.length===1?" moto":" motos"):"Ninguna";
   $("a-sf-n").className="pill "+(items.length?"bad":"ok");
   var hh=function(iso){return new Date(iso).toLocaleTimeString("es-VE",{hour:"2-digit",minute:"2-digit",timeZone:"America/Caracas"})};
@@ -932,7 +940,12 @@ function renderVigilanteReal(){
   }else gv.style.display="none";
   var P=CAM?CAM.puentes:[1,2,3,4,5].map(function(n){return{n:n,estado:"libre"}});
   var occ=P.filter(function(b){return b.estado!=="libre"&&b.n<5}).length, vistas=CAM?CAM.vistas:0, diff=vistas-S.orders.length;
-  $("g-kpis").innerHTML=[[vistas,"Motos que vio la cámara hoy"],[S.orders.length,"Motos cobradas hoy"],[Math.max(0,diff),diff>0?"Vistas sin cobrar aún":"Todo cuadra"],[occ+" / 4","Puentes ocupados"+(P.some(function(b){return b.n===5&&b.estado!=="libre"})?" · y 1 moto fuera del puente":"")]]
+  var fuera=P.some(function(b){return b.n===5&&b.estado!=="libre"})?" · y 1 moto fuera del puente":"", kp;
+  if(HH&&window.__yo){ // con datos reales: las cifras salen del historial de la cámara y de las facturas de hoy
+    var reales=HH.items.filter(motoReal), sf=reales.filter(sinFactura).length, pagadas=S.orders.filter(function(o){return o.pay}).length, porCobrar=S.orders.length-pagadas;
+    kp=[[reales.length,"Motos que vio la cámara hoy"],[pagadas,"Motos cobradas hoy"+(porCobrar?" · "+porCobrar+" por cobrar":"")],[sf,sf?"Vistas sin factura":"Todo cuadra: ninguna sin factura"],[occ+" / 4","Puentes ocupados"+fuera]];
+  }else kp=[[vistas,"Motos que vio la cámara hoy"],[S.orders.length,"Motos cobradas hoy"],[Math.max(0,diff),diff>0?"Vistas sin cobrar aún":"Todo cuadra"],[occ+" / 4","Puentes ocupados"+fuera]];
+  $("g-kpis").innerHTML=kp
     .map(function(k){return '<div class="card kpi"><b class="num">'+k[0]+'</b><span>'+k[1]+'</span></div>'}).join("");
   P.forEach(function(b){if(b.estado==="libre"){delete IMGU[b.n];delete IMGD[b.n]}});
   swapImgs($("g-bridges"),P.map(function(b){
@@ -1291,7 +1304,7 @@ if(location.protocol!=="file:"&&window.fetch){fetch("/api/yo").then(function(r){
   $("btn-reset").hidden=true; applyRole(); renderAll();
   loadTasa(); setInterval(loadTasa,30*60*1000);
   loadDia().then(ejemploDesdeEnlace); loadAuts(); setInterval(loadAuts,5000); setInterval(refrescarDia,10000);
-  if(u.permisos.indexOf("vigilante")>=0){loadCam();setInterval(loadCam,4000);loadHist();setInterval(loadHist,10000);loadCruces();setInterval(loadCruces,10000);loadSinFact();setInterval(loadSinFact,10000);loadConsumo();setInterval(loadConsumo,30000);$("h-dia").addEventListener("change",function(){HIST=null;loadHist()});$("h-ahora").addEventListener("change",renderHist)}
+  if(u.permisos.indexOf("vigilante")>=0){loadCam();setInterval(loadCam,4000);loadHist();setInterval(loadHist,10000);loadCruces();setInterval(loadCruces,10000);loadHoyH();setInterval(loadHoyH,10000);loadSinFact();setInterval(loadSinFact,10000);loadConsumo();setInterval(loadConsumo,30000);$("h-dia").addEventListener("change",function(){HIST=null;loadHist()});$("h-ahora").addEventListener("change",renderHist)}
 }).catch(function(){})}
  $("a-meta").value=S.meta; renderRules(); setInterval(function(){renderVigilante();renderMeta()},30000);
 })();

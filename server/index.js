@@ -132,6 +132,16 @@ function cobrarPendiente(d, yo) {
   return { error: 'No se encontró la factura.' };
 }
 
+// Marca una factura como validada con la cámara (cruce de fotos bueno o validación a ojo del dueño).
+function marcarValidada(id, info) {
+  for (const archivo of archivosVentas()) {
+    const filas = leerLineas(archivo), v = filas.find(x => x.id === String(id));
+    if (!v) continue;
+    if (v.validada && v.validada.tipo === info.tipo) return true;
+    v.validada = info; escribirLineas(archivo, filas); return true;
+  }
+  return false;
+}
 // Pone o corrige la placa de una factura (la corrige el dueño, o la completa la cámara en una factura "sin placa"). Actualiza también la ficha del cliente.
 function corregirPlaca(id, placaNueva, quien, soloSiVacia) {
   const placa = String(placaNueva || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
@@ -351,7 +361,12 @@ async function api(req, res, ruta) {
     if (ruta === '/api/estado') return json(res, 200, { hayUsuarios: leerUsuarios().length > 0, yo: yo ? publico(yo) : null });
     if (ruta === '/api/yo') return yo ? json(res, 200, publico(yo)) : json(res, 401, { error: 'Sin sesión.' });
     if (ruta === '/api/tasa') return yo ? json(res, 200, tasa) : json(res, 401, { error: 'Sin sesión.' });
-    if (ruta === '/api/dia') return puede(yo, 'tablet') ? json(res, 200, diaDeHoy()) : json(res, 403, { error: 'No tienes permiso.' });
+    if (ruta === '/api/dia') {
+      if (!puede(yo, 'tablet')) return json(res, 403, { error: 'No tienes permiso.' });
+      const dia = diaDeHoy(), val = camara.ventasValidadas();
+      dia.ventas = dia.ventas.map(v => Object.assign({}, v, { validada: !!(v.validada || val.has(v.id)) })); // validada: la factura ya cruzó su foto con la cámara
+      return json(res, 200, dia);
+    }
     if (ruta === '/api/cliente') {
       if (!puede(yo, 'tablet')) return json(res, 403, { error: 'No tienes permiso.' });
       const q = new URL(req.url, 'http://localhost').searchParams;
@@ -583,7 +598,7 @@ async function api(req, res, ruta) {
   return json(res, 404, { error: 'No encontrado.' });
 }
 
-const camara = require('./camara').crear({ DATA, json, fechaCaracas, ventasDeHoy: () => diaDeHoy().ventas, completarPlaca: (id, placa) => !corregirPlaca(id, placa, 'cámara', true).error });
+const camara = require('./camara').crear({ DATA, json, fechaCaracas, ventasDeHoy: () => diaDeHoy().ventas, completarPlaca: (id, placa) => !corregirPlaca(id, placa, 'cámara', true).error, marcarValidada });
 // FTP para las fotos 4K de la cámara. Solo arranca si hay clave en vault/.env (CAMARA_FTP_CLAVE); no lleva nada más: la carpeta es propia y solo acepta subir .jpg.
 // CAMARA_FTP_USUARIO (por defecto "camara"), CAMARA_FTP_PUERTO (2121), CAMARA_FTP_PASIVO ("30000-30009"), CAMARA_FTP_IP (IP pública del servidor; si falta se usa la de la conexión).
 // Solo para pruebas locales: con CAMARA_PRUEBA=1 y sin clave acepta usuario anónimo.

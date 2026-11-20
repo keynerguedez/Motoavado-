@@ -252,9 +252,12 @@ function crear(ctx) {
     const id = Date.now().toString(36) + crypto.randomBytes(3).toString('hex');
     const cs = comps.map(x => { const nf = id + '-p' + x.p.n + '.jpg'; try { fs.writeFileSync(path.join(CFOTOS, nf), x.foto, { mode: 0o600 }); } catch (e) {} return { puente: x.p.n, misma: x.r.misma, confianza: x.r.confianza || null, motivo: x.r.motivo || '', foto: nf }; });
     C.unshift(Object.assign({ id, t: new Date().toISOString(), origen, venta: { id: v.id, num: v.num, placa: v.placa || '', sinPlaca: !!v.sinPlaca }, comps: cs, tipo, puente: puente || null, valido: null }, extra || {}));
+    // Un cruce bueno deja la factura marcada como validada (queda en la propia factura, aunque el registro de cruces se recorte).
+    if (['coincide', 'enlazada', 'manual'].includes(tipo) && ctx.marcarValidada) { try { ctx.marcarValidada(v.id, { tipo, t: new Date().toISOString(), por: (extra && extra.por) || 'cámara' }); } catch (e) {} }
     while (C.length > 100) { const x = C.pop(); x.comps.forEach(k => { try { fs.unlinkSync(path.join(CFOTOS, k.foto)); } catch (e) {} }); }
     cGuardar();
   }
+  const ventasValidadas = () => new Set(C.filter(x => ['coincide', 'enlazada', 'manual'].includes(x.tipo) && x.valido !== false).map(x => x.venta.id));
   const cruces = () => { const v = C.filter(x => x.valido !== null); return { resumen: { total: C.length, validados: v.length, acertó: v.filter(x => x.valido === true).length }, items: C.slice(0, 50).map(x => Object.assign({}, x, { fotoVenta: '/api/camara/cruce-venta/' + x.venta.id + '.jpg', comps: x.comps.map(k => Object.assign({}, k, { url: '/api/camara/cruce/' + k.foto })) })) }; };
   function validarCruce(id, ok) { const e = C.find(x => x.id === String(id)); if (!e) return false; e.valido = ok === true ? true : ok === false ? false : null; cGuardar(); return true; }
   const fotoCruce = nombre => /^[a-z0-9]+-p[1-5]\.jpg$/.test(String(nombre)) ? (() => { try { return fs.readFileSync(path.join(CFOTOS, nombre)); } catch (e) { return null; } })() : null;
@@ -731,7 +734,7 @@ function crear(ctx) {
   }
   function foto(n) { try { return fs.readFileSync(path.join(FOTOS, 'camara-puente-' + Number(n) + '.jpg')); } catch (e) { return null; } }
 
-  return { validarManual, revalidar, liberarPuente, cruces, validarCruce, fotoCruce, fotoVentaId, cruzar, leerFoto, evento, vista, fotoVista, publico, foto, historial, marcarReal, fotoHist, alarma, fotoRecibida, leerPlaca, FOTOS4K, PUENTES };
+  return { ventasValidadas, validarManual, revalidar, liberarPuente, cruces, validarCruce, fotoCruce, fotoVentaId, cruzar, leerFoto, evento, vista, fotoVista, publico, foto, historial, marcarReal, fotoHist, alarma, fotoRecibida, leerPlaca, FOTOS4K, PUENTES };
 }
 
 module.exports = { crear };

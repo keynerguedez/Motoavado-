@@ -381,6 +381,13 @@ test('revalidación automática: salta las muy recientes, las de pago pendiente,
   assert.deepEqual(r.hechos, []); assert.equal(t.llamadas.comparar.length, 0);
 });
 
+test('revalidación automática: un intento que no compara nada no gasta cupo de la vuelta', async () => {
+  const sinLecturas = Array.from({ length: 10 }, (_, i) => ({ id: 'eeeeeeeeeee' + i, num: i + 1, placa: 'QQ' + (100 + i) + 'A', fecha: haceMin(15), estado: 'pagada' }));
+  const t = montar({ ventaFotos: sinLecturas, ventas: sinLecturas });
+  const r = await t.c.autoRevalidar();
+  assert.equal(r.hechos.length, 10, 'las 10 se intentan en la misma vuelta porque ninguna compara fotos'); assert.equal(t.llamadas.comparar.length, 0);
+});
+
 test('revalidación automática: sin lecturas de esa placa primero no busca más (barato) y reintenta a los 5 min con todas las fotos del día', async () => {
   const v = { id: 'ccccccccccc1', num: 4, placa: 'AJ0002E', fecha: haceMin(20), estado: 'pagada' };
   const t = montar({ ventaFotos: [v], ventas: [v], cruces: [{ foto: 'mwo77777ff-p3.jpg', contenido: 'MATCH' }], comparar: (a, b) => b === 'MATCH' ? { misma: true, confianza: 'alta', motivo: 'misma' } : { misma: false, confianza: 'alta' } });
@@ -393,12 +400,12 @@ test('revalidación automática: sin lecturas de esa placa primero no busca más
   assert.ok(t.llamadas.comparar.length >= 1);
 });
 
-test('revalidación automática: una "otra moto" con la misma placa se registra una vez y deja de insistir; máximo 3 facturas por vuelta', async () => {
-  const ventas = Array.from({ length: 5 }, (_, i) => ({ id: 'ddddddddddd' + i, num: i + 1, placa: 'ZZ' + (100 + i) + 'A', fecha: haceMin(15), estado: 'pagada' }));
+test('revalidación automática: una "otra moto" con la misma placa se registra una vez y deja de insistir; el gasto por vuelta se limita por comparaciones', async () => {
+  const ventas = Array.from({ length: 8 }, (_, i) => ({ id: 'ddddddddddd' + i, num: i + 1, placa: String.fromCharCode(65 + i) + String.fromCharCode(75 + i) + (1000 + i * 37), fecha: haceMin(15), estado: 'pagada' }));
   const t = montar({ historial: ventas.map((v, i) => ({ id: 'mwodis0000' + i, puente: 2, placa: v.placa, estado: 'alerta', salida: haceMin(10) })), ventaFotos: ventas, ventas, comparar: () => ({ misma: false, confianza: 'alta', motivo: 'otra' }) });
   let r = await t.c.autoRevalidar();
-  assert.equal(r.hechos.length, 3, 'tope de 3 por vuelta'); assert.ok(r.hechos.every(h => h.tipo === 'distinta'));
+  assert.equal(r.hechos.length, 6, 'tope de 6 comparaciones por vuelta (1 por factura aquí)'); assert.ok(r.hechos.every(h => h.tipo === 'distinta'));
   r = await t.c.autoRevalidar();
-  assert.equal(r.hechos.length, 2, 'las otras dos en la vuelta siguiente; las 3 primeras ya no se repiten');
-  assert.equal(t.c.cruces().items.filter(x => x.tipo === 'distinta').length, 5);
+  assert.equal(r.hechos.length, 2, 'las otras dos en la vuelta siguiente; las 6 primeras ya no se repiten');
+  assert.equal(t.c.cruces().items.filter(x => x.tipo === 'distinta').length, 8);
 });

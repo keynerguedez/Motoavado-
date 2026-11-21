@@ -434,3 +434,24 @@ test('Revalidar prueba también las lecturas de la hora de la factura con una pl
   assert.equal(t.llamadas.comparar.length, 2, 'solo se comparó con las dos candidatas');
   void ahoraIso;
 });
+
+test('validación por placa: si la foto no permite decidir pero la cámara leyó una placa compatible a la hora de la factura, la factura queda validada por placa; con "otra moto", lectura descartada o lejos en el tiempo, no', async () => {
+  const hace = m => new Date(Date.now() - m * 60e3).toISOString();
+  const v = { id: 'abc111def222', num: 22, placa: 'AR0F38N', fecha: hace(3) };
+  const dudosa = () => ({ misma: null, confianza: 'baja', motivo: 'solo se ve la placa en primer plano' });
+  const base = { puente: 1, parcial: 'AR?F36N?', estado: 'alerta', llegada: hace(20), salida: hace(2) };
+  const marcadas = [];
+  const ok = montar({ historial: [Object.assign({ id: 'mwoplaca001' }, base)], ventaFotos: [v], ventas: [v], comparar: dudosa, marcarValidada: (id, i) => marcadas.push([id, i.tipo]) });
+  const r = await ok.c.revalidar(v);
+  assert.equal(r.tipo, 'placa'); assert.deepEqual(marcadas, [['abc111def222', 'placa']]);
+  assert.match(ok.c.cruces().items[0].nota, /la cámara leyó AR\?F36N\?/);
+  assert.equal(ok.filas()[0].estado, 'tarde');
+  assert.ok(ok.c.ventasValidadas().has('abc111def222'));
+
+  const descartada = montar({ historial: [Object.assign({ id: 'mwoplaca002' }, base, { estado: 'descartada' })], ventaFotos: [v], ventas: [v], comparar: dudosa });
+  assert.notEqual((await descartada.c.revalidar(v)).tipo, 'placa');
+  const otra = montar({ historial: [Object.assign({ id: 'mwoplaca003' }, base)], ventaFotos: [v], ventas: [v], comparar: () => ({ misma: false, confianza: 'alta', motivo: 'otra moto' }) });
+  assert.equal((await otra.c.revalidar(v)).tipo, 'distinta');
+  const lejos = montar({ historial: [Object.assign({ id: 'mwoplaca004' }, base, { llegada: hace(300), salida: hace(280) })], ventaFotos: [v], ventas: [v], comparar: dudosa });
+  assert.notEqual((await lejos.c.revalidar(v)).tipo, 'placa');
+});

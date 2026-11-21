@@ -418,3 +418,19 @@ test('tieneFotoVenta dice si el servidor ya guardó la foto del encargado de esa
   assert.equal(t.c.tieneFotoVenta('abc123def456'), true);
   assert.equal(t.c.tieneFotoVenta('../../etc/passwd'), false);
 });
+
+test('Revalidar prueba también las lecturas de la hora de la factura con una placa que difiere en hasta 2 caracteres (0 leído como G, 8 como 6), pero no las lejanas en el tiempo ni las muy distintas', async () => {
+  const ahoraIso = new Date().toISOString(), hace = m => new Date(Date.now() - m * 60e3).toISOString();
+  const v = { id: 'fffffffffff1', num: 37, placa: 'AU7000F', fecha: hace(2) };
+  const t = montar({
+    historial: [
+      { id: 'mwoapro0001', puente: 3, llegada: hace(30), salida: hace(1), placa: 'AU70GGF', estado: 'alerta' },       // 2 caracteres, a la hora: candidata
+      { id: 'mwoapro0002', puente: 1, llegada: hace(20), salida: hace(3), parcial: 'AU?0GGF', estado: 'alerta' },     // parcial parecida, a la hora: candidata
+      { id: 'mwoapro0003', puente: 2, llegada: hace(300), salida: hace(280), placa: 'AU70GGF', estado: 'alerta' },    // parecida pero de hace horas: no
+      { id: 'mwoapro0004', puente: 3, llegada: hace(30), salida: hace(1), placa: 'XYZ9876', estado: 'alerta' },       // a la hora pero otra placa: no
+    ], ventaFotos: [v], ventas: [v] });
+  const r = await t.c.revalidar(v, { soloPlaca: true });
+  assert.equal(r.tipo, 'coincide');
+  assert.equal(t.llamadas.comparar.length, 2, 'solo se comparó con las dos candidatas');
+  void ahoraIso;
+});

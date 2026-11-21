@@ -289,6 +289,17 @@ function crear(ctx) {
   const suave = x => [...String(x)].map(c => PARECIDOS[c] || c).join('');
   const cercaSuave = (a, b) => cerca(suave(a), suave(b));
   const parcialSuave = (parcial, placa) => coincideParcial(suave(parcial), suave(placa));
+  // Distancia entre dos lecturas de placa (inserciones, borrados y cambios), contando como iguales los caracteres parecidos y tratando "?" como comodín.
+  function distSuave(a, b) {
+    a = suave(a); b = suave(b);
+    let prev = Array.from({ length: b.length + 1 }, (_, j) => j);
+    for (let i = 1; i <= a.length; i++) {
+      const cur = [i];
+      for (let j = 1; j <= b.length; j++) cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] || a[i - 1] === '?' ? 0 : 1));
+      prev = cur;
+    }
+    return prev[b.length];
+  }
   const encajaVenta = (p, placa, v) => p.estado !== 'libre' && ((p.estado === 'ok' && v && p.num === v.num) || (p.placa && cercaSuave(p.placa, placa)) || (!p.placa && p.parcial && parcialSuave(p.parcial, placa)));
   // Compara las dos fotos y lo registra: 'coincide' (misma moto), 'distinta' (misma placa pero otra moto: alerta) o 'duda'.
   async function verificar(v, jpeg, cands, origen) {
@@ -337,7 +348,14 @@ function crear(ctx) {
     const jpeg = fotoVenta(v.id); if (!jpeg) return { error: 'Esa factura no tiene foto del encargado.' };
     const placa = limpiarPlaca(v.placa);
     const hoy = ctx.fechaCaracas(new Date());
-    const filas = placa ? H.filter(e => e.dia === hoy && (e.num === v.num || (e.placa && cercaSuave(limpiarPlaca(e.placa), placa)) || (!e.placa && e.parcial && parcialSuave(e.parcial, placa)))).reverse().slice(0, 3) : [];
+    const exacta = e => e.num === v.num || (e.placa && cercaSuave(limpiarPlaca(e.placa), placa)) || (!e.placa && e.parcial && parcialSuave(e.parcial, placa));
+    // Además de las lecturas de esa placa (o parecida), se prueban las que estuvieron en un puente alrededor de la hora de la factura con una placa que difiere en hasta 2 caracteres
+    // (la cámara lee un 0 como G, un 8 como 6…): la comparación de fotos decide si es la misma moto, así que ser generoso aquí es seguro.
+    const tF = Date.parse(v.fecha) || Date.now(), margen = 30 * 60e3;
+    const cercaEnHora = e => { const a = Date.parse(e.llegada), b = e.salida ? Date.parse(e.salida) : Date.now(); return tF >= a - margen && tF <= b + margen; };
+    const aproximada = e => { const lectura = limpiarPlaca(e.placa) || String(e.parcial || '').toUpperCase().replace(/[^A-Z0-9?]/g, ''); return lectura.length >= 5 && distSuave(lectura, placa) <= 2; };
+    const filas = placa ? H.filter(e => e.dia === hoy && (exacta(e) || (cercaEnHora(e) && aproximada(e))))
+      .sort((a, b) => (exacta(b) - exacta(a)) || (Math.abs(Date.parse(a.llegada) - tF) - Math.abs(Date.parse(b.llegada) - tF))).slice(0, 3) : [];
     const vistas = new Set(); let comparadas = 0, prev = [];
     if (filas.length) {
       const comps = (await Promise.all(filas.map(async e => { const f = fotoHist(e.id); vistas.add(e.id); return f ? { e, p: { n: e.puente }, r: await comparar(jpeg, f), foto: f } : null; }))).filter(Boolean);

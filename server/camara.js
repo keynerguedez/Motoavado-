@@ -450,10 +450,26 @@ function crear(ctx) {
         if (!(a.n === 0 ? ahora >= salida + 5 * 60e3 : ahora >= a.t + 40 * 60e3)) continue;
         const fotoFila = fotoHist(e.id); if (!fotoFila) { a.fin = true; S.autoinv[e.id] = a; continue; }
         const medio = (llegada + salida) / 2;
-        const cands = ventas.filter(v => !usadas.has(v.num) && fotoVenta(v.id) && Date.parse(v.fecha) >= llegada - 30 * 60e3 && Date.parse(v.fecha) <= salida + 60 * 60e3)
-          .sort((x, y) => Math.abs(Date.parse(x.fecha) - medio) - Math.abs(Date.parse(y.fecha) - medio)).slice(0, 4);
+        const todas = ventas.filter(v => !usadas.has(v.num) && fotoVenta(v.id) && Date.parse(v.fecha) >= llegada - 30 * 60e3 && Date.parse(v.fecha) <= salida + 60 * 60e3)
+          .sort((x, y) => Math.abs(Date.parse(x.fecha) - medio) - Math.abs(Date.parse(y.fecha) - medio));
+        const cands = todas.slice(0, 4);
         let unida = null;
-        for (const v of cands) {
+        // Primero por placa: la foto del encargado suele ser un primer plano de la placa, que no sirve para reconocer la moto por imagen, pero sí confirma la placa de la factura.
+        // Si la lectura de la cámara (completa o parcial) está a hasta 2 caracteres de UNA sola factura emitida entre 15 min antes de llegar y 15 min después de bajar, se enlaza como "validada por placa"
+        // (salvo que la comparación de fotos diga con confianza que es otra moto).
+        const lectura = limpiarPlaca(e.placa) || String(e.parcial || '').toUpperCase().replace(/[^A-Z0-9?]/g, '');
+        if (lectura.length >= 5) {
+          const parecidas = todas.filter(v => { const f = Date.parse(v.fecha); return f >= llegada - 15 * 60e3 && f <= salida + 15 * 60e3; })
+            .map(v => ({ v, d: distSuave(lectura, limpiarPlaca(v.placa)) })).filter(x => x.d <= 2).sort((x, y) => x.d - y.d);
+          if (parecidas.length && (parecidas.length === 1 || parecidas[1].d >= parecidas[0].d + 2)) {
+            const v = parecidas[0].v, r = await comparar(fotoVenta(v.id), fotoFila); gastadas++;
+            if (!(r && r.misma === false && r.confianza !== 'baja')) {
+              cNuevo(v, 'automática (moto sin factura)', [{ p: { n: e.puente }, r, foto: fotoFila }], 'placa', e.puente, { nota: 'La cámara leyó ' + lectura + ' en el ' + (e.puente === 5 ? 'área fuera del puente' : 'puente ' + e.puente) + ' y la factura #' + v.num + ' (' + v.placa + ') se emitió mientras la moto estaba ahí; la placa leída es compatible con la de la factura.' });
+              vincularFila(e, v); usadas.add(v.num); S.cruces = S.cruces.filter(c => c.id !== v.id); unida = v;
+            }
+          }
+        }
+        for (const v of (unida ? [] : cands)) {
           if (gastadas >= COMPARACIONES_POR_VUELTA) break;
           const r = await comparar(fotoVenta(v.id), fotoFila); gastadas++;
           if (buena(r) && r.confianza === 'alta') { cNuevo(v, 'automática (moto sin factura)', [{ p: { n: e.puente }, r, foto: fotoFila }], 'coincide', e.puente); vincularFila(e, v); usadas.add(v.num); S.cruces = S.cruces.filter(c => c.id !== v.id); unida = v; break; }

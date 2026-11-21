@@ -116,7 +116,7 @@ function crear(ctx) {
   function marcarReal(id, real) { const e = H.find(x => x.id === String(id)); if (!e) return false; e.real = limpiarPlaca(real).slice(0, 10); hSucio = true; hGuardar(); return true; }
   function fotoHist(id) { if (!/^[a-z0-9]{6,20}$/.test(String(id))) return null; try { return fs.readFileSync(path.join(HFOTOS, id + '.jpg')); } catch (e) { return null; } }
   function avisar(kind, txt) { S.log.unshift({ t: new Date().toISOString(), kind, txt }); S.log.length = Math.min(S.log.length, MAX_LOG); }
-  function cambioDeDia() { const d = ctx.fechaCaracas(new Date()); if (S.dia !== d) { S.dia = d; S.vistas = 0; S.autorev = {}; } }
+  function cambioDeDia() { const d = ctx.fechaCaracas(new Date()); if (S.dia !== d) { S.dia = d; S.vistas = 0; S.autorev = {}; S.autoinv = {}; } }
 
   function tokenValido(req) {
     const t = process.env.CAMARA_TOKEN || '';
@@ -431,8 +431,42 @@ function crear(ctx) {
     } catch (e) { console.error('camara autorevalidar:', e.message); } finally { autoCorriendo = false; }
     return { corrida: true, hechos };
   }
+  // Emparejamiento inverso: motos que la cámara vio y ya bajaron sin factura enlazada. Se comparan con las fotos de las facturas de hoy emitidas alrededor de su paso (desde 30 min antes de llegar hasta 60 min después de bajar);
+  // si Claude dice con confianza alta que es la misma moto, la factura queda validada y la fila enlazada (así se arreglan las lecturas de placa equivocadas).
+  // Intento 1 a los 5 min de bajar y un segundo a los 40 min más; hasta 4 facturas por moto y COMPARACIONES_POR_VUELTA por vuelta.
+  let invCorriendo = false;
+  async function autoEmparejarInversa() {
+    if (invCorriendo) return { corrida: false }; invCorriendo = true;
+    const hechos = []; let gastadas = 0;
+    try {
+      S.autoinv = S.autoinv || {};
+      const hoy = ctx.fechaCaracas(new Date()), ahora = Date.now(), ventas = ctx.ventasDeHoy();
+      const usadas = new Set(H.filter(e => e.dia === hoy && e.num != null).map(e => e.num));
+      const huerfanas = H.filter(e => e.dia === hoy && e.num == null && (e.estado === 'alerta' || e.estado === 'espera') && e.salida).slice().reverse();
+      for (const e of huerfanas) {
+        if (gastadas >= COMPARACIONES_POR_VUELTA) break;
+        const a = S.autoinv[e.id] || { n: 0, t: 0 }; if (a.fin) continue;
+        const salida = Date.parse(e.salida), llegada = Date.parse(e.llegada);
+        if (!(a.n === 0 ? ahora >= salida + 5 * 60e3 : ahora >= a.t + 40 * 60e3)) continue;
+        const fotoFila = fotoHist(e.id); if (!fotoFila) { a.fin = true; S.autoinv[e.id] = a; continue; }
+        const medio = (llegada + salida) / 2;
+        const cands = ventas.filter(v => !usadas.has(v.num) && fotoVenta(v.id) && Date.parse(v.fecha) >= llegada - 30 * 60e3 && Date.parse(v.fecha) <= salida + 60 * 60e3)
+          .sort((x, y) => Math.abs(Date.parse(x.fecha) - medio) - Math.abs(Date.parse(y.fecha) - medio)).slice(0, 4);
+        let unida = null;
+        for (const v of cands) {
+          if (gastadas >= COMPARACIONES_POR_VUELTA) break;
+          const r = await comparar(fotoVenta(v.id), fotoFila); gastadas++;
+          if (buena(r) && r.confianza === 'alta') { cNuevo(v, 'automática (moto sin factura)', [{ p: { n: e.puente }, r, foto: fotoFila }], 'coincide', e.puente); vincularFila(e, v); usadas.add(v.num); S.cruces = S.cruces.filter(c => c.id !== v.id); unida = v; break; }
+        }
+        a.n++; a.t = Date.now(); if (unida || a.n >= 2) a.fin = true;
+        S.autoinv[e.id] = a; hechos.push({ fila: e.id, puente: e.puente, factura: unida ? unida.num : null });
+      }
+      if (hechos.length) guardar();
+    } catch (e) { console.error('camara emparejamiento inverso:', e.message); } finally { invCorriendo = false; }
+    return { corrida: true, hechos };
+  }
   const autoSeg = process.env.CAMARA_AUTOREV_SEG === undefined ? 60 : Number(process.env.CAMARA_AUTOREV_SEG);
-  if (autoSeg > 0) setInterval(() => autoRevalidar().catch(() => {}), autoSeg * 1000).unref();
+  if (autoSeg > 0) { setInterval(() => autoRevalidar().catch(() => {}), autoSeg * 1000).unref(); setInterval(() => autoEmparejarInversa().catch(() => {}), autoSeg * 1000 + 17000).unref(); }
 
   // El dueño valida a ojo una factura cuando la cámara no guardó una foto de esa moto: queda registrado con su nombre y una nota.
   function validarManual(v, nota, quien) {
@@ -832,7 +866,7 @@ function crear(ctx) {
   }
   function foto(n) { try { return fs.readFileSync(path.join(FOTOS, 'camara-puente-' + Number(n) + '.jpg')); } catch (e) { return null; } }
 
-  return { tieneFotoVenta, autoRevalidar, ventasValidadas, validarManual, revalidar, liberarPuente, cruces, validarCruce, fotoCruce, fotoVentaId, cruzar, leerFoto, evento, vista, fotoVista, publico, foto, historial, marcarReal, fotoHist, alarma, fotoRecibida, leerPlaca, FOTOS4K, PUENTES };
+  return { autoEmparejarInversa, tieneFotoVenta, autoRevalidar, ventasValidadas, validarManual, revalidar, liberarPuente, cruces, validarCruce, fotoCruce, fotoVentaId, cruzar, leerFoto, evento, vista, fotoVista, publico, foto, historial, marcarReal, fotoHist, alarma, fotoRecibida, leerPlaca, FOTOS4K, PUENTES };
 }
 
 module.exports = { crear };

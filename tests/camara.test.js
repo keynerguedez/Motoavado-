@@ -468,3 +468,34 @@ test('una moto que reaparece en 10 min y reabre su fila conserva su placa confir
   assert.equal(t.pub(3).placa, 'AY3U84A', 'la placa que ya se había leído y confirmado no se descarta');
   assert.notEqual(t.filas()[0].estado, 'descartada');
 });
+
+// ---------- emparejamiento inverso (moto vista sin factura -> buscar su factura por foto) ----------
+test('emparejamiento inverso: una moto que bajó sin factura enlazada se compara con las facturas de esa hora y, si Claude dice que es la misma con confianza alta, se enlaza y valida (aunque la placa se leyera mal)', async () => {
+  const marcadas = [];
+  const v = { id: 'abababababa1', num: 36, placa: 'AL9J26A', fecha: haceMin(25), estado: 'pagada' };
+  const lejos = { id: 'abababababa2', num: 37, placa: 'ZZ9999Z', fecha: haceMin(400), estado: 'pagada' };
+  const t = montar({ historial: [{ id: 'mwoinv00001', puente: 1, parcial: 'AL9?36A?', estado: 'alerta', llegada: haceMin(40), salida: haceMin(10) }], ventaFotos: [v, lejos], ventas: [v, lejos],
+    marcarValidada: (id, i) => marcadas.push([id, i.tipo]) });
+  const r = await t.c.autoEmparejarInversa();
+  assert.deepEqual(r.hechos, [{ fila: 'mwoinv00001', puente: 1, factura: 36 }]);
+  assert.deepEqual(marcadas, [['abababababa1', 'coincide']]);
+  const f = t.filas()[0]; assert.equal(f.num, 36); assert.equal(f.estado, 'tarde');
+  assert.equal(t.c.cruces().items[0].origen, 'automática (moto sin factura)');
+  assert.equal(t.llamadas.comparar.length, 1, 'la factura de hace 400 min queda fuera de la ventana de tiempo');
+  assert.deepEqual((await t.c.autoEmparejarInversa()).hechos, [], 'ya enlazada: no se repite');
+});
+
+test('emparejamiento inverso: espera 5 min tras bajar, no enlaza si Claude duda o dice otra moto, hace como mucho 2 intentos y no usa facturas ya enlazadas', async () => {
+  const v1 = { id: 'cdcdcdcdcdc1', num: 1, placa: 'AAA111', fecha: haceMin(15), estado: 'pagada' };
+  const v2 = { id: 'cdcdcdcdcdc2', num: 2, placa: 'BBB222', fecha: haceMin(16), estado: 'pagada' };
+  const reciente = montar({ historial: [{ id: 'mwoinv00002', puente: 2, estado: 'alerta', llegada: haceMin(20), salida: haceMin(2) }], ventaFotos: [v1], ventas: [v1] });
+  assert.deepEqual((await reciente.c.autoEmparejarInversa()).hechos, [], 'bajó hace 2 min: todavía no');
+  const duda = montar({ historial: [{ id: 'mwoinv00003', puente: 2, estado: 'alerta', llegada: haceMin(30), salida: haceMin(10) }], ventaFotos: [v1, v2], ventas: [v1, v2], comparar: () => ({ misma: true, confianza: 'media', motivo: 'parecida' }) });
+  let r = await duda.c.autoEmparejarInversa();
+  assert.deepEqual(r.hechos, [{ fila: 'mwoinv00003', puente: 2, factura: null }]); assert.equal(duda.filas()[0].num, null);
+  r = await duda.c.autoEmparejarInversa(); assert.deepEqual(r.hechos, [], 'el segundo intento no toca hasta 40 min después');
+  r = await conHora(41 * 60e3, () => duda.c.autoEmparejarInversa()); assert.equal(r.hechos.length, 1);
+  r = await conHora(90 * 60e3, () => duda.c.autoEmparejarInversa()); assert.deepEqual(r.hechos, [], 'máximo 2 intentos');
+  const yaEnlazada = montar({ historial: [{ id: 'mwoinv00004', puente: 1, placa: 'AAA111', num: 1, estado: 'tarde', llegada: haceMin(30), salida: haceMin(12) }, { id: 'mwoinv00005', puente: 3, estado: 'alerta', llegada: haceMin(30), salida: haceMin(12) }], ventaFotos: [v1], ventas: [v1] });
+  r = await yaEnlazada.c.autoEmparejarInversa(); assert.equal(yaEnlazada.llamadas.comparar.length, 0, 'la factura #1 ya tiene su moto');
+});

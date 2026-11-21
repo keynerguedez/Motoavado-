@@ -115,7 +115,7 @@ function crear(ctx) {
   function marcarReal(id, real) { const e = H.find(x => x.id === String(id)); if (!e) return false; e.real = limpiarPlaca(real).slice(0, 10); hSucio = true; hGuardar(); return true; }
   function fotoHist(id) { if (!/^[a-z0-9]{6,20}$/.test(String(id))) return null; try { return fs.readFileSync(path.join(HFOTOS, id + '.jpg')); } catch (e) { return null; } }
   function avisar(kind, txt) { S.log.unshift({ t: new Date().toISOString(), kind, txt }); S.log.length = Math.min(S.log.length, MAX_LOG); }
-  function cambioDeDia() { const d = ctx.fechaCaracas(new Date()); if (S.dia !== d) { S.dia = d; S.vistas = 0; } }
+  function cambioDeDia() { const d = ctx.fechaCaracas(new Date()); if (S.dia !== d) { S.dia = d; S.vistas = 0; S.autorev = {}; } }
 
   function tokenValido(req) {
     const t = process.env.CAMARA_TOKEN || '';
@@ -331,7 +331,8 @@ function crear(ctx) {
   function vincularFila(e, v) {
     if (e && (e.num == null || e.num === v.num)) { e.num = v.num; if (e.estado === 'alerta' || e.estado === 'espera') e.estado = e.salida ? 'tarde' : 'ok'; hSucio = true; hGuardar(); }
   }
-  async function revalidar(v) {
+  async function revalidar(v, opc) {
+    opc = opc || {}; const org = opc.origen || 'revalidación';
     const jpeg = fotoVenta(v.id); if (!jpeg) return { error: 'Esa factura no tiene foto del encargado.' };
     const placa = limpiarPlaca(v.placa);
     const hoy = ctx.fechaCaracas(new Date());
@@ -341,7 +342,13 @@ function crear(ctx) {
       const comps = (await Promise.all(filas.map(async e => { const f = fotoHist(e.id); vistas.add(e.id); return f ? { e, p: { n: e.puente }, r: await comparar(jpeg, f), foto: f } : null; }))).filter(Boolean);
       comparadas += comps.length; prev = comps;
       const si = comps.filter(x => buena(x.r));
-      if (si.length) { const m = si[0]; cNuevo(v, 'revalidación', comps, 'coincide', m.p.n); vincularFila(m.e, v); S.cruces = S.cruces.filter(c => c.id !== v.id); guardar(); return { ok: true, tipo: 'coincide', puente: m.p.n, comparadas }; }
+      if (si.length) { const m = si[0]; cNuevo(v, org, comps, 'coincide', m.p.n); vincularFila(m.e, v); S.cruces = S.cruces.filter(c => c.id !== v.id); guardar(); return { ok: true, tipo: 'coincide', puente: m.p.n, comparadas }; }
+    }
+    // Solo con las lecturas de esa placa (lo barato): si no coincide, no se buscan más fotos.
+    if (opc.soloPlaca) {
+      const no0 = prev.filter(x => x.r && x.r.misma === false && x.r.confianza !== 'baja');
+      if (no0.length) { cNuevo(v, org, prev, 'distinta', no0[0].p.n); return { ok: true, tipo: 'distinta', puente: no0[0].p.n, comparadas }; }
+      return { ok: true, tipo: 'ninguna', comparadas, soloPlaca: true };
     }
     // 2) todas las fotos de hoy
     const cand = H.filter(e => e.dia === hoy && !vistas.has(e.id)).map(e => ({ t: Date.parse(e.salida || e.llegada), e, p: { n: e.puente }, leer: () => fotoHist(e.id) }));
@@ -356,14 +363,45 @@ function crear(ctx) {
       m = lote.find(x => buena(x.r) && x.r.confianza === 'alta') || null;
     }
     if (m) {
-      cNuevo(v, 'revalidación (todas las fotos)', [m], 'coincide', m.p.n); vincularFila(m.e, v);
+      cNuevo(v, org + ' (todas las fotos)', [m], 'coincide', m.p.n); vincularFila(m.e, v);
       S.cruces = S.cruces.filter(c => c.id !== v.id); guardar(); return { ok: true, tipo: 'coincide', puente: m.p.n, comparadas };
     }
     const no = prev.filter(x => x.r && x.r.misma === false && x.r.confianza !== 'baja');
-    if (no.length) { cNuevo(v, 'revalidación', prev, 'distinta', no[0].p.n); return { ok: true, tipo: 'distinta', puente: no[0].p.n, comparadas }; }
+    if (no.length) { cNuevo(v, org, prev, 'distinta', no[0].p.n); return { ok: true, tipo: 'distinta', puente: no[0].p.n, comparadas }; }
     if (!comparadas) return { error: 'La cámara no tiene fotos de hoy para comparar.' };
     return { ok: true, tipo: 'ninguna', comparadas };
   }
+  // Revalidación automática: cada minuto el sistema reintenta validar solo las facturas de hoy cobradas con foto del encargado y sin cruce válido.
+  // Intento 1 (a los 2 min de la factura): solo las lecturas de esa placa, barato. Intentos 2 y 4 (+5 y +45 min): buscan en todas las fotos del día. Tope de 4 intentos por factura y 3 facturas por vuelta.
+  // Termina al coincidir, al salir "otra moto" (queda a revisión del dueño) o si no hay foto; lo demás lo resuelve el dueño con "Validar a ojo".
+  const ESPERAS_AUTO = [5, 15, 45]; let autoCorriendo = false;
+  async function autoRevalidar() {
+    if (autoCorriendo) return { corrida: false }; autoCorriendo = true;
+    const hechos = [];
+    try {
+      S.autorev = S.autorev || {};
+      const val = ventasValidadas(), ahora = Date.now();
+      const pendientes = ctx.ventasDeHoy().filter(v => v.estado !== 'pendiente' && !v.validada && !val.has(v.id) && fotoVenta(v.id));
+      for (const v of pendientes) {
+        if (hechos.length >= 3) break;
+        const a = S.autorev[v.id] || { n: 0, t: 0 };
+        if (a.fin) continue;
+        const toca = a.n === 0 ? ahora >= Date.parse(v.fecha) + 2 * 60e3 : ahora >= a.t + ESPERAS_AUTO[Math.min(a.n - 1, 2)] * 60e3;
+        if (!toca) continue;
+        const r = await revalidar(v, { soloPlaca: !(a.n === 1 || a.n === 3), origen: 'automática' });
+        a.n++; a.t = Date.now();
+        if (r.error && /no tiene foto del encargado/.test(r.error)) a.fin = true;
+        if (r.ok && (r.tipo === 'coincide' || r.tipo === 'distinta')) a.fin = true;
+        if (a.n >= 4) a.fin = true;
+        S.autorev[v.id] = a; hechos.push({ num: v.num, tipo: r.tipo || 'error' });
+      }
+      if (hechos.length) guardar();
+    } catch (e) { console.error('camara autorevalidar:', e.message); } finally { autoCorriendo = false; }
+    return { corrida: true, hechos };
+  }
+  const autoSeg = process.env.CAMARA_AUTOREV_SEG === undefined ? 60 : Number(process.env.CAMARA_AUTOREV_SEG);
+  if (autoSeg > 0) setInterval(() => autoRevalidar().catch(() => {}), autoSeg * 1000).unref();
+
   // El dueño valida a ojo una factura cuando la cámara no guardó una foto de esa moto: queda registrado con su nombre y una nota.
   function validarManual(v, nota, quien) {
     nota = String(nota || '').trim().slice(0, 200); if (nota.length < 3) return { error: 'Escribe una nota (por qué la validas a ojo).' };
@@ -762,7 +800,7 @@ function crear(ctx) {
   }
   function foto(n) { try { return fs.readFileSync(path.join(FOTOS, 'camara-puente-' + Number(n) + '.jpg')); } catch (e) { return null; } }
 
-  return { ventasValidadas, validarManual, revalidar, liberarPuente, cruces, validarCruce, fotoCruce, fotoVentaId, cruzar, leerFoto, evento, vista, fotoVista, publico, foto, historial, marcarReal, fotoHist, alarma, fotoRecibida, leerPlaca, FOTOS4K, PUENTES };
+  return { autoRevalidar, ventasValidadas, validarManual, revalidar, liberarPuente, cruces, validarCruce, fotoCruce, fotoVentaId, cruzar, leerFoto, evento, vista, fotoVista, publico, foto, historial, marcarReal, fotoHist, alarma, fotoRecibida, leerPlaca, FOTOS4K, PUENTES };
 }
 
 module.exports = { crear };

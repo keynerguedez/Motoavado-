@@ -52,6 +52,7 @@ function crear(ctx) {
     if (ult && ult.salida && !ult.noReusar && Date.now() - Date.parse(ult.salida) < MISMA_MOTO_MS && ult.dia === ctx.fechaCaracas(new Date())) {
       ult.salida = null; hSucio = true; p.hid = ult.id;
       p.desde = ult.llegada; p.placa = ult.placa || ''; p.parcial = ult.parcial || ''; if (ult.sinPlaca) { /* se vuelve a emparejar solo */ }
+      if (p.placa) p.confirmada = true; // una fila solo guarda placas completas ya confirmadas con dos lecturas: al reabrirla no se vuelven a poner en duda
       hFoto(p, jpeg); return true;
     }
     hNuevo(p, jpeg); return false;

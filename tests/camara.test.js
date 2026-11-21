@@ -474,7 +474,7 @@ test('emparejamiento inverso: una moto que bajó sin factura enlazada se compara
   const marcadas = [];
   const v = { id: 'abababababa1', num: 36, placa: 'AL9J26A', fecha: haceMin(25), estado: 'pagada' };
   const lejos = { id: 'abababababa2', num: 37, placa: 'ZZ9999Z', fecha: haceMin(400), estado: 'pagada' };
-  const t = montar({ historial: [{ id: 'mwoinv00001', puente: 1, parcial: 'AL9?36A?', estado: 'alerta', llegada: haceMin(40), salida: haceMin(10) }], ventaFotos: [v, lejos], ventas: [v, lejos],
+  const t = montar({ historial: [{ id: 'mwoinv00001', puente: 1, estado: 'alerta', llegada: haceMin(40), salida: haceMin(10) }], ventaFotos: [v, lejos], ventas: [v, lejos],
     marcarValidada: (id, i) => marcadas.push([id, i.tipo]) });
   const r = await t.c.autoEmparejarInversa();
   assert.deepEqual(r.hechos, [{ fila: 'mwoinv00001', puente: 1, factura: 36 }]);
@@ -498,4 +498,21 @@ test('emparejamiento inverso: espera 5 min tras bajar, no enlaza si Claude duda 
   r = await conHora(90 * 60e3, () => duda.c.autoEmparejarInversa()); assert.deepEqual(r.hechos, [], 'máximo 2 intentos');
   const yaEnlazada = montar({ historial: [{ id: 'mwoinv00004', puente: 1, placa: 'AAA111', num: 1, estado: 'tarde', llegada: haceMin(30), salida: haceMin(12) }, { id: 'mwoinv00005', puente: 3, estado: 'alerta', llegada: haceMin(30), salida: haceMin(12) }], ventaFotos: [v1], ventas: [v1] });
   r = await yaEnlazada.c.autoEmparejarInversa(); assert.equal(yaEnlazada.llamadas.comparar.length, 0, 'la factura #1 ya tiene su moto');
+});
+
+test('emparejamiento inverso por placa: una lectura aproximada de la cámara a la hora de UNA factura de placa parecida enlaza y valida por placa; con "otra moto" o dos candidatas parecidas no', async () => {
+  const marcadas = [];
+  const v = { id: 'efefefefefe1', num: 36, placa: 'AL9J26A', fecha: haceMin(25), estado: 'pagada' };
+  const fila = { id: 'mwoinv00010', puente: 1, parcial: 'AL9?36A?', estado: 'alerta', llegada: haceMin(40), salida: haceMin(10) };
+  const dudosa = () => ({ misma: null, confianza: 'baja', motivo: 'solo se ve la placa en primer plano' });
+  const ok = montar({ historial: [fila], ventaFotos: [v], ventas: [v], comparar: dudosa, marcarValidada: (id, i) => marcadas.push([id, i.tipo]) });
+  const r = await ok.c.autoEmparejarInversa();
+  assert.deepEqual(r.hechos, [{ fila: 'mwoinv00010', puente: 1, factura: 36 }]);
+  assert.deepEqual(marcadas, [['efefefefefe1', 'placa']]); assert.equal(ok.filas()[0].num, 36);
+  assert.match(ok.c.cruces().items[0].nota, /la factura #36/);
+  const otra = montar({ historial: [Object.assign({}, fila, { id: 'mwoinv00011' })], ventaFotos: [v], ventas: [v], comparar: () => ({ misma: false, confianza: 'alta', motivo: 'otra moto' }) });
+  assert.equal((await otra.c.autoEmparejarInversa()).hechos[0].factura, null);
+  const v2 = { id: 'efefefefefe2', num: 37, placa: 'AL9J26B', fecha: haceMin(24), estado: 'pagada' }; // dos facturas igual de parecidas: no se elige ninguna por placa
+  const ambigua = montar({ historial: [Object.assign({}, fila, { id: 'mwoinv00012' })], ventaFotos: [v, v2], ventas: [v, v2], comparar: dudosa });
+  assert.equal((await ambigua.c.autoEmparejarInversa()).hechos[0].factura, null);
 });

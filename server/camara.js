@@ -372,18 +372,19 @@ function crear(ctx) {
     return { ok: true, tipo: 'ninguna', comparadas };
   }
   // Revalidación automática: cada minuto el sistema reintenta validar solo las facturas de hoy cobradas con foto del encargado y sin cruce válido.
-  // Intento 1 (a los 2 min de la factura): solo las lecturas de esa placa, barato. Intentos 2 y 4 (+5 y +45 min): buscan en todas las fotos del día. Tope de 4 intentos por factura y 3 facturas por vuelta.
+  // Intento 1 (a los 2 min de la factura): solo las lecturas de esa placa, barato. Intentos 2 y 4 (+5 y +45 min): buscan en todas las fotos del día. Tope de 4 intentos por factura.
+  // El gasto por vuelta se limita por comparaciones de fotos (COMPARACIONES_POR_VUELTA), no por facturas: un intento que no compara nada es gratis y no frena a los demás.
   // Termina al coincidir, al salir "otra moto" (queda a revisión del dueño) o si no hay foto; lo demás lo resuelve el dueño con "Validar a ojo".
-  const ESPERAS_AUTO = [5, 15, 45]; let autoCorriendo = false;
+  const ESPERAS_AUTO = [5, 15, 45], COMPARACIONES_POR_VUELTA = 6; let autoCorriendo = false;
   async function autoRevalidar() {
     if (autoCorriendo) return { corrida: false }; autoCorriendo = true;
-    const hechos = [];
+    const hechos = []; let gastadas = 0;
     try {
       S.autorev = S.autorev || {};
       const val = ventasValidadas(), ahora = Date.now();
       const pendientes = ctx.ventasDeHoy().filter(v => v.estado !== 'pendiente' && !v.validada && !val.has(v.id) && fotoVenta(v.id));
       for (const v of pendientes) {
-        if (hechos.length >= 3) break;
+        if (gastadas >= COMPARACIONES_POR_VUELTA || hechos.length >= 40) break;
         const a = S.autorev[v.id] || { n: 0, t: 0 };
         if (a.fin) continue;
         const toca = a.n === 0 ? ahora >= Date.parse(v.fecha) + 2 * 60e3 : ahora >= a.t + ESPERAS_AUTO[Math.min(a.n - 1, 2)] * 60e3;
@@ -393,7 +394,7 @@ function crear(ctx) {
         if (r.error && /no tiene foto del encargado/.test(r.error)) a.fin = true;
         if (r.ok && (r.tipo === 'coincide' || r.tipo === 'distinta')) a.fin = true;
         if (a.n >= 4) a.fin = true;
-        S.autorev[v.id] = a; hechos.push({ num: v.num, tipo: r.tipo || 'error' });
+        gastadas += r.comparadas || 0; S.autorev[v.id] = a; hechos.push({ num: v.num, tipo: r.tipo || 'error' });
       }
       if (hechos.length) guardar();
     } catch (e) { console.error('camara autorevalidar:', e.message); } finally { autoCorriendo = false; }

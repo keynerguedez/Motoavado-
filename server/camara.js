@@ -257,16 +257,18 @@ function crear(ctx) {
   fs.mkdirSync(CFOTOS, { recursive: true });
   let C = []; try { C = JSON.parse(fs.readFileSync(CRU, 'utf8')); if (!Array.isArray(C)) C = []; } catch (e) {}
   function cGuardar() { try { const tmp = CRU + '.tmp'; fs.writeFileSync(tmp, JSON.stringify(C), { mode: 0o600 }); fs.renameSync(tmp, CRU); } catch (e) { console.error('camara cruces:', e.message); } }
+  // Un cruce valida la factura si es de uno de estos tipos: fotos iguales, enlace directo, validación a ojo del dueño o validación por placa (ver revalidar).
+  const TIPOS_VALIDOS = ['coincide', 'enlazada', 'manual', 'placa'];
   function cNuevo(v, origen, comps, tipo, puente, extra) {
     const id = Date.now().toString(36) + crypto.randomBytes(3).toString('hex');
     const cs = comps.map(x => { const nf = id + '-p' + x.p.n + '.jpg'; try { fs.writeFileSync(path.join(CFOTOS, nf), x.foto, { mode: 0o600 }); } catch (e) {} return { puente: x.p.n, misma: x.r.misma, confianza: x.r.confianza || null, motivo: x.r.motivo || '', foto: nf }; });
     C.unshift(Object.assign({ id, t: new Date().toISOString(), origen, venta: { id: v.id, num: v.num, placa: v.placa || '', sinPlaca: !!v.sinPlaca }, comps: cs, tipo, puente: puente || null, valido: null }, extra || {}));
     // Un cruce bueno deja la factura marcada como validada (queda en la propia factura, aunque el registro de cruces se recorte).
-    if (['coincide', 'enlazada', 'manual'].includes(tipo) && ctx.marcarValidada) { try { ctx.marcarValidada(v.id, { tipo, t: new Date().toISOString(), por: (extra && extra.por) || 'cámara' }); } catch (e) {} }
+    if (TIPOS_VALIDOS.includes(tipo) && ctx.marcarValidada) { try { ctx.marcarValidada(v.id, { tipo, t: new Date().toISOString(), por: (extra && extra.por) || 'cámara' }); } catch (e) {} }
     while (C.length > 100) { const x = C.pop(); x.comps.forEach(k => { try { fs.unlinkSync(path.join(CFOTOS, k.foto)); } catch (e) {} }); }
     cGuardar();
   }
-  const ventasValidadas = () => new Set(C.filter(x => ['coincide', 'enlazada', 'manual'].includes(x.tipo) && x.valido !== false).map(x => x.venta.id));
+  const ventasValidadas = () => new Set(C.filter(x => TIPOS_VALIDOS.includes(x.tipo) && x.valido !== false).map(x => x.venta.id));
   const cruces = () => { const v = C.filter(x => x.valido !== null); return { resumen: { total: C.length, validados: v.length, acertó: v.filter(x => x.valido === true).length }, items: C.slice(0, 50).map(x => Object.assign({}, x, { fotoVenta: '/api/camara/cruce-venta/' + x.venta.id + '.jpg', comps: x.comps.map(k => Object.assign({}, k, { url: '/api/camara/cruce/' + k.foto })) })) }; };
   function validarCruce(id, ok) { const e = C.find(x => x.id === String(id)); if (!e) return false; e.valido = ok === true ? true : ok === false ? false : null; cGuardar(); return true; }
   const fotoCruce = nombre => /^[a-z0-9]+-p[1-5]\.jpg$/.test(String(nombre)) ? (() => { try { return fs.readFileSync(path.join(CFOTOS, nombre)); } catch (e) { return null; } })() : null;
@@ -352,7 +354,7 @@ function crear(ctx) {
     // Además de las lecturas de esa placa (o parecida), se prueban las que estuvieron en un puente alrededor de la hora de la factura con una placa que difiere en hasta 2 caracteres
     // (la cámara lee un 0 como G, un 8 como 6…): la comparación de fotos decide si es la misma moto, así que ser generoso aquí es seguro.
     const tF = Date.parse(v.fecha) || Date.now(), margen = 30 * 60e3;
-    const cercaEnHora = e => { const a = Date.parse(e.llegada), b = e.salida ? Date.parse(e.salida) : Date.now(); return tF >= a - margen && tF <= b + margen; };
+    const cercaEnHora = (e, m) => { const a = Date.parse(e.llegada), b = e.salida ? Date.parse(e.salida) : Date.now(); return tF >= a - (m == null ? margen : m) && tF <= b + (m == null ? margen : m); };
     const aproximada = e => { const lectura = limpiarPlaca(e.placa) || String(e.parcial || '').toUpperCase().replace(/[^A-Z0-9?]/g, ''); return lectura.length >= 5 && distSuave(lectura, placa) <= 2; };
     const filas = placa ? H.filter(e => e.dia === hoy && (exacta(e) || (cercaEnHora(e) && aproximada(e))))
       .sort((a, b) => (exacta(b) - exacta(a)) || (Math.abs(Date.parse(a.llegada) - tF) - Math.abs(Date.parse(b.llegada) - tF))).slice(0, 3) : [];
@@ -362,6 +364,15 @@ function crear(ctx) {
       comparadas += comps.length; prev = comps;
       const si = comps.filter(x => buena(x.r));
       if (si.length) { const m = si[0]; cNuevo(v, org, comps, 'coincide', m.p.n); vincularFila(m.e, v); S.cruces = S.cruces.filter(c => c.id !== v.id); guardar(); return { ok: true, tipo: 'coincide', puente: m.p.n, comparadas }; }
+    }
+    // Validación por placa: si la foto del encargado no permite decidir (por ejemplo un primer plano de la placa) pero la cámara leyó una placa compatible con la de la factura,
+    // en un puente y a la hora de la factura (±15 min), y la comparación no dice "otra moto", la factura queda validada por placa. Las lecturas descartadas no cuentan.
+    const porPlaca = prev.filter(x => x.e && x.e.estado !== 'descartada' && !(x.r && x.r.misma === false && x.r.confianza !== 'baja') && cercaEnHora(x.e, 15 * 60e3) && aproximada(x.e));
+    if (porPlaca.length) {
+      const m = porPlaca[0], lectura = m.e.placa || m.e.parcial;
+      cNuevo(v, org, prev, 'placa', m.p.n, { nota: 'La foto del encargado no permite confirmar la moto por imagen; se valida porque la cámara leyó ' + lectura + ' en el ' + (m.p.n === 5 ? 'área fuera del puente' : 'puente ' + m.p.n) + ' a la hora de la factura (placa ' + (v.placa || '') + ').' });
+      vincularFila(m.e, v); S.cruces = S.cruces.filter(c => c.id !== v.id); guardar();
+      return { ok: true, tipo: 'placa', puente: m.p.n, comparadas };
     }
     // Solo con las lecturas de esa placa (lo barato): si no coincide, no se buscan más fotos.
     if (opc.soloPlaca) {

@@ -557,12 +557,32 @@ function renderClientes(){
   $("c-rows").innerHTML=l.length?l.map(function(c){return '<tr><td>'+esc(c.nombre||"Sin nombre")+(c.frecuente?' <b style="color:var(--ok,#0a6b3d)">★ Frecuente</b>':'')+'</td><td class="num">'+esc(fmtTel(c.telefono))+'</td><td>'+c.motos.map(function(m){return '<b>'+esc(m.placa)+'</b>'+(m.modelo?' · '+esc(m.modelo):'')}).join("<br>")+'</td><td class="r num">'+c.visitas+'</td><td>'+(c.ultima?new Date(c.ultima).toLocaleDateString("es-VE"):"hoy")+'</td><td>'+esc(c.ultimoServicio||"")+'</td><td class="r num">'+usd(c.gastado)+'</td></tr>'}).join(""):'<tr><td colspan="7" class="note">'+(CLI.length?"Nadie coincide con la búsqueda.":"Todavía no hay clientes. Aparecen aquí al cobrar la primera moto.")+'</td></tr>';
 }
 /* La foto del encargado se cruza en el servidor con la moto del puente (Claude compara las dos imágenes). */
+var PEND_FOTO={}, SUBIENDO={};
+function resultadoFoto(o,j){
+  var pn=j.puente===5?"área fuera del puente":"puente "+j.puente;var t=j.sinPlaca?"Foto guardada. Sin placa no se cruza con la cámara.":j.puente&&j.misma===true?"✓ La foto coincide con la moto del "+pn+" (misma placa).":j.puente&&j.misma===false?"⚠ La foto NO coincide con la moto del "+pn+", que tiene esa misma placa. Revisa.":j.puente?"Foto guardada. Claude no pudo confirmar si es la misma moto del "+pn+"; el dueño la revisará.":j.pendiente?"Foto guardada. Se comparará cuando la cámara lea esa placa en un puente.":"";
+  if(t){o.cruceTxt=t;$("f-err").textContent="Moto #"+o.num+": "+t;renderAll()}
+}
+/* Sube la foto de la moto al servidor. Si falla (internet, servidor ocupado) reintenta sola, y mientras la factura no tenga foto en el servidor se vuelve a intentar con cada recarga del día. */
+function subirFoto(o,id,intento){
+  SUBIENDO[id]=true; var blob=PEND_FOTO[id]; if(!blob){SUBIENDO[id]=false;return}
+  fetch("/api/ventas/foto?id="+encodeURIComponent(id),{method:"POST",headers:{"content-type":"image/jpeg"},body:blob}).then(function(r){
+    if(!r.ok)throw new Error("http "+r.status);
+    return r.json().catch(function(){return{}});
+  }).then(function(j){delete PEND_FOTO[id];SUBIENDO[id]=false;resultadoFoto(o,j)}).catch(function(){
+    SUBIENDO[id]=false;
+    if(intento<4)setTimeout(function(){subirFoto(o,id,intento+1)},[0,3000,8000,20000][intento]);
+    else toastWa("No se pudo subir la foto de la moto #"+o.num+". Se reintentará sola; revisa el internet.");
+  });
+}
+function reintentarFotos(d){
+  (d.ventas||[]).forEach(function(v){
+    if(v.conFoto){delete PEND_FOTO[v.id];return}
+    if(PEND_FOTO[v.id]&&!SUBIENDO[v.id])subirFoto({num:v.num},v.id,3);
+  });
+}
 function enviarFoto(o,id){
   if(!window.__yo||!o.fotoGrande||!id||o.fotoEnviada)return; o.fotoEnviada=true;
-  fetch("/api/ventas/foto?id="+encodeURIComponent(id),{method:"POST",headers:{"content-type":"image/jpeg"},body:o.fotoGrande}).then(function(r){return r.json().catch(function(){return{}})}).then(function(j){
-    var pn=j.puente===5?"área fuera del puente":"puente "+j.puente;var t=j.sinPlaca?"Foto guardada. Sin placa no se cruza con la cámara.":j.puente&&j.misma===true?"✓ La foto coincide con la moto del "+pn+" (misma placa).":j.puente&&j.misma===false?"⚠ La foto NO coincide con la moto del "+pn+", que tiene esa misma placa. Revisa.":j.puente?"Foto guardada. Claude no pudo confirmar si es la misma moto del "+pn+"; el dueño la revisará.":j.pendiente?"Foto guardada. Se comparará cuando la cámara lea esa placa en un puente.":"";
-    if(t){o.cruceTxt=t;$("f-err").textContent="Moto #"+o.num+": "+t;renderAll()}
-  }).catch(function(){});
+  PEND_FOTO[id]=o.fotoGrande; subirFoto(o,id,1);
 }
 function saveSale(o,sigue){
   if(!window.__yo){sigue();return} var a=paidAmt(o);
@@ -579,14 +599,14 @@ function loadTasa(){
 }
 function loadDia(){
   return fetch("/api/dia").then(function(r){return r.ok?r.json():null}).then(function(d){
-    if(!d)return; window.__firmaDia=firmaDia(d); var cols=["#2f3b46","#a8443c","#2b5f9e","#8a9aa5","#6b7780","#3f7a52"];
+    if(!d)return; window.__firmaDia=firmaDia(d); reintentarFotos(d); var cols=["#2f3b46","#a8443c","#2b5f9e","#8a9aa5","#6b7780","#3f7a52"];
     var loc=S.orders.filter(function(o){return !o.srvId&&!o.pay}), oldC=S.clients;
     S.orders=[];S.clients={};
     d.ventas.forEach(function(v,i){
       var ids=v.servicios.map(function(x){return x.id}).filter(function(id){return svc(id)}); if(!ids.length)return;
       var pct=parseFloat(v.descuento)||0;
       S.clients[v.telefono]={nombre:v.cliente||"Sin nombre",prev:(d.previas&&d.previas[v.telefono])||0};
-      S.orders.push({validada:!!v.validada,placaPor:v.placaPor||"",num:v.num,time:hhmm(new Date(v.fecha)),placa:v.placa,modelo:v.modelo,photo:ph(cols[i%cols.length]),svc:ids,lav:v.lavador,tel:v.telefono,disc:pct?{pct:pct,motivo:"",status:"approved"}:null,pay:v.estado==="pendiente"?null:{method:v.metodo,ref:v.ref,tasa:v.tasa||S.tasa,cur:v.moneda,val:v.monto},op:v.usuario,ticket:true,ejemplo:!!v.ejemplo,srvId:v.id,sin:!!v.sinPlaca,tipo:v.tipo||"normal",nota:v.nota||""});
+      S.orders.push({conFoto:v.conFoto,validada:!!v.validada,placaPor:v.placaPor||"",num:v.num,time:hhmm(new Date(v.fecha)),placa:v.placa,modelo:v.modelo,photo:ph(cols[i%cols.length]),svc:ids,lav:v.lavador,tel:v.telefono,disc:pct?{pct:pct,motivo:"",status:"approved"}:null,pay:v.estado==="pendiente"?null:{method:v.metodo,ref:v.ref,tasa:v.tasa||S.tasa,cur:v.moneda,val:v.monto},op:v.usuario,ticket:true,ejemplo:!!v.ejemplo,srvId:v.id,sin:!!v.sinPlaca,tipo:v.tipo||"normal",nota:v.nota||""});
       if(v.sinPlaca)S.orders[S.orders.length-1].placa="SIN PLACA";
     });
     loc.forEach(function(o){o.num=S.orders.length+1;if(!S.clients[o.tel])S.clients[o.tel]=oldC[o.tel]||{nombre:"Sin nombre",prev:0};S.orders.push(o)});
@@ -666,7 +686,7 @@ function construirDia(d){
     var ids=v.servicios.map(function(x){return x.id}).filter(function(id){return svc(id)}); if(!ids.length)return;
     var pct=parseFloat(v.descuento)||0;
     R.clients[v.telefono]={nombre:v.cliente||"Sin nombre",prev:(d.previas&&d.previas[v.telefono])||0};
-    var o={validada:!!v.validada,placaPor:v.placaPor||"",num:v.num,time:hhmm(new Date(v.fecha)),placa:v.sinPlaca?"SIN PLACA":v.placa,modelo:v.modelo,photo:ph(cols[i%cols.length]),svc:ids,lav:v.lavador,tel:v.telefono,disc:pct?{pct:pct,motivo:"",status:"approved"}:null,pay:v.estado==="pendiente"?null:{method:v.metodo,ref:v.ref,tasa:v.tasa||S.tasa,cur:v.moneda,val:v.monto},op:v.usuario,ticket:true,ejemplo:!!v.ejemplo,srvId:v.id,sin:!!v.sinPlaca,tipo:v.tipo||"normal",nota:v.nota||""};
+    var o={conFoto:v.conFoto,validada:!!v.validada,placaPor:v.placaPor||"",num:v.num,time:hhmm(new Date(v.fecha)),placa:v.sinPlaca?"SIN PLACA":v.placa,modelo:v.modelo,photo:ph(cols[i%cols.length]),svc:ids,lav:v.lavador,tel:v.telefono,disc:pct?{pct:pct,motivo:"",status:"approved"}:null,pay:v.estado==="pendiente"?null:{method:v.metodo,ref:v.ref,tasa:v.tasa||S.tasa,cur:v.moneda,val:v.monto},op:v.usuario,ticket:true,ejemplo:!!v.ejemplo,srvId:v.id,sin:!!v.sinPlaca,tipo:v.tipo||"normal",nota:v.nota||""};
     R.orders.push(o);
   });
   R.gastos=d.gastos.map(function(g,i){return{id:i+1,time:"",desc:g.desc,monto:g.monto,real:g.monto,cat:"Otros",pago:g.pago,foto:ph("#6b7780"),factura:ph("#8a9aa5"),status:"done",op:g.usuario}});
@@ -702,7 +722,7 @@ function renderAdminBase(){
   var arow=function(o){
     var pago=o.pay?'<span class="pill ok">'+esc(o.pay.method)+(paidAmt(o).cur!=="$"?" · "+paidAmt(o).txt:"")+(o.pay.ref?" · "+esc(o.pay.ref):"")+'</span>':(o.disc&&o.disc.status==="pending"?'<span class="pill warn">Espera autorización</span>':'<span class="pill bad">Por cobrar</span>');
     var d=o.disc&&o.disc.status==="approved"?' <span class="pill mut">-'+o.disc.pct+'%</span>':"";
-    if(window.__yo&&o.pay&&o.srvId)pago+=validadaO(o)?'<br><span class="pill ok">Validada con la cámara</span>':'<br><span class="pill warn">Pendiente por validación</span>';
+    if(window.__yo&&o.pay&&o.srvId)pago+=validadaO(o)?'<br><span class="pill ok">Validada con la cámara</span>':'<br><span class="pill warn">Pendiente por validación</span>'+(o.conFoto===false?'<br><span class="note">Sin foto del encargado</span>':"");
     return '<tr><td class="num">#'+String(o.num).padStart(3,"0")+'</td><td><img class="thumb" style="width:56px;height:42px" src="'+o.photo+'" alt=""></td><td class="num">'+o.time+'</td><td>'+(o.placa?esc(o.placa):'<span class="note">Sin placa</span>')+(o.placaPor?'<br><span class="note">'+(o.placaPor==="cámara"?"completada por la cámara":"corregida por "+esc(o.placaPor))+'</span>':"")+(window.__yo&&window.__yo.rol==="dueno"&&o.srvId&&!ADIA?'<br><button class="btn sm" data-act="fixplaca" data-n="'+o.num+'">Corregir placa</button>':"")+'</td><td>'+esc(cliName(o))+'<br><span class="note num">'+fmtTel(o.tel)+'</span></td><td>'+esc(names(o))+d+'</td><td>'+esc(o.op)+'</td><td>'+pago+'</td><td class="r num"><b>'+usd(total(o))+'</b></td></tr>';
   };
   $("a-rows").innerHTML=groupOrders().map(function(g){
@@ -793,7 +813,7 @@ function loadHist(){
 }
 /* Mantiene al día las motos y las validaciones: cada 10 s mira si cambió algo en el servidor (facturas nuevas, cobros, validaciones, placas) y solo entonces vuelve a cargar el día.
    Si el usuario está escribiendo en un campo, espera al siguiente ciclo para no molestarlo. */
-function firmaDia(d){return d.ventas.map(function(v){return [v.id,v.estado,v.placa,v.sinPlaca?1:0,v.validada?1:0,v.metodo,v.monto,v.placaPor||"",v.tipo||""].join(",")}).join("|")+"#"+(d.gastos||[]).length}
+function firmaDia(d){return d.ventas.map(function(v){return [v.id,v.estado,v.placa,v.sinPlaca?1:0,v.validada?1:0,v.metodo,v.monto,v.placaPor||"",v.tipo||"",v.conFoto?1:0].join(",")}).join("|")+"#"+(d.gastos||[]).length}
 function refrescarDia(){
   if(!window.__yo||document.hidden)return;
   fetch("/api/dia").then(function(r){return r.ok?r.json():null}).then(function(d){

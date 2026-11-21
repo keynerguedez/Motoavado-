@@ -409,3 +409,12 @@ test('revalidación automática: una "otra moto" con la misma placa se registra 
   assert.equal(r.hechos.length, 2, 'las otras dos en la vuelta siguiente; las 6 primeras ya no se repiten');
   assert.equal(t.c.cruces().items.filter(x => x.tipo === 'distinta').length, 8);
 });
+
+test('tieneFotoVenta dice si el servidor ya guardó la foto del encargado de esa factura', async () => {
+  const v = { id: 'abc123def456', num: 7, placa: 'AJ002E' };
+  const t = montar({ ventas: [v] });
+  assert.equal(t.c.tieneFotoVenta('abc123def456'), false);
+  await t.c.cruzar(v, Buffer.alloc(2000, 1));
+  assert.equal(t.c.tieneFotoVenta('abc123def456'), true);
+  assert.equal(t.c.tieneFotoVenta('../../etc/passwd'), false);
+});

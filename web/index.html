@@ -319,7 +319,7 @@ details.grp summary{cursor:pointer;font-weight:600;font-size:.9rem;color:var(--m
         <div class="row" style="flex-wrap:wrap;gap:10px"><h3 style="margin-right:auto">Cruce de fotos: la del encargado contra la de la cámara</h3><label class="row note" style="gap:6px"><input type="checkbox" id="x-todos" style="width:auto"> Mostrar también los que no coinciden</label><span class="pill mut" id="x-res">–</span></div>
         <div id="x-pend" class="row" style="flex-wrap:wrap;gap:6px"></div><div class="note" id="x-msg"></div>
         <div class="tablewrap"><table style="min-width:760px"><thead><tr><th>Hora</th><th>Factura</th><th>Foto del encargado</th><th>Foto del puente</th><th>Lo que dijo Claude</th><th>Resultado</th><th>¿Acertó?</th></tr></thead><tbody id="x-rows"><tr><td colspan="7" class="note">Cargando…</td></tr></tbody></table></div>
-        <p class="note">Cuando el encargado registra una moto con foto, Claude la compara solo con la moto del puente que tiene la misma placa. Aquí ves las dos fotos, lo que respondió y por qué. Marca si acertó para medir la fiabilidad. Se guardan los últimos 100 cruces.</p>
+        <p class="note">Cuando el encargado registra una moto con foto, Claude la compara solo con la moto del puente que tiene la misma placa. Aquí ves las dos fotos, lo que respondió y por qué. Marca si acertó para medir la fiabilidad. Se guardan los últimos 100 cruces. <b>Revalidación automática:</b> cada minuto el sistema reintenta solo validar las facturas sin cruce (hasta 4 intentos por factura); las que queden sin resolver las validas tú a ojo.</p>
       </div>
     </div>
   </section>

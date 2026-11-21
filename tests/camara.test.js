@@ -353,3 +353,52 @@ test('la vista en vivo se renueva con cada foto que llega, como mucho una cada C
     assert.notEqual(t.c.publico().vista.t, t1);
   } finally { delete process.env.CAMARA_VISTA_MS; }
 });
+
+// ---------- revalidación automática ----------
+const haceMin = m => new Date(Date.now() - m * 60e3).toISOString();
+
+test('revalidación automática: valida sola una factura cuya placa ya tiene lectura de la cámara, y no repite', async () => {
+  const marcadas = [];
+  const v = { id: 'aaaaaaaaaaa1', num: 5, placa: 'AX0A64W', fecha: haceMin(10), estado: 'pagada' };
+  const t = montar({ historial: [{ id: 'mwoauto0001', puente: 1, placa: 'AX0A64W', estado: 'alerta', salida: haceMin(8) }], ventaFotos: [v], ventas: [v], marcarValidada: (id, i) => marcadas.push([id, i.tipo]) });
+  const r = await t.c.autoRevalidar();
+  assert.deepEqual(r.hechos, [{ num: 5, tipo: 'coincide' }]);
+  assert.deepEqual(marcadas, [['aaaaaaaaaaa1', 'coincide']]);
+  assert.equal(t.c.cruces().items[0].origen, 'automática');
+  assert.equal(t.filas()[0].estado, 'tarde');
+  const n = t.llamadas.comparar.length;
+  await t.c.autoRevalidar();
+  assert.equal(t.llamadas.comparar.length, n, 'una factura ya validada no se vuelve a comparar');
+});
+
+test('revalidación automática: salta las muy recientes, las de pago pendiente, las ya validadas y las sin foto', async () => {
+  const reciente = { id: 'bbbbbbbbbbb1', num: 1, placa: 'AAA111', fecha: haceMin(1), estado: 'pagada' };
+  const pend = { id: 'bbbbbbbbbbb2', num: 2, placa: 'AAA112', fecha: haceMin(30), estado: 'pendiente' };
+  const ya = { id: 'bbbbbbbbbbb3', num: 3, placa: 'AAA113', fecha: haceMin(30), estado: 'pagada', validada: true };
+  const sinFoto = { id: 'bbbbbbbbbbb4', num: 4, placa: 'AAA114', fecha: haceMin(30), estado: 'pagada' };
+  const t = montar({ ventas: [reciente, pend, ya, sinFoto], ventaFotos: [reciente, pend, ya] });
+  const r = await t.c.autoRevalidar();
+  assert.deepEqual(r.hechos, []); assert.equal(t.llamadas.comparar.length, 0);
+});
+
+test('revalidación automática: sin lecturas de esa placa primero no busca más (barato) y reintenta a los 5 min con todas las fotos del día', async () => {
+  const v = { id: 'ccccccccccc1', num: 4, placa: 'AJ0002E', fecha: haceMin(20), estado: 'pagada' };
+  const t = montar({ ventaFotos: [v], ventas: [v], cruces: [{ foto: 'mwo77777ff-p3.jpg', contenido: 'MATCH' }], comparar: (a, b) => b === 'MATCH' ? { misma: true, confianza: 'alta', motivo: 'misma' } : { misma: false, confianza: 'alta' } });
+  let r = await t.c.autoRevalidar();
+  assert.deepEqual(r.hechos, [{ num: 4, tipo: 'ninguna' }]); assert.equal(t.llamadas.comparar.length, 0, 'primer intento: sin lecturas de esa placa no compara nada');
+  r = await t.c.autoRevalidar();
+  assert.deepEqual(r.hechos, [], 'aún no toca el segundo intento');
+  r = await conHora(6 * 60e3, () => t.c.autoRevalidar());
+  assert.deepEqual(r.hechos, [{ num: 4, tipo: 'coincide' }]);
+  assert.ok(t.llamadas.comparar.length >= 1);
+});
+
+test('revalidación automática: una "otra moto" con la misma placa se registra una vez y deja de insistir; máximo 3 facturas por vuelta', async () => {
+  const ventas = Array.from({ length: 5 }, (_, i) => ({ id: 'ddddddddddd' + i, num: i + 1, placa: 'ZZ' + (100 + i) + 'A', fecha: haceMin(15), estado: 'pagada' }));
+  const t = montar({ historial: ventas.map((v, i) => ({ id: 'mwodis0000' + i, puente: 2, placa: v.placa, estado: 'alerta', salida: haceMin(10) })), ventaFotos: ventas, ventas, comparar: () => ({ misma: false, confianza: 'alta', motivo: 'otra' }) });
+  let r = await t.c.autoRevalidar();
+  assert.equal(r.hechos.length, 3, 'tope de 3 por vuelta'); assert.ok(r.hechos.every(h => h.tipo === 'distinta'));
+  r = await t.c.autoRevalidar();
+  assert.equal(r.hechos.length, 2, 'las otras dos en la vuelta siguiente; las 3 primeras ya no se repiten');
+  assert.equal(t.c.cruces().items.filter(x => x.tipo === 'distinta').length, 5);
+});

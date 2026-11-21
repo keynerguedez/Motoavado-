@@ -366,7 +366,7 @@ async function api(req, res, ruta) {
       const pedido = new URL(req.url, 'http://localhost').searchParams.get('dia') || '';
       if (pedido && pedido !== fechaCaracas(new Date()) && !puede(yo, 'admin')) return json(res, 403, { error: 'Solo Administración puede ver otros días.' });
       const dia = diaDeHoy(pedido), val = camara.ventasValidadas();
-      dia.ventas = dia.ventas.map(v => Object.assign({}, v, { validada: !!(v.validada || val.has(v.id)) })); // validada: la factura ya cruzó su foto con la cámara
+      dia.ventas = dia.ventas.map(v => Object.assign({}, v, { validada: !!(v.validada || val.has(v.id)), conFoto: camara.tieneFotoVenta(v.id) })); // validada: la factura ya cruzó su foto con la cámara
       return json(res, 200, dia);
     }
     if (ruta === '/api/cliente') {

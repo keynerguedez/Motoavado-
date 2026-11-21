@@ -270,6 +270,7 @@ function crear(ctx) {
   const cruces = () => { const v = C.filter(x => x.valido !== null); return { resumen: { total: C.length, validados: v.length, acertó: v.filter(x => x.valido === true).length }, items: C.slice(0, 50).map(x => Object.assign({}, x, { fotoVenta: '/api/camara/cruce-venta/' + x.venta.id + '.jpg', comps: x.comps.map(k => Object.assign({}, k, { url: '/api/camara/cruce/' + k.foto })) })) }; };
   function validarCruce(id, ok) { const e = C.find(x => x.id === String(id)); if (!e) return false; e.valido = ok === true ? true : ok === false ? false : null; cGuardar(); return true; }
   const fotoCruce = nombre => /^[a-z0-9]+-p[1-5]\.jpg$/.test(String(nombre)) ? (() => { try { return fs.readFileSync(path.join(CFOTOS, nombre)); } catch (e) { return null; } })() : null;
+  const tieneFotoVenta = id => /^[a-f0-9]{6,20}$/.test(String(id)) && fs.existsSync(path.join(FOTOS, 'venta', id + '.jpg'));
   const fotoVentaId = id => /^[a-f0-9]{6,20}$/.test(String(id)) ? fotoVenta(id) : null;
   const fotoVenta = id => { try { return fs.readFileSync(path.join(FOTOS, 'venta', id + '.jpg')); } catch (e) { return null; } };
   const fotoPuente = n => { try { return fs.readFileSync(path.join(FOTOS, 'camara-puente-' + n + '.jpg')); } catch (e) { return null; } };
@@ -801,7 +802,7 @@ function crear(ctx) {
   }
   function foto(n) { try { return fs.readFileSync(path.join(FOTOS, 'camara-puente-' + Number(n) + '.jpg')); } catch (e) { return null; } }
 
-  return { autoRevalidar, ventasValidadas, validarManual, revalidar, liberarPuente, cruces, validarCruce, fotoCruce, fotoVentaId, cruzar, leerFoto, evento, vista, fotoVista, publico, foto, historial, marcarReal, fotoHist, alarma, fotoRecibida, leerPlaca, FOTOS4K, PUENTES };
+  return { tieneFotoVenta, autoRevalidar, ventasValidadas, validarManual, revalidar, liberarPuente, cruces, validarCruce, fotoCruce, fotoVentaId, cruzar, leerFoto, evento, vista, fotoVista, publico, foto, historial, marcarReal, fotoHist, alarma, fotoRecibida, leerPlaca, FOTOS4K, PUENTES };
 }
 
 module.exports = { crear };

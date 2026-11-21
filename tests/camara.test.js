@@ -455,3 +455,16 @@ test('validación por placa: si la foto no permite decidir pero la cámara leyó
   const lejos = montar({ historial: [Object.assign({ id: 'mwoplaca004' }, base, { llegada: hace(300), salida: hace(280) })], ventaFotos: [v], ventas: [v], comparar: dudosa });
   assert.notEqual((await lejos.c.revalidar(v)).tipo, 'placa');
 });
+
+test('una moto que reaparece en 10 min y reabre su fila conserva su placa confirmada: dos relecturas ilegibles (tapada por los mecánicos) no la descartan', async () => {
+  const hace = m => new Date(Date.now() - m * 60e3).toISOString();
+  const t = montar({ historial: [{ id: 'mwoback0001', puente: 3, placa: 'AY3U84A', estado: 'alerta', llegada: hace(30), salida: hace(2), foto: 'ANTES' }],
+    comparar: () => ({ misma: true, confianza: 'alta', motivo: 'igual' }), leer: haiku(() => ({ moto: true, placa: '', parcial: '', motivo: 'ilegible' })) });
+  await t.ev(3, { revision: true }); // reaparece la moto: la primera lectura es ilegible y se reabre la fila anterior
+  assert.equal(t.pub(3).placa, 'AY3U84A'); assert.equal(t.filas().length, 1, 'se reabrió la misma fila');
+  await t.ev(3, { revision: true }); await ESPERA(5);
+  await t.ev(3, { revision: true }); await ESPERA(5);
+  await t.ev(3, { revision: true });
+  assert.equal(t.pub(3).placa, 'AY3U84A', 'la placa que ya se había leído y confirmado no se descarta');
+  assert.notEqual(t.filas()[0].estado, 'descartada');
+});

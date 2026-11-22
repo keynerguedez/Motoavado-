@@ -957,7 +957,7 @@ function renderSinFact(){
     var pu=e.puente===5?"Fuera del puente":"Puente "+e.puente, pl=e.placa||e.parcial||"placa no legible";
     var fin=e.salida?new Date(e.salida).getTime():Date.now(), min=Math.max(0,Math.round((fin-new Date(e.llegada).getTime())/60000));
     var est=e.estado==="esperando"?'<span class="pill warn">Esperando factura</span><br><span class="note">Llegó hace '+min+' min · está en el puente</span>':e.estado==="lavando"?'<span class="pill warn">En lavado · sin factura</span><br><span class="note">Lleva '+min+' min en el puente</span>':e.estado==="espera"?'<span class="pill warn">Bajó · esperando factura</span><br><span class="note">Estuvo '+min+' min</span>':'<span class="pill bad">Sin factura</span><br><span class="note">'+(e.salida?"Ya bajó · estuvo ":"Lleva ")+min+' min</span>';
-    return '<tr><td><img class="thumb" style="width:96px;height:72px;object-fit:cover;cursor:zoom-in" loading="lazy" src="'+esc(e.foto)+'" alt="Ampliar" data-act="foto" data-src="'+esc(e.foto)+'" data-t="'+esc(pu+" · "+hh(e.llegada)+" · "+pl)+'"></td><td class="num">'+hh(e.llegada)+(e.salida?'<br><span class="note">salió '+hh(e.salida)+'</span>':"")+'</td><td>'+pu+'</td><td><b>'+esc(pl)+'</b></td><td>'+est+'</td></tr>';
+    return '<tr><td><img class="thumb" style="width:96px;height:72px;object-fit:cover;cursor:zoom-in" loading="lazy" src="'+esc(e.foto)+'" alt="Ampliar" data-act="foto" data-src="'+esc(e.foto)+'" data-t="'+esc(pu+" · "+hh(e.llegada)+" · "+pl)+'"></td><td class="num">'+hh(e.llegada)+(e.salida?'<br><span class="note">salió '+hh(e.salida)+'</span>':"")+'</td><td>'+pu+'</td><td><b>'+esc(pl)+'</b></td><td>'+est+(window.__yo&&window.__yo.rol==="dueno"&&!ADIA&&e.salida?'<br><button class="btn sm" data-act="enlazarfila" data-id="'+esc(e.id)+'">Enlazar a una factura</button>':"")+'</td></tr>';
   }).join(""):'<tr><td colspan="5"><span class="pill ok">Todas las motos vistas por la cámara tienen factura</span></td></tr>';
 }
 var XR=null;
@@ -1251,6 +1251,17 @@ document.addEventListener("click",function(ev){
   else if(a==="wa"){var wo=S.orders.filter(function(x){return String(x.num)===t.dataset.n})[0]; if(wo)compartirWa(wo)}
   else if(a==="vivo")abrirVivo();
   else if(a==="cerrarvivo")cerrarVivo();
+  else if(a==="enlazarfila"){
+    var fl=SF&&SF.items.filter(function(x){return x.id===t.dataset.id})[0]; if(!fl)return;
+    var ya={}; SF.items.forEach(function(x){if(x.num!=null)ya[x.num]=1});
+    var lect=(fl.placa||fl.parcial||"").replace(/[^A-Z0-9]/g,"");
+    var cand=S.orders.filter(function(o){return o.srvId&&!ya[o.num]}).map(function(o){var p=String(o.placa||"").replace(/[^A-Z0-9]/g,""),c=0;for(var i=0;i<Math.min(p.length,lect.length);i++)if(p[i]===lect[i])c++;return{o:o,c:c}}).sort(function(a,b){return b.c-a.c||b.o.num-a.o.num}).slice(0,8);
+    var lista=cand.map(function(x){return "#"+x.o.num+" "+(x.o.placa||"sin placa")+" · "+x.o.time}).join("\n");
+    var num=window.prompt("¿Con qué factura de hoy se enlaza la moto vista "+(lect||"sin placa legible")+"?\nEscribe el número (sin #). Facturas sin moto enlazada, las más parecidas primero:\n"+lista);
+    if(!num)return; num=parseInt(String(num).replace(/\D/g,""),10);
+    var of=S.orders.filter(function(o){return o.num===num&&o.srvId})[0]; if(!of){toastWa("No se encontró la factura #"+num+" de hoy.");return}
+    jpost("/api/camara/historial/enlazar",{fila:fl.id,venta:of.srvId}).then(function(r){toastWa(r.ok?"Moto enlazada con la factura #"+num+" y validada.":(r.j.error||"No se pudo enlazar."));loadSinFact();loadCruces();loadHoyH()});
+  }
   else if(a==="adiahoy"){$("a-dia").value=hoyCaracas();elegirDiaAdmin("")}
   else if(a==="xval"){jpost("/api/camara/cruces/validar",{id:t.dataset.id,ok:t.dataset.v==="1"}).then(function(){loadCruces()})}
   else if(a==="hreal"){var hi=$("hr-"+t.dataset.id);if(hi)jpost("/api/camara/historial/real",{id:t.dataset.id,real:hi.value}).then(function(){hi.blur();loadHist()})}

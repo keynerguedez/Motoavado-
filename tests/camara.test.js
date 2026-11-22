@@ -516,3 +516,19 @@ test('emparejamiento inverso por placa: una lectura aproximada de la cámara a l
   const ambigua = montar({ historial: [Object.assign({}, fila, { id: 'mwoinv00012' })], ventaFotos: [v, v2], ventas: [v, v2], comparar: dudosa });
   assert.equal((await ambigua.c.autoEmparejarInversa()).hechos[0].factura, null);
 });
+
+test('enlazar a mano una moto vista sin factura con una factura: queda validada; no se puede repetir ni usar una factura que ya tiene moto', async () => {
+  const marcadas = [];
+  const v = { id: 'abcabcabcab1', num: 17, placa: 'AE4D1J', fecha: haceMin(5), estado: 'pagada' };
+  const v2 = { id: 'abcabcabcab2', num: 18, placa: 'ZZZ999', fecha: haceMin(4), estado: 'pagada' };
+  const t = montar({ historial: [{ id: 'mwoenl00001', puente: 1, placa: 'AE4D41J', estado: 'alerta', llegada: haceMin(200), salida: haceMin(180) }, { id: 'mwoenl00002', puente: 3, placa: 'XXX111', estado: 'alerta', llegada: haceMin(100), salida: haceMin(90) }, { id: 'mwoenl00003', puente: 2, placa: 'ZZZ999', estado: 'tarde', num: 18, llegada: haceMin(60), salida: haceMin(50) }],
+    ventas: [v, v2], marcarValidada: (id, i) => marcadas.push([id, i.tipo, i.por]) });
+  assert.ok(t.c.enlazarFila('no-existe', v, 'Raúl').error);
+  assert.deepEqual(t.c.enlazarFila('mwoenl00001', v, 'Raúl'), { ok: true });
+  assert.deepEqual(marcadas, [['abcabcabcab1', 'manual', 'Raúl']]);
+  const f = t.filas().find(x => x.id === 'mwoenl00001'); assert.equal(f.num, 17); assert.equal(f.estado, 'tarde');
+  assert.match(t.c.cruces().items[0].nota, /moto vista AE4D41J en el puente 1 con la factura #17/);
+  assert.match(t.c.enlazarFila('mwoenl00001', v, 'Raúl').error, /ya está enlazada/);
+  assert.match(t.c.enlazarFila('mwoenl00002', v, 'Raúl').error, /ya tiene su moto/);
+  assert.match(t.c.enlazarFila('mwoenl00002', v2, 'Raúl').error, /ya tiene su moto/);
+});

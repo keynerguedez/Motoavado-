@@ -520,6 +520,13 @@ async function api(req, res, ruta) {
     if (!puede(yo, 'vigilante')) return json(res, 403, { error: 'No tienes permiso.' });
     return camara.validarCruce(d.id, d.ok) ? json(res, 200, { ok: true }) : json(res, 404, { error: 'No se encontró el cruce.' });
   }
+  if (ruta === '/api/camara/historial/enlazar') {
+    if (yo.rol !== 'dueno') return json(res, 403, { error: 'Solo el dueño puede enlazar una moto con una factura.' });
+    const v = diaDeHoy().ventas.find(x => x.id === String(d.venta || ''));
+    if (!v) return json(res, 404, { error: 'No se encontró la factura de hoy.' });
+    const r = camara.enlazarFila(d.fila, v, yo.nombre);
+    return json(res, r.error ? 400 : 200, r);
+  }
   if (ruta === '/api/camara/historial/real') {
     if (!puede(yo, 'vigilante')) return json(res, 403, { error: 'No tienes permiso.' });
     return camara.marcarReal(d.id, d.real) ? json(res, 200, { ok: true }) : json(res, 404, { error: 'No se encontró la lectura.' });

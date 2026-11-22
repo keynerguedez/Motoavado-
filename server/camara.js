@@ -484,6 +484,18 @@ function crear(ctx) {
   const autoSeg = process.env.CAMARA_AUTOREV_SEG === undefined ? 60 : Number(process.env.CAMARA_AUTOREV_SEG);
   if (autoSeg > 0) { setInterval(() => autoRevalidar().catch(() => {}), autoSeg * 1000).unref(); setInterval(() => autoEmparejarInversa().catch(() => {}), autoSeg * 1000 + 17000).unref(); }
 
+  // El dueño enlaza a mano una moto que la cámara vio y bajó sin factura con la factura que le corresponde (por ejemplo cuando la placa se leyó o se escribió distinta). La factura queda validada.
+  function enlazarFila(idFila, v, quien) {
+    const hoy = ctx.fechaCaracas(new Date()), e = H.find(x => x.id === String(idFila) && x.dia === hoy);
+    if (!e) return { error: 'No se encontró esa moto en el historial de hoy.' };
+    if (e.num != null) return { error: 'Esa moto ya está enlazada con la factura #' + e.num + '.' };
+    if (H.some(x => x.dia === hoy && x.num === v.num)) return { error: 'Esa factura ya tiene su moto enlazada.' };
+    const lectura = e.placa || e.parcial || 'sin placa legible';
+    cNuevo(v, 'manual', [], 'manual', e.puente, { nota: 'Enlazada a mano: moto vista ' + lectura + ' en el ' + (e.puente === 5 ? 'área fuera del puente' : 'puente ' + e.puente) + ' con la factura #' + v.num + ' (' + (v.placa || 'sin placa') + ').', por: quien, valido: true });
+    vincularFila(e, v); S.cruces = S.cruces.filter(c => c.id !== v.id); guardar();
+    return { ok: true };
+  }
+
   // El dueño valida a ojo una factura cuando la cámara no guardó una foto de esa moto: queda registrado con su nombre y una nota.
   function validarManual(v, nota, quien) {
     nota = String(nota || '').trim().slice(0, 200); if (nota.length < 3) return { error: 'Escribe una nota (por qué la validas a ojo).' };
@@ -882,7 +894,7 @@ function crear(ctx) {
   }
   function foto(n) { try { return fs.readFileSync(path.join(FOTOS, 'camara-puente-' + Number(n) + '.jpg')); } catch (e) { return null; } }
 
-  return { autoEmparejarInversa, tieneFotoVenta, autoRevalidar, ventasValidadas, validarManual, revalidar, liberarPuente, cruces, validarCruce, fotoCruce, fotoVentaId, cruzar, leerFoto, evento, vista, fotoVista, publico, foto, historial, marcarReal, fotoHist, alarma, fotoRecibida, leerPlaca, FOTOS4K, PUENTES };
+  return { enlazarFila, autoEmparejarInversa, tieneFotoVenta, autoRevalidar, ventasValidadas, validarManual, revalidar, liberarPuente, cruces, validarCruce, fotoCruce, fotoVentaId, cruzar, leerFoto, evento, vista, fotoVista, publico, foto, historial, marcarReal, fotoHist, alarma, fotoRecibida, leerPlaca, FOTOS4K, PUENTES };
 }
 
 module.exports = { crear };

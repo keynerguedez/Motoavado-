@@ -500,6 +500,34 @@ function crear(ctx) {
   const autoSeg = process.env.CAMARA_AUTOREV_SEG === undefined ? 60 : Number(process.env.CAMARA_AUTOREV_SEG);
   if (autoSeg > 0) { setInterval(() => autoRevalidar().catch(() => {}), autoSeg * 1000).unref(); setInterval(() => autoEmparejarInversa().catch(() => {}), autoSeg * 1000 + 17000).unref(); }
 
+  // Resumen del día para el cierre: lo que vio la cámara frente a lo facturado (motos distintas de verdad, facturas sin moto, motos sin factura, validación y cobros raros).
+  function cierre(ventas, dia) {
+    dia = dia || ctx.fechaCaracas(new Date());
+    const filas = H.filter(e => e.dia === dia && !(e.puente === EXTRA && !e.placa && !e.parcial));
+    const reales = filas.filter(e => e.estado !== 'descartada' && !(e.estado === 'esperando' && e.salida));
+    const falsosPositivos = filas.filter(e => e.estado === 'esperando' && e.salida).length, descartadas = filas.filter(e => e.estado === 'descartada');
+    const vinculadas = reales.filter(e => e.num != null), numsFilas = new Set(vinculadas.map(e => e.num));
+    // Una lectura descartada cuya placa es la de una factura sin otra moto sigue siendo una moto real y facturada.
+    const numsDescartadas = [];
+    descartadas.forEach(e => { const p = limpiarPlaca(e.placa); const v = p && ventas.find(x => !numsFilas.has(x.num) && !numsDescartadas.includes(x.num) && limpiarPlaca(x.placa) === p); if (v) numsDescartadas.push(v.num); });
+    // Motos vistas sin factura; la misma moto leída en dos filas seguidas (misma zona, menos de 10 min entre una y otra, placa parecida) cuenta una vez.
+    const sinFilas = reales.filter(e => e.num == null).sort((a, b) => (a.llegada < b.llegada ? -1 : 1)), sinFactura = [];
+    sinFilas.forEach(e => {
+      const ant = sinFactura[sinFactura.length - 1], l = e.placa || e.parcial || '';
+      if (ant && ant.puente === e.puente && ant.salida && Date.parse(e.llegada) - Date.parse(ant.salida) < 10 * 60e3 && l && ant.lectura && distSuave(ant.lectura, l) <= 2) { ant.salida = e.salida; ant.lecturas.push(l); return; }
+      sinFactura.push({ puente: e.puente, llegada: e.llegada, salida: e.salida, lectura: l, lecturas: [l].filter(Boolean) });
+    });
+    const motosConFactura = numsFilas.size + numsDescartadas.length;
+    const facturasSinMoto = ventas.filter(v => !numsFilas.has(v.num) && !numsDescartadas.includes(v.num)).map(v => ({ num: v.num, placa: v.placa || '', fecha: v.fecha }));
+    const porPlaca = {}; ventas.forEach(v => { const p = limpiarPlaca(v.placa); if (p) (porPlaca[p] = porPlaca[p] || []).push(v.num); });
+    const repetidas = Object.keys(porPlaca).filter(p => porPlaca[p].length > 1).map(p => ({ placa: p, facturas: porPlaca[p] }));
+    const tardias = vinculadas.map(e => { const v = ventas.find(x => x.num === e.num); return v && e.salida ? { num: v.num, placa: v.placa || '', minutos: Math.round((Date.parse(v.fecha) - Date.parse(e.salida)) / 60000) } : null; }).filter(x => x && x.minutos > 60);
+    const diferencias = ventas.filter(v => v.moneda === 'Bs' && v.esperado && v.monto && Math.abs(v.monto - v.esperado) / v.esperado > 0.08)
+      .map(v => ({ num: v.num, placa: v.placa || '', total: v.total, monto: v.monto, esperado: Math.round(v.esperado), dif: Math.round(v.monto - v.esperado) }));
+    const val = ventasValidadas(), pendientes = ventas.filter(v => v.estado !== 'pendiente' && !v.validada && !val.has(v.id)).map(v => ({ num: v.num, placa: v.placa || '', sinFoto: !tieneFotoVenta(v.id) }));
+    return { dia, filas: filas.length, reales: reales.length, falsosPositivos, descartadas: descartadas.length, motosConFactura, motosSinFactura: sinFactura.length, motosDistintas: motosConFactura + sinFactura.length, sinFactura, facturasSinMoto, repetidas, tardias, diferencias, validadas: ventas.filter(v => v.estado !== 'pendiente').length - pendientes.length, pendientes };
+  }
+
   // El dueño enlaza a mano una moto que la cámara vio y bajó sin factura con la factura que le corresponde (por ejemplo cuando la placa se leyó o se escribió distinta). La factura queda validada.
   function enlazarFila(idFila, v, quien) {
     const hoy = ctx.fechaCaracas(new Date()), e = H.find(x => x.id === String(idFila) && x.dia === hoy);
@@ -910,7 +938,7 @@ function crear(ctx) {
   }
   function foto(n) { try { return fs.readFileSync(path.join(FOTOS, 'camara-puente-' + Number(n) + '.jpg')); } catch (e) { return null; } }
 
-  return { enlazarFila, autoEmparejarInversa, tieneFotoVenta, autoRevalidar, ventasValidadas, validarManual, revalidar, liberarPuente, cruces, validarCruce, fotoCruce, fotoVentaId, cruzar, leerFoto, evento, vista, fotoVista, publico, foto, historial, marcarReal, fotoHist, alarma, fotoRecibida, leerPlaca, FOTOS4K, PUENTES };
+  return { cierre, enlazarFila, autoEmparejarInversa, tieneFotoVenta, autoRevalidar, ventasValidadas, validarManual, revalidar, liberarPuente, cruces, validarCruce, fotoCruce, fotoVentaId, cruzar, leerFoto, evento, vista, fotoVista, publico, foto, historial, marcarReal, fotoHist, alarma, fotoRecibida, leerPlaca, FOTOS4K, PUENTES };
 }
 
 module.exports = { crear };

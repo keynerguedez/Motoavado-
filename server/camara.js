@@ -525,7 +525,7 @@ function crear(ctx) {
     const diferencias = ventas.filter(v => v.moneda === 'Bs' && v.esperado && v.monto && Math.abs(v.monto - v.esperado) / v.esperado > 0.08)
       .map(v => ({ num: v.num, placa: v.placa || '', total: v.total, monto: v.monto, esperado: Math.round(v.esperado), dif: Math.round(v.monto - v.esperado) }));
     const val = ventasValidadas(), pendientes = ventas.filter(v => v.estado !== 'pendiente' && !v.validada && !val.has(v.id)).map(v => ({ num: v.num, placa: v.placa || '', sinFoto: !tieneFotoVenta(v.id) }));
-    return { dia, filas: filas.length, reales: reales.length, falsosPositivos, descartadas: descartadas.length, motosConFactura, motosSinFactura: sinFactura.length, motosDistintas: motosConFactura + sinFactura.length, sinFactura, facturasSinMoto, repetidas, tardias, diferencias, validadas: ventas.filter(v => v.estado !== 'pendiente').length - pendientes.length, pendientes };
+    return { dia, filas: filas.length, reales: reales.length, falsosPositivos, descartadas: descartadas.length, motosConFactura, motosSinFactura: sinFactura.length, motosDistintas: motosConFactura + sinFactura.length, facturas: ventas.length, motosReales: ventas.length + sinFactura.length, sinFactura, facturasSinMoto, repetidas, tardias, diferencias, validadas: ventas.filter(v => v.estado !== 'pendiente').length - pendientes.length, pendientes };
   }
 
   // El dueño enlaza a mano una moto que la cámara vio y bajó sin factura con la factura que le corresponde (por ejemplo cuando la placa se leyó o se escribió distinta). La factura queda validada.

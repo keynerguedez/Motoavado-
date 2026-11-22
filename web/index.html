@@ -756,7 +756,8 @@ function renderPrices(){
 function cierreExtra(c){
   var cm=c.camara, co=c.consumo||{}, hc=function(iso){return new Date(iso).toLocaleTimeString("es-VE",{hour:"numeric",minute:"2-digit",timeZone:"America/Caracas"})};
   var pu=function(n){return n===5?"fuera del puente":"puente "+n}, L=["","CÁMARA"];
-  L.push("Motos distintas detectadas: "+cm.motosDistintas+" ("+cm.motosConFactura+" con factura, "+cm.motosSinFactura+" sin factura)");
+  L.push("Motos del día: "+cm.motosReales+" ("+cm.facturas+" facturadas + "+cm.motosSinFactura+" vistas sin factura)");
+  L.push("  La cámara detectó "+cm.motosDistintas+" ("+cm.motosConFactura+" con factura + "+cm.motosSinFactura+" sin factura)"+(cm.facturasSinMoto.length?"; "+cm.facturasSinMoto.length+" facturas sin moto en la cámara":""));
   L.push("  Filas guardadas "+cm.filas+" · falsos positivos "+cm.falsosPositivos+" · lecturas descartadas "+cm.descartadas);
   if(cm.sinFactura.length){L.push("Motos vistas sin factura ("+cm.sinFactura.length+"):");cm.sinFactura.forEach(function(x){L.push("  "+hc(x.llegada)+(x.salida?"–"+hc(x.salida):"")+" · "+pu(x.puente)+" · "+(x.lecturas.length?x.lecturas.join(" / "):"sin placa"))})}
   if(cm.facturasSinMoto.length)L.push("Facturas sin moto de la cámara: "+cm.facturasSinMoto.map(function(x){return "#"+x.num+" "+x.placa}).join(", "));

@@ -400,6 +400,12 @@ async function api(req, res, ruta) {
       const f = camara.fotoVentaId(fv[1]); if (!f) return json(res, 404, { error: 'Sin foto.' });
       res.writeHead(200, { 'content-type': 'image/jpeg', 'cache-control': 'private, max-age=600' }); return res.end(f);
     }
+    if (ruta === '/api/cierre') {
+      if (!puede(yo, 'admin')) return json(res, 403, { error: 'No tienes permiso.' });
+      const pedido = new URL(req.url, 'http://localhost').searchParams.get('dia') || '', dia = diaDeHoy(pedido);
+      const co = consumo.resumen(dia.dia);
+      return json(res, 200, { camara: camara.cierre(dia.ventas, dia.dia), consumo: { dia: co.delDia.costo, llamadas: co.delDia.llamadas, mes: co.delMes.costo, proyeccion: co.proyeccion } });
+    }
     if (ruta === '/api/consumo') {
       if (!puede(yo, 'admin')) return json(res, 403, { error: 'No tienes permiso.' });
       return json(res, 200, consumo.resumen(new URL(req.url, 'http://localhost').searchParams.get('dia') || ''));

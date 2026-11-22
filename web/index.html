@@ -356,7 +356,7 @@ details.grp summary{cursor:pointer;font-weight:600;font-size:.9rem;color:var(--m
 <div class="overlay" id="ov-cierre"><div class="sheet stack">
   <h2>Cierre del día</h2>
   <pre id="c-text"></pre>
-  <div class="row"><button class="btn" data-act="closecierre" style="flex:1">Cerrar</button><button class="btn pri" data-act="copycierre" style="flex:1" id="c-copy">Copiar para WhatsApp</button></div>
+  <div class="row"><button class="btn" data-act="closecierre" style="flex:1">Cerrar</button><button class="btn" data-act="copycierre" style="flex:1" id="c-copy">Copiar para WhatsApp</button><button class="btn pri" data-act="enviarcierre" style="flex:1">Enviar por WhatsApp</button></div>
 </div></div>
 
 <script>
@@ -751,6 +751,29 @@ function renderAdminBase(){
 }
 function renderPrices(){
   $("a-prices").innerHTML=S.services.map(function(s){return '<label class="row price" style="justify-content:space-between"><span>'+esc(s.name)+'</span><input type="number" min="0" step="0.5" id="pr-'+s.id+'" data-price="'+s.id+'" value="'+s.price+'"></label>'}).join("");
+}
+/* Parte del cierre que sale del servidor: lo que vio la cámara frente a lo facturado, validación, cobros raros y consumo de la API. */
+function cierreExtra(c){
+  var cm=c.camara, co=c.consumo||{}, hc=function(iso){return new Date(iso).toLocaleTimeString("es-VE",{hour:"numeric",minute:"2-digit",timeZone:"America/Caracas"})};
+  var pu=function(n){return n===5?"fuera del puente":"puente "+n}, L=["","CÁMARA"];
+  L.push("Motos distintas detectadas: "+cm.motosDistintas+" ("+cm.motosConFactura+" con factura, "+cm.motosSinFactura+" sin factura)");
+  L.push("  Filas guardadas "+cm.filas+" · falsos positivos "+cm.falsosPositivos+" · lecturas descartadas "+cm.descartadas);
+  if(cm.sinFactura.length){L.push("Motos vistas sin factura ("+cm.sinFactura.length+"):");cm.sinFactura.forEach(function(x){L.push("  "+hc(x.llegada)+(x.salida?"–"+hc(x.salida):"")+" · "+pu(x.puente)+" · "+(x.lecturas.length?x.lecturas.join(" / "):"sin placa"))})}
+  if(cm.facturasSinMoto.length)L.push("Facturas sin moto de la cámara: "+cm.facturasSinMoto.map(function(x){return "#"+x.num+" "+x.placa}).join(", "));
+  L.push("","VALIDACIÓN","Facturas validadas: "+cm.validadas+" de "+(cm.validadas+cm.pendientes.length)+(cm.pendientes.length?" · pendientes: "+cm.pendientes.map(function(x){return "#"+x.num+" "+x.placa+(x.sinFoto?" (sin foto del encargado)":"")}).join(", "):""));
+  var rev=[]; cm.diferencias.forEach(function(x){rev.push("Cobro con diferencia: #"+x.num+" "+x.placa+" "+usd(x.total)+" → Bs "+fmtN(x.monto)+" (cálculo Bs "+fmtN(x.esperado)+", "+(x.dif>0?"+":"")+fmtN(x.dif)+")")});
+  cm.repetidas.forEach(function(x){rev.push("Misma placa repetida: "+x.placa+" en "+x.facturas.map(function(n){return "#"+n}).join(" y "))});
+  cm.tardias.forEach(function(x){rev.push("Facturada "+x.minutos+" min después de bajar: #"+x.num+" "+x.placa)});
+  if(rev.length){L.push("","PARA REVISAR");rev.forEach(function(x){L.push(x)})}
+  if(co.dia!=null)L.push("","API DE ANTHROPIC","Consumo del día: $"+co.dia.toFixed(2)+" ("+co.llamadas+" llamadas)"+(co.mes!=null?" · mes $"+co.mes.toFixed(2):"")+(co.proyeccion!=null?" · ritmo del mes ≈ $"+Math.round(co.proyeccion):""));
+  return L.join("\n");
+}
+/* Abre WhatsApp con un texto: en teléfono o tablet, el menú de compartir; en computador, WhatsApp Web (con el texto puesto si es corto; si es largo queda copiado para pegarlo). */
+function enviarTextoWa(texto){
+  try{navigator.clipboard&&navigator.clipboard.writeText(texto)}catch(e){}
+  if(ESMOVIL&&navigator.share){navigator.share({text:texto}).then(function(){toastWa("Cierre compartido.")}).catch(function(e){if(!(e&&e.name==="AbortError")){window.open("https://wa.me/?text="+encodeURIComponent(texto),"_blank")}});return}
+  if(texto.length<=3500){window.open("https://web.whatsapp.com/send?text="+encodeURIComponent(texto),"_blank");toastWa("Se abrió WhatsApp Web con el cierre (también quedó copiado). Elige el chat.")}
+  else{window.open("https://web.whatsapp.com/","_blank");toastWa("El cierre es largo: quedó copiado. Elige el chat en WhatsApp Web y pégalo (Cmd/Ctrl+V).")}
 }
 function cierreText(){
   var paid=S.orders.filter(function(o){return o.pay}), unpaid=S.orders.filter(function(o){return !o.pay});
@@ -1272,7 +1295,11 @@ document.addEventListener("click",function(ev){
   else if(a==="closepay"){pendingNew=null;$("ov-pay").classList.remove("on")}
   else if(a==="approve"){o.disc.status="approved";renderAll()}
   else if(a==="deny"){o.disc.status="rejected";renderAll()}
-  else if(a==="cierre"){$("c-text").textContent=conDiaAdmin(cierreText);$("c-copy").textContent="Copiar para WhatsApp";$("ov-cierre").classList.add("on")}
+  else if(a==="cierre"){
+    $("c-text").textContent=conDiaAdmin(cierreText);$("c-copy").textContent="Copiar para WhatsApp";$("ov-cierre").classList.add("on");
+    if(window.__yo)fetch("/api/cierre"+(ADIA?"?dia="+encodeURIComponent(ADIA):"")).then(function(r){return r.ok?r.json():null}).then(function(c){if(c)$("c-text").textContent=conDiaAdmin(cierreText)+"\n"+cierreExtra(c)}).catch(function(){});
+  }
+  else if(a==="enviarcierre")enviarTextoWa($("c-text").textContent);
   else if(a==="closecierre")$("ov-cierre").classList.remove("on");
   else if(a==="copycierre"){try{navigator.clipboard.writeText($("c-text").textContent).then(function(){$("c-copy").textContent="Copiado"},function(){$("c-copy").textContent="No se pudo copiar"})}catch(e){$("c-copy").textContent="No se pudo copiar"}}
   else if(a==="simok"||a==="simbad"){

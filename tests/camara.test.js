@@ -585,3 +585,28 @@ test('leerPlaca manda el esfuerzo de razonamiento configurado a Sonnet (no a Hai
     assert.equal(enviados.length, 1); assert.equal(enviados[0].esfuerzo, undefined, 'tras el rechazo ya no se manda el parámetro');
   } finally { https.request = original; if (clave0 === undefined) delete process.env.ANTHROPIC_API_KEY; else process.env.ANTHROPIC_API_KEY = clave0; }
 });
+
+// ---------- resumen del cierre del día ----------
+test('cierre: cuenta las motos distintas de verdad (sin falsos positivos ni duplicados, sumando las descartadas que eran facturas), lista las sin factura y los puntos a revisar', () => {
+  const hace = m => new Date(Date.now() - m * 60e3).toISOString();
+  const fac = (num, placa, extra) => Object.assign({ id: 'cccccccccc' + String(num).padStart(2, '0'), num, placa, fecha: hace(100 - num), estado: 'pagada', moneda: 'Bs', esperado: 5045, monto: 5100, total: 5 }, extra || {});
+  const ventas = [fac(1, 'AAA111', { validada: true }), fac(2, 'BBB222'), fac(3, 'CCC333'), fac(4, 'AAA111'), fac(5, 'DDD555', { monto: 9000 }), fac(6, 'EEE666', { fecha: hace(10) })];
+  const row = (id, puente, extra) => Object.assign({ id: 'mwocie' + id, puente, estado: 'alerta', llegada: hace(300), salida: hace(290) }, extra);
+  const t = montar({ ventas, historial: [
+    row('0001', 1, { placa: 'AAA111', num: 1, estado: 'tarde' }), row('0002', 1, { placa: 'AAA111', num: 1, estado: 'tarde', llegada: hace(280), salida: hace(270) }), // dos filas de la factura #1
+    row('0003', 3, { placa: 'BBB222', num: 2, estado: 'ok' }),
+    row('0004', 3, { placa: 'CCC333', estado: 'descartada' }),                                                // descartada que era la factura #3
+    row('0005', 2, { estado: 'esperando', llegada: hace(200), salida: hace(198) }),                           // falso positivo de 2 min
+    row('0006', 1, { parcial: 'ZZ9?81Q', llegada: hace(200), salida: hace(190) }), row('0007', 1, { parcial: 'ZZ9?81?', llegada: hace(185), salida: hace(175) }), // la misma moto leída dos veces
+    row('0008', 3, { placa: 'YYY777', llegada: hace(150), salida: hace(140) }),
+  ] });
+  const r = t.c.cierre(ventas, HOY);
+  assert.equal(r.filas, 8); assert.equal(r.falsosPositivos, 1); assert.equal(r.descartadas, 1); assert.equal(r.reales, 6);
+  assert.equal(r.motosConFactura, 3, 'facturas #1 (2 filas), #2 y #3 (por su lectura descartada)');
+  assert.equal(r.motosSinFactura, 2, 'ZZ9?81Q/ZZ9?81? cuenta una vez y YYY777 otra'); assert.equal(r.motosDistintas, 5);
+  assert.deepEqual(r.sinFactura.map(x => x.lectura).sort(), ['YYY777', 'ZZ9?81Q']);
+  assert.deepEqual(r.facturasSinMoto.map(x => x.num).sort(), [4, 5, 6]);
+  assert.deepEqual(r.repetidas, [{ placa: 'AAA111', facturas: [1, 4] }]);
+  assert.deepEqual(r.diferencias.map(x => [x.num, x.dif]), [[5, 9000 - 5045]]);
+  assert.equal(r.pendientes.length, 5, 'solo #1 está validada'); assert.equal(r.validadas, 1);
+});

@@ -39,7 +39,7 @@ test('el resumen separa el día elegido del mes completo y proyecta el mes en cu
   const r = c.resumen('2026-11-18');
   assert.equal(r.delDia.llamadas, 1); assert.ok(Math.abs(r.delDia.costo - 0.10) < 1e-9);
   assert.equal(r.delMes.llamadas, 2); assert.ok(Math.abs(r.delMes.costo - 0.40) < 1e-9);
-  assert.ok(Math.abs(r.proyeccion - 0.40 / 20 * 30) < 1e-9, 'proyección = costo del mes / días transcurridos × días del mes');
+  assert.ok(Math.abs(r.proyeccion - 0.40 / 2 * 30) < 1e-9, 'proyección = costo por día con registro × días del mes (el registro tiene 2 días)');
   assert.equal(c.resumen('2026-10-05').delMes.llamadas, 0);
   assert.equal(c.resumen('../../etc').dia, '2026-11-20', 'una fecha no válida cae en hoy');
 });
@@ -58,5 +58,6 @@ test('las dos llamadas a la API de camara.js siguen registrando su consumo', () 
   const src = fs.readFileSync(path.join(__dirname, '../server/camara.js'), 'utf8');
   assert.match(src, /usoApi\(opc\.placaSolo \? 'lectura-ampliada' : \/haiku\/\.test\(modelo\) \? 'moto-haiku' : 'lectura-placa', modelo, t\)/);
   assert.match(src, /usoApi\('comparar-fotos'/);
-  assert.equal((src.match(/hostname: 'api\.anthropic\.com'/g) || []).length, 2, 'si se añade otra llamada a la API hay que registrar su consumo');
+  assert.equal((src.match(/hostname: 'api\.anthropic\.com'/g) || []).length, 1, 'toda llamada a la API pasa por postMensajes; si se añade otra hay que registrar su consumo');
+  assert.equal((src.match(/return postMensajes\(clave/g) || []).length, 2, 'leerPlaca y compararFotos usan postMensajes');
 });

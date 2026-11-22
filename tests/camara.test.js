@@ -388,7 +388,7 @@ test('revalidación automática: un intento que no compara nada no gasta cupo de
   assert.equal(r.hechos.length, 10, 'las 10 se intentan en la misma vuelta porque ninguna compara fotos'); assert.equal(t.llamadas.comparar.length, 0);
 });
 
-test('revalidación automática: sin lecturas de esa placa primero no busca más (barato) y reintenta a los 5 min con todas las fotos del día', async () => {
+test('revalidación automática: sin lecturas de esa placa primero no busca más (barato) y, con CAMARA_AUTOREV_TODAS=1, reintenta a los 5 min con todas las fotos del día; por defecto no', async () => {
   const v = { id: 'ccccccccccc1', num: 4, placa: 'AJ0002E', fecha: haceMin(20), estado: 'pagada' };
   const t = montar({ ventaFotos: [v], ventas: [v], cruces: [{ foto: 'mwo77777ff-p3.jpg', contenido: 'MATCH' }], comparar: (a, b) => b === 'MATCH' ? { misma: true, confianza: 'alta', motivo: 'misma' } : { misma: false, confianza: 'alta' } });
   let r = await t.c.autoRevalidar();
@@ -396,8 +396,15 @@ test('revalidación automática: sin lecturas de esa placa primero no busca más
   r = await t.c.autoRevalidar();
   assert.deepEqual(r.hechos, [], 'aún no toca el segundo intento');
   r = await conHora(6 * 60e3, () => t.c.autoRevalidar());
-  assert.deepEqual(r.hechos, [{ num: 4, tipo: 'coincide' }]);
-  assert.ok(t.llamadas.comparar.length >= 1);
+  assert.deepEqual(r.hechos, [{ num: 4, tipo: 'ninguna' }], 'por defecto el segundo intento tampoco busca en todas las fotos (solo el botón Revalidar lo hace)');
+  assert.equal(t.llamadas.comparar.length, 0);
+  process.env.CAMARA_AUTOREV_TODAS = '1';
+  try {
+    const t2 = montar({ ventaFotos: [v], ventas: [v], cruces: [{ foto: 'mwo77777ff-p3.jpg', contenido: 'MATCH' }], comparar: (a, b) => b === 'MATCH' ? { misma: true, confianza: 'alta', motivo: 'misma' } : { misma: false, confianza: 'alta' } });
+    await t2.c.autoRevalidar();
+    r = await conHora(6 * 60e3, () => t2.c.autoRevalidar());
+    assert.deepEqual(r.hechos, [{ num: 4, tipo: 'coincide' }]); assert.ok(t2.llamadas.comparar.length >= 1);
+  } finally { delete process.env.CAMARA_AUTOREV_TODAS; }
 });
 
 test('revalidación automática: una "otra moto" con la misma placa se registra una vez y deja de insistir; el gasto por vuelta se limita por comparaciones', async () => {
@@ -470,7 +477,14 @@ test('una moto que reaparece en 10 min y reabre su fila conserva su placa confir
 });
 
 // ---------- emparejamiento inverso (moto vista sin factura -> buscar su factura por foto) ----------
-test('emparejamiento inverso: una moto que bajó sin factura enlazada se compara con las facturas de esa hora y, si Claude dice que es la misma con confianza alta, se enlaza y valida (aunque la placa se leyera mal)', async () => {
+test('emparejamiento inverso por imagen (solo con CAMARA_INVERSO_IMAGEN=1): se compara con las facturas de esa hora y, si Claude dice que es la misma con confianza alta, se enlaza y valida', async () => {
+  process.env.CAMARA_INVERSO_IMAGEN = '1';
+  try { await inversoPorImagen(); } finally { delete process.env.CAMARA_INVERSO_IMAGEN; }
+  const sinVariable = montar({ historial: [{ id: 'mwoinv00099', puente: 1, estado: 'alerta', llegada: haceMin(40), salida: haceMin(10) }], ventaFotos: [{ id: 'abababababa9' }], ventas: [{ id: 'abababababa9', num: 9, placa: 'ZZ0001', fecha: haceMin(25), estado: 'pagada' }] });
+  await sinVariable.c.autoEmparejarInversa();
+  assert.equal(sinVariable.llamadas.comparar.length, 0, 'por defecto no se compara por imagen');
+});
+async function inversoPorImagen() {
   const marcadas = [];
   const v = { id: 'abababababa1', num: 36, placa: 'AL9J26A', fecha: haceMin(25), estado: 'pagada' };
   const lejos = { id: 'abababababa2', num: 37, placa: 'ZZ9999Z', fecha: haceMin(400), estado: 'pagada' };
@@ -483,9 +497,13 @@ test('emparejamiento inverso: una moto que bajó sin factura enlazada se compara
   assert.equal(t.c.cruces().items[0].origen, 'automática (moto sin factura)');
   assert.equal(t.llamadas.comparar.length, 1, 'la factura de hace 400 min queda fuera de la ventana de tiempo');
   assert.deepEqual((await t.c.autoEmparejarInversa()).hechos, [], 'ya enlazada: no se repite');
-});
+}
 
 test('emparejamiento inverso: espera 5 min tras bajar, no enlaza si Claude duda o dice otra moto, hace como mucho 2 intentos y no usa facturas ya enlazadas', async () => {
+  process.env.CAMARA_INVERSO_IMAGEN = '1';
+  try { await inversoIntentos(); } finally { delete process.env.CAMARA_INVERSO_IMAGEN; }
+});
+async function inversoIntentos() {
   const v1 = { id: 'cdcdcdcdcdc1', num: 1, placa: 'AAA111', fecha: haceMin(15), estado: 'pagada' };
   const v2 = { id: 'cdcdcdcdcdc2', num: 2, placa: 'BBB222', fecha: haceMin(16), estado: 'pagada' };
   const reciente = montar({ historial: [{ id: 'mwoinv00002', puente: 2, estado: 'alerta', llegada: haceMin(20), salida: haceMin(2) }], ventaFotos: [v1], ventas: [v1] });
@@ -498,7 +516,7 @@ test('emparejamiento inverso: espera 5 min tras bajar, no enlaza si Claude duda 
   r = await conHora(90 * 60e3, () => duda.c.autoEmparejarInversa()); assert.deepEqual(r.hechos, [], 'máximo 2 intentos');
   const yaEnlazada = montar({ historial: [{ id: 'mwoinv00004', puente: 1, placa: 'AAA111', num: 1, estado: 'tarde', llegada: haceMin(30), salida: haceMin(12) }, { id: 'mwoinv00005', puente: 3, estado: 'alerta', llegada: haceMin(30), salida: haceMin(12) }], ventaFotos: [v1], ventas: [v1] });
   r = await yaEnlazada.c.autoEmparejarInversa(); assert.equal(yaEnlazada.llamadas.comparar.length, 0, 'la factura #1 ya tiene su moto');
-});
+}
 
 test('emparejamiento inverso por placa: una lectura aproximada de la cámara a la hora de UNA factura de placa parecida enlaza y valida por placa; con "otra moto" o dos candidatas parecidas no', async () => {
   const marcadas = [];
@@ -531,4 +549,39 @@ test('enlazar a mano una moto vista sin factura con una factura: queda validada;
   assert.match(t.c.enlazarFila('mwoenl00001', v, 'Raúl').error, /ya está enlazada/);
   assert.match(t.c.enlazarFila('mwoenl00002', v, 'Raúl').error, /ya tiene su moto/);
   assert.match(t.c.enlazarFila('mwoenl00002', v2, 'Raúl').error, /ya tiene su moto/);
+});
+
+// ---------- llamadas a la API: esfuerzo bajo con respaldo y consumo registrado ----------
+test('leerPlaca manda el esfuerzo de razonamiento configurado a Sonnet (no a Haiku), registra el consumo y, si la API rechaza el parámetro, reintenta sin él y deja de mandarlo', async () => {
+  const https = require('https'), original = https.request, EventEmitter = require('events');
+  const enviados = [];
+  let rechazar = false;
+  https.request = (opts, cb) => {
+    const req = new EventEmitter();
+    req.end = body => {
+      const j = JSON.parse(body); enviados.push({ modelo: j.model, esfuerzo: j.output_config && j.output_config.effort, thinking: j.thinking && j.thinking.type });
+      const res = new EventEmitter(); res.statusCode = (rechazar && j.output_config) ? 400 : 200; cb(res);
+      res.emit('data', (rechazar && j.output_config) ? JSON.stringify({ error: { message: 'output_config.effort: no soportado' } })
+        : JSON.stringify({ model: j.model, content: [{ type: 'text', text: '{"moto":true,"placa":"AB1C23D","segura":true}' }], usage: { input_tokens: 800, output_tokens: 60 } }));
+      res.emit('end');
+    };
+    return req;
+  };
+  const clave0 = process.env.ANTHROPIC_API_KEY; process.env.ANTHROPIC_API_KEY = 'clave-de-prueba';
+  try {
+    const registros = [];
+    const c = crear({ DATA: fs.mkdtempSync(path.join(os.tmpdir(), 'motolavado-api-')), json: () => {}, fechaCaracas: () => HOY, ventasDeHoy: () => [], registrarUso: r => registros.push(r) });
+    const r1 = await c.leerPlaca(Buffer.alloc(100, 1));
+    assert.equal(r1.placa, 'AB1C23D');
+    assert.deepEqual(enviados[0], { modelo: 'claude-sonnet-5-5', esfuerzo: 'medium', thinking: undefined });
+    assert.equal(registros[0].funcion, 'lectura-placa'); assert.equal(registros[0].usage.output_tokens, 60);
+    await c.leerPlaca(Buffer.alloc(100, 1), 'claude-haiku-5-5');
+    assert.deepEqual(enviados[1], { modelo: 'claude-haiku-5-5', esfuerzo: undefined, thinking: 'disabled' }, 'Haiku no lleva esfuerzo');
+    // la API rechaza el parámetro: se reintenta sin él y la lectura sigue funcionando
+    rechazar = true; enviados.length = 0;
+    const r2 = await c.leerPlaca(Buffer.alloc(100, 1));
+    assert.equal(r2.placa, 'AB1C23D'); assert.equal(enviados.length, 2); assert.equal(enviados[0].esfuerzo, 'medium'); assert.equal(enviados[1].esfuerzo, undefined);
+    enviados.length = 0; await c.leerPlaca(Buffer.alloc(100, 1));
+    assert.equal(enviados.length, 1); assert.equal(enviados[0].esfuerzo, undefined, 'tras el rechazo ya no se manda el parámetro');
+  } finally { https.request = original; if (clave0 === undefined) delete process.env.ANTHROPIC_API_KEY; else process.env.ANTHROPIC_API_KEY = clave0; }
 });

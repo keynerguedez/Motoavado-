@@ -18,8 +18,8 @@ const ESPERA_BAJADA_MIN = 15;   // minutos que tiene una moto que ya bajó para 
 const MIN_GRACIA = 5;           // minutos que se le da a una moto montada para que la registren antes de alertar
 const MAX_FOTO = 3 * 1024 * 1024;
 const MAX_REINTENTOS_LECTURA = 3;   // lecturas seguidas al llegar la moto (el agente reenvía a los 8 y 20 s)
-const MAX_LECTURAS_LENTAS = 30;     // tope de lecturas por moto, contando las lentas
-const CADA_LECTURA_LENTA = 55000;   // ms: mientras siga sin placa completa, se reintenta una vez por minuto
+const MAX_LECTURAS_LENTAS = 10;     // tope de lecturas por moto, contando las lentas
+const CADA_LECTURA_LENTA = 180000;  // ms: mientras siga sin placa completa, se reintenta cada 3 minutos (cada lectura es una llamada a Sonnet)
 const MAX_LOG = 100;
 
 function crear(ctx) {
@@ -45,7 +45,7 @@ function crear(ctx) {
     p.hid = id; hSucio = true; hFoto(p, jpeg);
   }
   // Si la moto de un puente desaparece y vuelve a verse en menos de 10 minutos, es la misma: se reabre su fila y su reloj (no empieza otra).
-  const RELEER_MS = Number(process.env.CAMARA_RELEER_MS) || 5 * 60e3;
+  const RELEER_MS = Number(process.env.CAMARA_RELEER_MS) || 10 * 60e3;
   const MISMA_MOTO_MS = 10 * 60e3;
   function hAbrir(p, jpeg) {
     let ult = null; for (let i = H.length - 1; i >= 0; i--) if (H[i].puente === p.n) { ult = H[i]; break; }
@@ -136,6 +136,27 @@ function crear(ctx) {
     });
   }
 
+  // Llamada a la API de Mensajes. El esfuerzo de razonamiento (output_config.effort) se baja para leer una placa o comparar dos fotos: es percepción, no necesita pensar mucho, y los tokens de salida
+  // (el razonamiento incluido) son lo más caro. Si la API rechazara el parámetro, se deja de enviar y todo sigue funcionando como antes. Devuelve { t: cuerpo, status } o null si falló la conexión.
+  let sinEsfuerzo = false;
+  function postMensajes(clave, cuerpoObj, timeoutMs, esfuerzo) {
+    const enviar = conEsfuerzo => new Promise(done => {
+      const body = JSON.stringify(conEsfuerzo && esfuerzo ? Object.assign({}, cuerpoObj, { output_config: { effort: esfuerzo } }) : cuerpoObj);
+      const r = https.request({ hostname: 'api.anthropic.com', path: '/v1/messages', method: 'POST', timeout: timeoutMs,
+        headers: { 'content-type': 'application/json', 'x-api-key': clave, 'anthropic-version': '2023-06-01', 'content-length': Buffer.byteLength(body) } }, res => {
+        let t = ''; res.on('data', c => { t += c; }); res.on('end', () => done({ t, status: res.statusCode }));
+      });
+      r.on('error', () => done(null)); r.on('timeout', () => { r.destroy(); done(null); });
+      r.end(body);
+    });
+    return (async () => {
+      let r = await enviar(!sinEsfuerzo);
+      if (r && r.status === 400 && esfuerzo && !sinEsfuerzo && /effort|output_config/i.test(r.t)) { sinEsfuerzo = true; console.error('camara: la API rechazó el parámetro effort; se envía sin él'); r = await enviar(false); }
+      return r;
+    })();
+  }
+  const ESFUERZO_LECTURA = process.env.CAMARA_ESFUERZO_LECTURA || 'medium', ESFUERZO_COMPARAR = process.env.CAMARA_ESFUERZO_COMPARAR || 'low';
+
   // Consumo de la API: cada respuesta trae `usage` (tokens); se registra con la función que hizo la llamada (ver server/consumo.js).
   function usoApi(funcion, modelo, texto) {
     if (!ctx.registrarUso) return;
@@ -203,33 +224,27 @@ function crear(ctx) {
     const modelo = modeloForzado || process.env.CAMARA_MODELO || 'claude-sonnet-5-5';
     // max_tokens holgado: si el modelo piensa antes de responder, esos tokens salen del mismo cupo y con uno corto el texto llega vacío.
     // Haiku piensa por defecto y admite apagarlo; los demás modelos rechazan ese parámetro, así que solo se manda a Haiku.
-    const cuerpo = JSON.stringify(Object.assign({
+    const cuerpoObj = Object.assign({
       model: modelo, max_tokens: 1500,
       messages: [{ role: 'user', content: [
         { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: jpeg.toString('base64') } },
         { type: 'text', text: opc.placaSolo ? 'Esta imagen es un recorte ampliado de la placa de una moto venezolana. Responde solo JSON: {"placa":"ABC123","segura":true}. "placa" son los 6 a 8 letras y números de la placa; si no estás seguro de cada carácter, deja "placa":"" y "segura":false, y en "parcial" escribe los que sí distingues con "?" en los dudosos (ejemplo: {"placa":"","segura":false,"parcial":"AR8U65?"}). Fíjate bien en M/H, 8/B, 0/O/D, 5/S, 1/I y 2/Z. Nunca inventes un carácter que no se vea.' : (process.env.CAMARA_PRUEBA === '1' ? 'MODO DE PRUEBA: un cartón o papel con una placa escrita cuenta como la moto (moto:true). ' : '') + 'Es una foto de una rampa de un lavadero de motos. Responde solo JSON: {"moto":true,"placa":"ABC123","segura":true}. "moto" es true solo si ves una moto sobre la rampa (aunque esté a medias, mojada o sin placa visible); es false si solo hay personas, cubetas, mangueras, herramientas, el piso o la rampa vacía. "placa" es la placa venezolana (6 a 8 letras y números); si no se ve completa o no estás seguro de cada carácter, deja "placa":"" y "segura":false, y en "parcial" escribe los caracteres que sí distingues, en su posición, con "?" en cada uno que no ves o no estás seguro (ejemplo: {"moto":true,"placa":"","segura":false,"parcial":"AB1C??"}). Nunca inventes un carácter que no se vea. Si la moto no tiene placa o está tapada, deja "placa":"" y "parcial":""; no tomes números de otras motos, cascos, carteles, ropa o calcomanías. Además añade "caja": el rectángulo donde está la placa, como fracciones del ancho y alto de la imagen, {"x":0.42,"y":0.55,"w":0.12,"h":0.05} (x e y son la esquina superior izquierda), o null si no la ves. Añade también "cortada": true si lo que ves de la moto está cortado por el borde de la imagen (solo un trozo de una moto que está fuera de la rampa), o false si la moto aparece entera sobre la rampa.' }] }],
-    }, /haiku/.test(modelo) ? { thinking: { type: 'disabled' } } : {}));
-    return new Promise(ok => {
-      const r = https.request({ hostname: 'api.anthropic.com', path: '/v1/messages', method: 'POST', timeout: 20000,
-        headers: { 'content-type': 'application/json', 'x-api-key': clave, 'anthropic-version': '2023-06-01', 'content-length': Buffer.byteLength(cuerpo) } }, res => {
-        let t = ''; res.on('data', c => { t += c; });
-        res.on('end', () => {
-          usoApi(opc.placaSolo ? 'lectura-ampliada' : /haiku/.test(modelo) ? 'moto-haiku' : 'lectura-placa', modelo, t);
-          try {
-            const txt = (JSON.parse(t).content || []).map(x => x.text || '').join('');
-            const j = JSON.parse(/\{[\s\S]*\}/.exec(txt)[0]);
-            const placa = limpiarPlaca(j.placa), moto = opc.placaSolo ? true : j.moto === true ? true : j.moto === false ? false : null;
-            const cortada = j.cortada === true;
-            const cj = j.caja, caja = cj && [cj.x, cj.y, cj.w, cj.h].every(v => typeof v === 'number' && v >= 0 && v <= 1) && cj.w > 0.01 && cj.h > 0.01 ? { x: cj.x, y: cj.y, w: cj.w, h: cj.h } : null;
-            if (moto === false) return ok({ moto: false, placa: '', motivo: 'no-hay-moto' });
-            if (j.segura === true && /^[A-Z0-9]{5,8}$/.test(placa)) return ok({ moto, placa, caja, cortada });
-            const parcial = limpiarParcial(j.parcial);
-            ok({ moto, placa: '', parcial, motivo: parcial ? 'parcial' : 'ilegible', caja, cortada });
-          } catch (e) { ok({ moto: null, placa: '', motivo: 'error' }); }
-        });
-      });
-      r.on('error', () => ok({ moto: null, placa: '', motivo: 'error' })); r.on('timeout', () => { r.destroy(); ok({ moto: null, placa: '', motivo: 'error' }); });
-      r.end(cuerpo);
+    }, /haiku/.test(modelo) ? { thinking: { type: 'disabled' } } : {});
+    return postMensajes(clave, cuerpoObj, 20000, /haiku/.test(modelo) ? null : ESFUERZO_LECTURA).then(resp => {
+      if (!resp) return { moto: null, placa: '', motivo: 'error' };
+      const t = resp.t;
+      usoApi(opc.placaSolo ? 'lectura-ampliada' : /haiku/.test(modelo) ? 'moto-haiku' : 'lectura-placa', modelo, t);
+      try {
+        const txt = (JSON.parse(t).content || []).map(x => x.text || '').join('');
+        const j = JSON.parse(/\{[\s\S]*\}/.exec(txt)[0]);
+        const placa = limpiarPlaca(j.placa), moto = opc.placaSolo ? true : j.moto === true ? true : j.moto === false ? false : null;
+        const cortada = j.cortada === true;
+        const cj = j.caja, caja = cj && [cj.x, cj.y, cj.w, cj.h].every(v => typeof v === 'number' && v >= 0 && v <= 1) && cj.w > 0.01 && cj.h > 0.01 ? { x: cj.x, y: cj.y, w: cj.w, h: cj.h } : null;
+        if (moto === false) return { moto: false, placa: '', motivo: 'no-hay-moto' };
+        if (j.segura === true && /^[A-Z0-9]{5,8}$/.test(placa)) return { moto, placa, caja, cortada };
+        const parcial = limpiarParcial(j.parcial);
+        return { moto, placa: '', parcial, motivo: parcial ? 'parcial' : 'ilegible', caja, cortada };
+      } catch (e) { return { moto: null, placa: '', motivo: 'error' }; }
     });
   }
 
@@ -239,17 +254,18 @@ function crear(ctx) {
     const clave = process.env.ANTHROPIC_API_KEY;
     if (!clave) return Promise.resolve({ misma: null });
     const img = j => ({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: j.toString('base64') } });
-    const cuerpo = JSON.stringify({ model: process.env.CAMARA_MODELO || 'claude-sonnet-5-5', max_tokens: 1500, messages: [{ role: 'user', content: [
+    const cuerpoObj = { model: process.env.CAMARA_MODELO || 'claude-sonnet-5-5', max_tokens: 1500, messages: [{ role: 'user', content: [
       { type: 'text', text: 'Foto 1 (la tomó el encargado al registrar la moto):' }, img(a), { type: 'text', text: 'Foto 2 (cámara fija sobre el puente de lavado):' }, img(b),
-      { type: 'text', text: 'Son de un lavadero de motos. ¿La moto de la foto 1 es la misma que la moto montada en el puente de la foto 2? Compara color, tipo, marca, maletas, carenado, accesorios y estado; ignora personas, fondo y luz. Responde solo JSON: {"misma":true,"confianza":"alta","motivo":"frase corta"}. "misma" es true, false, o null si no puedes saberlo; "confianza" es "alta", "media" o "baja"; "motivo" es una frase de menos de 20 palabras con lo que viste (qué coincide o qué difiere).' }] }] });
-    return new Promise(ok => {
-      const r = https.request({ hostname: 'api.anthropic.com', path: '/v1/messages', method: 'POST', timeout: 30000,
-        headers: { 'content-type': 'application/json', 'x-api-key': clave, 'anthropic-version': '2023-06-01', 'content-length': Buffer.byteLength(cuerpo) } }, res => {
-        let t = ''; res.on('data', c => { t += c; });
-        res.on('end', () => { usoApi('comparar-fotos', process.env.CAMARA_MODELO || 'claude-sonnet-5-5', t); try { const txt = (JSON.parse(t).content || []).map(x => x.text || '').join(''); const j = JSON.parse(/\{[\s\S]*\}/.exec(txt)[0]); ok({ misma: j.misma === true ? true : j.misma === false ? false : null, confianza: ['alta', 'media', 'baja'].includes(j.confianza) ? j.confianza : 'baja', motivo: String(j.motivo || '').slice(0, 200) }); } catch (e) { ok({ misma: null }); } });
-      });
-      r.on('error', () => ok({ misma: null })); r.on('timeout', () => { r.destroy(); ok({ misma: null }); });
-      r.end(cuerpo);
+      { type: 'text', text: 'Son de un lavadero de motos. ¿La moto de la foto 1 es la misma que la moto montada en el puente de la foto 2? Compara color, tipo, marca, maletas, carenado, accesorios y estado; ignora personas, fondo y luz. Responde solo JSON: {"misma":true,"confianza":"alta","motivo":"frase corta"}. "misma" es true, false, o null si no puedes saberlo; "confianza" es "alta", "media" o "baja"; "motivo" es una frase de menos de 20 palabras con lo que viste (qué coincide o qué difiere).' }] }] };
+    return postMensajes(clave, cuerpoObj, 30000, ESFUERZO_COMPARAR).then(resp => {
+      if (!resp) return { misma: null };
+      const t = resp.t;
+      usoApi('comparar-fotos', process.env.CAMARA_MODELO || 'claude-sonnet-5-5', t);
+      try {
+        const txt = (JSON.parse(t).content || []).map(x => x.text || '').join('');
+        const j = JSON.parse(/\{[\s\S]*\}/.exec(txt)[0]);
+        return { misma: j.misma === true ? true : j.misma === false ? false : null, confianza: ['alta', 'media', 'baja'].includes(j.confianza) ? j.confianza : 'baja', motivo: String(j.motivo || '').slice(0, 200) };
+      } catch (e) { return { misma: null }; }
     });
   }
   const comparar = (a, b) => (ctx.compararFotos || compararFotos)(a, b);
@@ -420,7 +436,7 @@ function crear(ctx) {
         if (a.fin) continue;
         const toca = a.n === 0 ? ahora >= Date.parse(v.fecha) + 2 * 60e3 : ahora >= a.t + ESPERAS_AUTO[Math.min(a.n - 1, 2)] * 60e3;
         if (!toca) continue;
-        const r = await revalidar(v, { soloPlaca: !(a.n === 1 || a.n === 3), origen: 'automática' });
+        const r = await revalidar(v, { soloPlaca: !(process.env.CAMARA_AUTOREV_TODAS === '1' && (a.n === 1 || a.n === 3)), origen: 'automática' }); // la búsqueda en todas las fotos (hasta 24 comparaciones) solo con CAMARA_AUTOREV_TODAS=1: por defecto es solo el botón Revalidar
         a.n++; a.t = Date.now();
         if (r.error && /no tiene foto del encargado/.test(r.error)) a.fin = true;
         if (r.ok && (r.tipo === 'coincide' || r.tipo === 'distinta')) a.fin = true;
@@ -469,7 +485,7 @@ function crear(ctx) {
             }
           }
         }
-        for (const v of (unida ? [] : cands)) {
+        for (const v of (unida || process.env.CAMARA_INVERSO_IMAGEN !== '1' ? [] : cands)) { // por imagen solo con CAMARA_INVERSO_IMAGEN=1: las fotos del encargado suelen ser primeros planos de la placa y casi nunca deciden
           if (gastadas >= COMPARACIONES_POR_VUELTA) break;
           const r = await comparar(fotoVenta(v.id), fotoFila); gastadas++;
           if (buena(r) && r.confianza === 'alta') { cNuevo(v, 'automática (moto sin factura)', [{ p: { n: e.puente }, r, foto: fotoFila }], 'coincide', e.puente); vincularFila(e, v); usadas.add(v.num); S.cruces = S.cruces.filter(c => c.id !== v.id); unida = v; break; }

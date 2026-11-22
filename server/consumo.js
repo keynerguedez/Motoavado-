@@ -52,9 +52,9 @@ function crear(ctx) {
     let regs = []; try { regs = fs.readFileSync(archivo(mes), 'utf8').split('\n').filter(Boolean).map(l => { try { return JSON.parse(l); } catch (e) { return null; } }).filter(Boolean); } catch (e) {}
     const delDia = agrupar(regs.filter(r => r.dia === dia), P), delMes = agrupar(regs, P);
     let proyeccion = null;
-    if (mes === hoy.slice(0, 7)) { // el mes en curso: costo del mes / días transcurridos * días del mes
-      const y = +mes.slice(0, 4), m = +mes.slice(5, 7), diasMes = new Date(y, m, 0).getDate(), transcurridos = +hoy.slice(8, 10);
-      proyeccion = transcurridos ? delMes.costo / transcurridos * diasMes : null;
+    if (mes === hoy.slice(0, 7)) { // el mes en curso: costo por día con registro × días del mes (no por días transcurridos: el registro empieza el día que se activa)
+      const y = +mes.slice(0, 4), m = +mes.slice(5, 7), diasMes = new Date(y, m, 0).getDate(), conDatos = new Set(regs.map(r => r.dia)).size;
+      proyeccion = conDatos ? delMes.costo / conDatos * diasMes : null;
     }
     const usados = {}; regs.forEach(r => { if (P[r.modelo]) usados[r.modelo] = P[r.modelo]; });
     return { dia, mes, delDia, delMes, proyeccion, precios: usados };

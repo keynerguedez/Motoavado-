@@ -533,7 +533,8 @@ function crear(ctx) {
     const hoy = ctx.fechaCaracas(new Date()), e = H.find(x => x.id === String(idFila) && x.dia === hoy);
     if (!e) return { error: 'No se encontró esa moto en el historial de hoy.' };
     if (e.num != null) return { error: 'Esa moto ya está enlazada con la factura #' + e.num + '.' };
-    if (H.some(x => x.dia === hoy && x.num === v.num)) return { error: 'Esa factura ya tiene su moto enlazada.' };
+    // La factura ya tiene su moto en otra fila: esta fila es la misma moto leída con otra placa (por ejemplo una Y leída como V). Se conserva el registro pero deja de contar como moto sin factura.
+    if (H.some(x => x.dia === hoy && x.num === v.num)) { e.estado = 'descartada'; e.mismaDe = v.num; hSucio = true; hGuardar(); return { ok: true, fusionada: true }; }
     const lectura = e.placa || e.parcial || 'sin placa legible';
     cNuevo(v, 'manual', [], 'manual', e.puente, { nota: 'Enlazada a mano: moto vista ' + lectura + ' en el ' + (e.puente === 5 ? 'área fuera del puente' : 'puente ' + e.puente) + ' con la factura #' + v.num + ' (' + (v.placa || 'sin placa') + ').', por: quien, valido: true });
     vincularFila(e, v); S.cruces = S.cruces.filter(c => c.id !== v.id); guardar();

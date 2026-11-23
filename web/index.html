@@ -337,6 +337,14 @@ details.grp summary{cursor:pointer;font-weight:600;font-size:.9rem;color:var(--m
   <h2>Cobrar moto <span id="p-num"></span></h2>
   <div class="total" style="border:0;padding:0"><span id="p-det" class="note"></span><span style="text-align:right"><b class="num" id="p-total"></b><br><b class="num" id="p-bs" style="font-size:1.35rem"></b></span></div>
   <div class="chips" id="p-methods"></div>
+  <button type="button" class="btn sm" id="p-split-btn" data-act="split" style="align-self:flex-start">Dividir en dos métodos</button>
+  <div id="p-split" class="card stack" hidden>
+    <label class="f">Parte 1 en $ (método elegido arriba)<input id="p-usd1" type="text" inputmode="decimal" autocomplete="off"></label>
+    <span class="note">Método de la parte 2 (lo que falta):</span>
+    <div class="chips" id="p-methods2"></div>
+    <div class="note num" id="p-split-info"></div>
+    <label class="f" id="p-ref2-f" hidden>Referencia de la parte 2<input id="p-ref2" type="text" inputmode="numeric" autocomplete="off" placeholder="004512"></label>
+  </div>
   <div id="p-conv" class="card" style="text-align:center" hidden></div>
   <label class="f" id="p-monto-f" hidden><span id="p-monto-l">Monto cobrado</span><input id="p-monto" type="text" inputmode="decimal" autocomplete="off"></label>
   <div class="note num" id="p-dif" hidden></div>
@@ -391,7 +399,7 @@ var S={
   orders:[],
   week:[["Vie",0],["Sáb",0],["Dom",0],["Lun",0],["Mar",0],["Mié",0]]
 };
-var draft={photo:null,svc:{}}, paying=null, payMethod=null;
+var draft={photo:null,svc:{}}, paying=null, payMethod=null, paySplit=false, payMethod2=null;
 var VIEWS=["tablet","comisiones","gastos","clientes","admin","autorizar","vigilante"], EXPECT={lp:15,la:20,rp:15,ra:20,pre:35,vip:45,pc:10,pp:30,pg:40,px:50,cp:45,cg:55,cx:65,ca:15,lc:5,kit:5}, NOW=Date.now();
 function hhmm(d){return String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0")}
 S.bridges=[{n:1,state:"libre"},{n:2,state:"libre"},{n:3,state:"libre"},{n:4,state:"libre"}];
@@ -446,7 +454,7 @@ function groupOrders(){
 }
 /* Caja del día: lo cobrado por cada método en la moneda en que se recibió (Bs, $ o USDT) para saber cuánto debe haber en cada uno. */
 function cajaMetodos(){
-  var M={}; S.orders.filter(function(o){return o.pay}).forEach(function(o){var a=paidAmt(o),m=o.pay.method,r=M[m]||(M[m]={n:0,cur:a.cur,val:0,usd:0});r.n++;r.val+=a.val;r.usd+=total(o)});
+  var M={}; S.orders.filter(function(o){return o.pay}).forEach(function(o){pagoPartes(o).forEach(function(p){var m=p.method,r=M[m]||(M[m]={n:0,cur:p.cur,val:0,usd:0});r.n++;r.val+=p.val;r.usd+=p.usd})});
   return M;
 }
 function cajaTxt(r){return r.cur==="Bs"?"Bs "+fmtN(r.val):r.cur==="USDT"?fmtN(r.val)+" USDT":usd(r.val)}
@@ -522,7 +530,7 @@ function addOrder(pend){
 }
 function openPay(n){openPayObj(S.orders.filter(function(o){return o.num===n})[0])}
 function openPayObj(o){
-  paying=o; payMethod=null;
+  paying=o; payMethod=null; paySplit=false; payMethod2=null; $("p-usd1").value=""; $("p-ref2").value=""; renderSplit();
   $("p-num").textContent="#"+String(o.num).padStart(3,"0"); $("p-det").textContent=paying.placa+" · "+names(paying);
   $("p-total").textContent=usd(total(paying)); $("p-bs").textContent=bs(total(paying));
   $("p-ref").value=""; $("p-err").textContent=""; setMonto(); renderMethods(); $("ov-pay").classList.add("on");
@@ -533,7 +541,14 @@ function payAmt(method,t,rate){
   if(method==="Binance")return {cur:"USDT",val:t,txt:fmtN(t)+" USDT"};
   return {cur:"$",val:t,txt:usd(t)};
 }
+/* Pago dividido en dos métodos: o.pay.parts = [{method,ref,cur,val,usd}]; un pago normal es una sola parte. */
+function partTxt(p){return p.method+" "+(p.cur==="Bs"?"Bs "+fmtN(p.val):p.cur==="USDT"?fmtN(p.val)+" USDT":usd(p.val))}
+function pagoPartes(o){
+  if(o.pay.parts)return o.pay.parts;
+  var a=paidAmt(o); return [{method:o.pay.method,ref:o.pay.ref,cur:a.cur,val:a.val,usd:total(o)}];
+}
 function paidAmt(o){
+  if(o.pay.parts)return {cur:"Mixto",val:total(o),txt:o.pay.parts.map(partTxt).join(" + ")};
   var a=payAmt(o.pay.method,total(o),o.pay.tasa||S.tasa);
   // Si el encargado escribió el monto realmente cobrado (p. ej. redondeado), ese es el que vale.
   if(o.pay.val>0&&o.pay.cur===a.cur){a.val=o.pay.val;a.txt=a.cur==="Bs"?"Bs "+fmtN(a.val):a.cur==="USDT"?fmtN(a.val)+" USDT":usd(a.val)}
@@ -545,19 +560,19 @@ function parseMonto(v){
   var n=parseFloat(v); return n>0?Math.round(n*100)/100:null;
 }
 function setMonto(){
-  var f=$("p-monto-f"); if(!payMethod||!paying){f.hidden=true;$("p-dif").hidden=true;return}
+  var f=$("p-monto-f"); if(!payMethod||!paying||paySplit){f.hidden=true;$("p-dif").hidden=true;return}
   var a=payAmt(payMethod,total(paying),S.tasa);
   f.hidden=false; $("p-monto-l").textContent="Monto cobrado ("+(a.cur==="Bs"?"Bs":a.cur==="USDT"?"USDT":"$")+")";
   $("p-monto").value=String(Math.round(a.val*100)/100).replace(".",","); montoDif();
 }
 function montoDif(){
-  var d=$("p-dif"); if(!payMethod||!paying){d.hidden=true;return}
+  var d=$("p-dif"); if(!payMethod||!paying||paySplit){d.hidden=true;return}
   var a=payAmt(payMethod,total(paying),S.tasa), m=parseMonto($("p-monto").value);
   if(m==null||Math.abs(m-a.val)<0.005){d.hidden=true;return}
   d.hidden=false; d.textContent="Diferencia sobre el monto calculado: "+(m>a.val?"+":"-")+fmtN(Math.abs(m-a.val));
 }
 function renderConv(){
-  var el=$("p-conv"); if(!payMethod||!paying){el.hidden=true;return}
+  var el=$("p-conv"); if(!payMethod||!paying||paySplit){el.hidden=true;return}
   var a=payAmt(payMethod,total(paying),S.tasa);
   el.hidden=false;
   el.innerHTML='<span class="note">El cliente paga</span><b class="num" style="display:block;font-family:var(--display);font-size:2.4rem;line-height:1.1">'+a.txt+'</b><span class="note num">'+(a.cur==="Bs"?"Tasa euro BCV de este momento: Bs "+fmtN(S.tasa):a.cur==="USDT"?"Equivale a "+usd(total(paying))+" (1 USDT = 1 $) · en bolívares: "+bs(total(paying)):"Pago directo en dólares · en bolívares: "+bs(total(paying)))+'</span>';
@@ -567,7 +582,7 @@ function ticketHtml(o){
   return '<div class="wa" style="max-width:none"><b>Moto Lavado R1 · Ticket #'+String(o.num).padStart(3,"0")+'</b><span class="num">'+d.toLocaleDateString("es-VE")+' · '+o.time+'</span><span>Hola '+esc(cliName(o))+', este es el ticket de tu lavado.</span><span>Placa: <b>'+esc(o.placa)+'</b>'+(o.modelo?' · '+esc(o.modelo):'')+'</span>'
     +o.svc.map(function(id){return '<span class="row" style="justify-content:space-between"><span>'+esc(svc(id).name)+'</span><span class="num">'+usd(svc(id).price)+'</span></span>'}).join("")
     +(o.disc&&o.disc.status==="approved"?'<span>Descuento: '+o.disc.pct+'%</span>':'')
-    +'<b class="row" style="justify-content:space-between"><span>Total</span><span class="num">'+usd(total(o))+'</span></b><span>Pagado: <b class="num">'+a.txt+'</b> por '+esc(o.pay.method)+(o.pay.ref?' (ref. '+esc(o.pay.ref)+')':'')+'</span>'
+    +'<b class="row" style="justify-content:space-between"><span>Total</span><span class="num">'+usd(total(o))+'</span></b><span>Pagado: <b class="num">'+a.txt+'</b> '+(o.pay.parts?'':' por '+esc(o.pay.method))+(o.pay.ref?' (ref. '+esc(o.pay.ref)+')':'')+'</span>'
     +(a.cur==="Bs"?'<span class="note num">Tasa euro BCV: Bs '+fmtN(o.pay.tasa)+'</span>':'')+'<span>Gracias por tu visita.</span></div>';
 }
 var CLI=[];
@@ -609,10 +624,16 @@ function enviarFoto(o,id){
   PEND_FOTO[id]=o.fotoGrande; subirFoto(o,id,1);
 }
 function saveSale(o,sigue){
-  if(!window.__yo){sigue();return} var a=paidAmt(o);
-  if(o.srvId){jpost("/api/ventas/cobrar",{id:o.srvId,metodo:o.pay.method,ref:o.pay.ref,moneda:a.cur,monto:a.val,esperado:o.pay.esp,tasa:o.pay.tasa}).then(function(r){if(!r.ok)$("f-err").textContent="Ojo: el cobro de la moto #"+o.num+" no se guardó en el servidor ("+(r.j.error||"error")+"). Avisa al dueño.";sigue(r.ok?o.num:null)}).catch(function(){$("f-err").textContent="Ojo: sin conexión, el cobro de la moto #"+o.num+" no se guardó.";sigue(null)});return}
-  fetch("/api/ventas",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({telefono:o.tel,cliente:cliName(o),placa:o.sin?"":o.placa,sinPlaca:!!o.sin,modelo:o.modelo,servicios:o.svc.map(function(id){return{id:id,nombre:svc(id).name,precio:svc(id).price}}),total:total(o),descuento:o.disc&&o.disc.status==="approved"?o.disc.pct+"%":"",lavador:o.lav,metodo:o.pay.method,ref:o.pay.ref,moneda:a.cur,monto:a.val,esperado:o.pay.esp,tasa:o.pay.tasa})})
+  if(!window.__yo){sigue();return} var a=paidAmt(o), pg=o.pay.parts?o.pay.parts.map(function(p){return{metodo:p.method,ref:p.ref,moneda:p.cur,monto:p.val,usd:p.usd}}):undefined;
+  if(o.srvId){jpost("/api/ventas/cobrar",{id:o.srvId,metodo:o.pay.method,ref:o.pay.ref,moneda:a.cur,monto:a.val,esperado:o.pay.esp,tasa:o.pay.tasa,pagos:pg}).then(function(r){if(!r.ok)$("f-err").textContent="Ojo: el cobro de la moto #"+o.num+" no se guardó en el servidor ("+(r.j.error||"error")+"). Avisa al dueño.";sigue(r.ok?o.num:null)}).catch(function(){$("f-err").textContent="Ojo: sin conexión, el cobro de la moto #"+o.num+" no se guardó.";sigue(null)});return}
+  fetch("/api/ventas",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({telefono:o.tel,cliente:cliName(o),placa:o.sin?"":o.placa,sinPlaca:!!o.sin,modelo:o.modelo,servicios:o.svc.map(function(id){return{id:id,nombre:svc(id).name,precio:svc(id).price}}),total:total(o),descuento:o.disc&&o.disc.status==="approved"?o.disc.pct+"%":"",lavador:o.lav,metodo:o.pay.method,ref:o.pay.ref,moneda:a.cur,monto:a.val,esperado:o.pay.esp,tasa:o.pay.tasa,pagos:pg})})
   .then(function(r){return r.json().then(function(j){if(!r.ok)$("f-err").textContent="Ojo: la moto #"+o.num+" no se guardó en el servidor. Avisa al dueño.";else enviarFoto(o,j.id);sigue(r.ok?j.num:null)})}).catch(function(){$("f-err").textContent="Ojo: sin conexión, la moto #"+o.num+" no se guardó en el servidor.";sigue(null)});
+}
+/* Pago que guardó el servidor: normal (un método) o dividido (v.pagos con dos partes). */
+function payDeSrv(v){
+  var p={method:v.metodo,ref:v.ref,tasa:v.tasa||S.tasa,cur:v.moneda,val:v.monto};
+  if(v.pagos&&v.pagos.length)p.parts=v.pagos.map(function(x){return{method:x.metodo,ref:x.ref,cur:x.moneda,val:x.monto,usd:x.usd}});
+  return p;
 }
 var TASA_INFO=null;
 function loadTasa(){
@@ -630,7 +651,7 @@ function loadDia(){
       var ids=v.servicios.map(function(x){return x.id}).filter(function(id){return svc(id)}); if(!ids.length)return;
       var pct=parseFloat(v.descuento)||0;
       S.clients[v.telefono]={nombre:v.cliente||"Sin nombre",prev:(d.previas&&d.previas[v.telefono])||0};
-      S.orders.push({conFoto:v.conFoto,validada:!!v.validada,placaPor:v.placaPor||"",num:v.num,time:hhmm(new Date(v.fecha)),placa:v.placa,modelo:v.modelo,photo:ph(cols[i%cols.length]),svc:ids,lav:v.lavador,tel:v.telefono,disc:pct?{pct:pct,motivo:"",status:"approved"}:null,pay:v.estado==="pendiente"?null:{method:v.metodo,ref:v.ref,tasa:v.tasa||S.tasa,cur:v.moneda,val:v.monto},op:v.usuario,ticket:true,ejemplo:!!v.ejemplo,srvId:v.id,sin:!!v.sinPlaca,tipo:v.tipo||"normal",nota:v.nota||""});
+      S.orders.push({conFoto:v.conFoto,validada:!!v.validada,placaPor:v.placaPor||"",num:v.num,time:hhmm(new Date(v.fecha)),placa:v.placa,modelo:v.modelo,photo:ph(cols[i%cols.length]),svc:ids,lav:v.lavador,tel:v.telefono,disc:pct?{pct:pct,motivo:"",status:"approved"}:null,pay:v.estado==="pendiente"?null:payDeSrv(v),op:v.usuario,ticket:true,ejemplo:!!v.ejemplo,srvId:v.id,sin:!!v.sinPlaca,tipo:v.tipo||"normal",nota:v.nota||""});
       if(v.sinPlaca)S.orders[S.orders.length-1].placa="SIN PLACA";
     });
     loc.forEach(function(o){o.num=S.orders.length+1;if(!S.clients[o.tel])S.clients[o.tel]=oldC[o.tel]||{nombre:"Sin nombre",prev:0};S.orders.push(o)});
@@ -675,12 +696,25 @@ function sendTicket(o,numSrv){
   var k=$("k-estado"); if(!window.__yo){k.textContent="Así le llega por WhatsApp.";return}
   var a=paidAmt(o), tz=o.pay.tasa||S.tasa; k.textContent="Enviando por WhatsApp…";
   fetch("/api/ticket",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({telefono:o.tel,num:String(numSrv||o.num).padStart(3,"0"),cliente:cliName(o),placa:o.placa,modelo:o.modelo,
-    servicios:o.svc.map(function(id){return{nombre:svc(id).name,precio:"Bs "+fmtN(svc(id).price*tz)}}).concat(o.disc&&o.disc.status==="approved"?[{nombre:"Descuento "+o.disc.pct+"%",precio:"- Bs "+fmtN((subtotal(o)-total(o))*tz)}]:[]),descuento:"",total:"Bs "+fmtN(total(o)*tz),pagado:a.txt,metodo:o.pay.method,ref:o.pay.ref,tasa:""})})
+    servicios:o.svc.map(function(id){return{nombre:svc(id).name,precio:"Bs "+fmtN(svc(id).price*tz)}}).concat(o.disc&&o.disc.status==="approved"?[{nombre:"Descuento "+o.disc.pct+"%",precio:"- Bs "+fmtN((subtotal(o)-total(o))*tz)}]:[]),descuento:"",total:"Bs "+fmtN(total(o)*tz),pagado:a.txt,metodo:o.pay.parts?"pago dividido":o.pay.method,ref:o.pay.ref,tasa:""})})
   .then(function(r){return r.json().then(function(j){k.textContent=r.ok?"Enviado por WhatsApp al "+fmtTel(o.tel)+".":"No se envió por WhatsApp: "+(j.error||"error")})}).catch(function(){k.textContent="No se envió por WhatsApp: sin conexión."});
 }
 function showTicket(o){$("k-to").textContent="WhatsApp al "+fmtTel(o.tel)+" · "+cliName(o);$("k-body").innerHTML=ticketHtml(o);$("ov-ticket").classList.add("on")}
 function renderMethods(){renderConv();$("p-methods").innerHTML=METHODS.map(function(m){return '<button type="button" class="chip" data-act="method" data-m="'+m+'" aria-pressed="'+(payMethod===m)+'">'+m+'</button>'}).join("")}
+/* Pago dividido: la parte 1 se escribe en dólares y la parte 2 es lo que falta; cada una se convierte a la moneda de su método. */
+function splitUsd(){var t=total(paying),u1=parseMonto($("p-usd1").value);return {t:t,u1:u1,u2:u1==null?null:Math.round((t-u1)*100)/100}}
+function renderSplit(){
+  var b=$("p-split-btn"),box=$("p-split"); if(!b)return;
+  b.textContent=paySplit?"Quitar la división (un solo método)":"Dividir en dos métodos"; box.hidden=!paySplit; if(!paySplit||!paying)return;
+  $("p-methods2").innerHTML=METHODS.filter(function(m){return m!==payMethod}).map(function(m){return '<button type="button" class="chip" data-act="method2" data-m="'+m+'" aria-pressed="'+(payMethod2===m)+'">'+m+'</button>'}).join("");
+  $("p-ref2-f").hidden=!(payMethod2&&NEEDREF[payMethod2]);
+  var x=splitUsd(), el=$("p-split-info"), tz=S.tasa, ok=x.u1!=null&&x.u1>0&&x.u2>0.004;
+  if(!ok){el.textContent="Total "+usd(x.t)+". Escribe cuántos dólares paga con el método 1; el resto va al método 2.";return}
+  var l1=payMethod?payAmt(payMethod,x.u1,tz).txt:usd(x.u1), l2=payMethod2?payAmt(payMethod2,x.u2,tz).txt:usd(x.u2);
+  el.innerHTML="Parte 1: <b>"+(payMethod||"método 1")+" "+l1+"</b> ("+usd(x.u1)+")<br>Parte 2: <b>"+(payMethod2||"método 2")+" "+l2+"</b> ("+usd(x.u2)+")";
+}
 function confirmPay(){
+  if(paySplit)return confirmSplit();
   var ref=$("p-ref").value.trim();
   if(!payMethod){$("p-err").textContent="Elige cómo pagó.";return}
   if(NEEDREF[payMethod]&&!ref){$("p-err").textContent="Escribe la referencia del "+payMethod+".";return}
@@ -688,6 +722,21 @@ function confirmPay(){
   if(mc==null){$("p-err").textContent="Escribe el monto cobrado.";return}
   if(mc<pa.val*0.5||mc>pa.val*2){$("p-err").textContent="El monto cobrado no se parece al total ("+pa.txt+"). Revísalo.";return}
   paying.pay={method:payMethod,ref:ref,tasa:S.tasa,cur:pa.cur,val:mc,esp:pa.val};
+  var po=paying; po.ticket=true; $("ov-pay").classList.remove("on");
+  if(pendingNew===po){pendingNew=null;commitOrder(po);$("f-err").textContent="Moto #"+po.num+" cobrada y registrada. Ya puede pasar al puente."}
+  else renderAll();
+  showTicket(po); saveSale(po,function(n){sendTicket(po,n)});
+}
+
+function confirmSplit(){
+  var e=function(t){$("p-err").textContent=t}, x=splitUsd(), ref1=$("p-ref").value.trim(), ref2=$("p-ref2").value.trim();
+  if(!payMethod)return e("Elige el método de la parte 1 (arriba).");
+  if(!payMethod2)return e("Elige el método de la parte 2.");
+  if(x.u1==null||x.u1<=0||x.u2<0.01)return e("Escribe cuántos dólares paga con el método 1 (menos que el total).");
+  if(NEEDREF[payMethod]&&!ref1)return e("Escribe la referencia del "+payMethod+" (parte 1).");
+  if(NEEDREF[payMethod2]&&!ref2)return e("Escribe la referencia del "+payMethod2+" (parte 2).");
+  var tz=S.tasa, a1=payAmt(payMethod,x.u1,tz), a2=payAmt(payMethod2,x.u2,tz);
+  paying.pay={method:"Mixto",ref:[ref1,ref2].filter(Boolean).join(" / "),tasa:tz,parts:[{method:payMethod,ref:ref1,cur:a1.cur,val:Math.round(a1.val*100)/100,usd:x.u1},{method:payMethod2,ref:ref2,cur:a2.cur,val:Math.round(a2.val*100)/100,usd:x.u2}]};
   var po=paying; po.ticket=true; $("ov-pay").classList.remove("on");
   if(pendingNew===po){pendingNew=null;commitOrder(po);$("f-err").textContent="Moto #"+po.num+" cobrada y registrada. Ya puede pasar al puente."}
   else renderAll();
@@ -710,7 +759,7 @@ function construirDia(d){
     var ids=v.servicios.map(function(x){return x.id}).filter(function(id){return svc(id)}); if(!ids.length)return;
     var pct=parseFloat(v.descuento)||0;
     R.clients[v.telefono]={nombre:v.cliente||"Sin nombre",prev:(d.previas&&d.previas[v.telefono])||0};
-    var o={conFoto:v.conFoto,validada:!!v.validada,placaPor:v.placaPor||"",num:v.num,time:hhmm(new Date(v.fecha)),placa:v.sinPlaca?"SIN PLACA":v.placa,modelo:v.modelo,photo:ph(cols[i%cols.length]),svc:ids,lav:v.lavador,tel:v.telefono,disc:pct?{pct:pct,motivo:"",status:"approved"}:null,pay:v.estado==="pendiente"?null:{method:v.metodo,ref:v.ref,tasa:v.tasa||S.tasa,cur:v.moneda,val:v.monto},op:v.usuario,ticket:true,ejemplo:!!v.ejemplo,srvId:v.id,sin:!!v.sinPlaca,tipo:v.tipo||"normal",nota:v.nota||""};
+    var o={conFoto:v.conFoto,validada:!!v.validada,placaPor:v.placaPor||"",num:v.num,time:hhmm(new Date(v.fecha)),placa:v.sinPlaca?"SIN PLACA":v.placa,modelo:v.modelo,photo:ph(cols[i%cols.length]),svc:ids,lav:v.lavador,tel:v.telefono,disc:pct?{pct:pct,motivo:"",status:"approved"}:null,pay:v.estado==="pendiente"?null:payDeSrv(v),op:v.usuario,ticket:true,ejemplo:!!v.ejemplo,srvId:v.id,sin:!!v.sinPlaca,tipo:v.tipo||"normal",nota:v.nota||""};
     R.orders.push(o);
   });
   R.gastos=d.gastos.map(function(g,i){return{id:i+1,time:"",desc:g.desc,monto:g.monto,real:g.monto,cat:"Otros",pago:g.pago,foto:ph("#6b7780"),factura:ph("#8a9aa5"),status:"done",op:g.usuario}});
@@ -753,7 +802,7 @@ function renderAdminBase(){
     var op=!!openA[g.k];
     return '<tr class="grow" data-act="tglA" data-k="'+esc(g.k)+'"><td colspan="7"><span class="car">'+(op?"▾":"▸")+'</span> '+esc(g.name)+' · '+g.os.length+' motos</td><td class="r num" colspan="2">'+usd(g.tot)+'</td></tr>'+(op?g.os.map(arow).join(""):"");
   }).join("");
-  var byM={},maxM=0; paid.forEach(function(o){byM[o.pay.method]=(byM[o.pay.method]||0)+total(o)});
+  var byM={},maxM=0; paid.forEach(function(o){pagoPartes(o).forEach(function(p){byM[p.method]=(byM[p.method]||0)+p.usd})});
   METHODS.forEach(function(m){maxM=Math.max(maxM,byM[m]||0)});
   $("a-pay").innerHTML=METHODS.map(function(m){var v=byM[m]||0;var cm=cajaMetodos()[m];return '<div class="bar"><span>'+m+'</span><i style="width:'+(maxM?v/maxM*100:0)+'%"></i><span class="num" style="text-align:right">'+(cm&&cm.cur!=="$"?cajaTxt(cm)+" · ":"")+usd(v)+'</span></div>'}).join("");
   var byS={},maxS=0; S.orders.forEach(function(o){o.svc.forEach(function(id){byS[id]=(byS[id]||0)+1})});
@@ -803,11 +852,11 @@ function enviarTextoWa(texto){
 function cierreText(){
   var paid=S.orders.filter(function(o){return o.pay}), unpaid=S.orders.filter(function(o){return !o.pay});
   var ing=paid.reduce(function(a,o){return a+total(o)},0), byM={}, desc=0;
-  paid.forEach(function(o){byM[o.pay.method]=(byM[o.pay.method]||0)+total(o)});
+  paid.forEach(function(o){pagoPartes(o).forEach(function(p){byM[p.method]=(byM[p.method]||0)+p.usd})});
   S.orders.forEach(function(o){if(o.disc&&o.disc.status==="approved")desc+=subtotal(o)-total(o)});
   var L=["CIERRE MOTO LAVADO · "+new Date().toLocaleDateString("es-VE"),"Motos atendidas: "+S.orders.length,"Cobrado: "+usd(ing)+" ("+bs(ing)+")",""];
   METHODS.forEach(function(m){if(byM[m])L.push("  "+m+": "+usd(byM[m]))});
-  var rb=0,ru=0; paid.forEach(function(o){var a=paidAmt(o);if(a.cur==="Bs")rb+=a.val;else if(a.cur==="USDT")ru+=a.val});
+  var rb=0,ru=0; paid.forEach(function(o){pagoPartes(o).forEach(function(p){if(p.cur==="Bs")rb+=p.val;else if(p.cur==="USDT")ru+=p.val})});
   var cmj=cajaMetodos(); L.push("","CAJA: lo que debe haber por método"); METHODS.forEach(function(m){if(cmj[m])L.push("  "+m+": "+cajaTxt(cmj[m])+" ("+cmj[m].n+" motos"+(cmj[m].cur!=="$"?", equivale a "+usd(cmj[m].usd):"")+")")});
   L.push("","Recibido en bolívares: Bs "+fmtN(rb),"Recibido en USDT: "+fmtN(ru),"Tasa euro BCV del día: Bs "+fmtN(S.tasa));
   var go_=gastosOk(), gt=go_.reduce(function(a,g){return a+gAmt(g)},0);
@@ -928,8 +977,8 @@ function iniciarEnVivo(){
 /* Compartir por WhatsApp: la foto de la moto con un texto (cliente, servicio, monto, pago y referencia) para que el encargado lo mande al grupo sin escribirlo otra vez. */
 function textoWa(o){
   var tasa=(o.pay&&o.pay.tasa)||S.tasa, a=o.pay?paidAmt(o):null, monto=usd(total(o));
-  if(!o.pay||a.cur==="Bs"||a.cur==="USDT")monto+=" · "+(a&&a.cur==="Bs"?a.txt:"Bs "+fmtN(total(o)*tasa));
-  var pago=o.pay?esc0(o.pay.method)+(o.pay.ref?" · ref. "+o.pay.ref:""):(o.disc&&o.disc.status==="pending"?"pendiente de autorización":"pendiente"+(o.nota?" · "+o.nota:""));
+  if(!o.pay||a.cur==="Bs"||a.cur==="USDT"||a.cur==="Mixto")monto+=" · "+(a&&a.cur==="Bs"?a.txt:"Bs "+fmtN(total(o)*tasa));
+  var pago=o.pay?(o.pay.parts?a.txt:esc0(o.pay.method))+(o.pay.ref?" · ref. "+o.pay.ref:""):(o.disc&&o.disc.status==="pending"?"pendiente de autorización":"pendiente"+(o.nota?" · "+o.nota:""));
   return ["*Moto #"+o.num+" · "+(o.placa||"SIN PLACA")+"*","Cliente: "+cliName(o),"Servicio: "+names(o),"Monto: "+monto,"Pago: "+pago,"Atendió "+o.op+" · "+o.time].join("\n");
 }
 function esc0(x){return String(x==null?"":x)}
@@ -1332,7 +1381,9 @@ document.addEventListener("click",function(ev){
   else if(a==="hreal"){var hi=$("hr-"+t.dataset.id);if(hi)jpost("/api/camara/historial/real",{id:t.dataset.id,real:hi.value}).then(function(){hi.blur();loadHist()})}
   else if(a==="aprobar"||a==="negar")decidir(t.dataset.aid,a==="aprobar");
   else if(a==="pay")openPay(n);
-  else if(a==="method"){payMethod=t.dataset.m;setMonto();renderMethods()}
+  else if(a==="method"){payMethod=t.dataset.m;if(payMethod2===payMethod)payMethod2=null;setMonto();renderMethods();renderSplit()}
+  else if(a==="split"){paySplit=!paySplit;if(paySplit&&!$("p-usd1").value&&paying)$("p-usd1").value=String(Math.round(total(paying)/2*100)/100).replace(".",",");setMonto();renderConv();renderSplit()}
+  else if(a==="method2"){payMethod2=t.dataset.m;renderSplit()}
   else if(a==="confirmpay")confirmPay();
   else if(a==="closepay"){pendingNew=null;$("ov-pay").classList.remove("on")}
   else if(a==="approve"){o.disc.status="approved";renderAll()}
@@ -1443,6 +1494,7 @@ document.addEventListener("input",function(ev){
   else if(t.dataset&&t.dataset.greal){var gr=S.gastos.filter(function(x){return x.id===+t.dataset.greal})[0], rr=parseFloat(t.value);gr.real=rr>=0?rr:null}
   else if(t.id==="a-meta"){var mv=parseInt(t.value,10);if(mv>0){S.meta=mv;renderMeta()}}
   else if(t.id==="p-monto")montoDif();
+  else if(t.id==="p-usd1")renderSplit();
   else if(t.id==="x-todos")renderCruces();
   else if(t.id==="a-dia")elegirDiaAdmin(t.value);
   else if(t.id==="vv-z")actualizarVivo();

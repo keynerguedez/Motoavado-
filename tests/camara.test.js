@@ -34,6 +34,7 @@ function montar(o = {}) {
   if (o.cruces) fs.writeFileSync(path.join(dir, 'camara-cruces.json'), JSON.stringify(o.cruces.map(c => ({ id: c.foto.split('-')[0], t: new Date().toISOString(), origen: 'registro', venta: { id: 'x', num: 0, placa: '' }, comps: [{ puente: c.puente || 3, misma: false, confianza: 'alta', motivo: '', foto: c.foto }], tipo: 'sin-coincidencia', puente: null, valido: null }))));
   (o.ventaFotos || []).forEach(v => fs.writeFileSync(path.join(dir, 'fotos/venta', v.id + '.jpg'), Buffer.from(v.contenido || 'VENTA')));
   const llamadas = { leer: [], comparar: [] };
+  const ffAnt = process.env.FFMPEG; if (o.ffmpeg) process.env.FFMPEG = o.ffmpeg;
   const c = crear({
     DATA: dir, json: () => {}, fechaCaracas: () => HOY,
     ventasDeHoy: () => (typeof o.ventas === 'function' ? o.ventas() : o.ventas) || [],
@@ -41,8 +42,9 @@ function montar(o = {}) {
     leerPlaca: async (j, m, opc) => { llamadas.leer.push(opc && opc.placaSolo ? 'zoom' : /haiku/.test(m || '') ? 'haiku' : 'full'); return (o.leer || (() => ({ moto: true, placa: '', parcial: '', motivo: 'ilegible' })))(j, m, opc || {}); },
     compararFotos: async (a, b) => { llamadas.comparar.push(String(b)); return (o.comparar || (() => ({ misma: true, confianza: 'alta', motivo: 'igual' })))(String(a), String(b)); },
   });
-  const ev = async (n, { presente = true, revision = false } = {}) => {
-    const req = Readable.from([Buffer.alloc(2000, 7)]);
+  process.env.FFMPEG = ffAnt;
+  const ev = async (n, { presente = true, revision = false, byte = 7 } = {}) => {
+    const req = Readable.from([Buffer.alloc(2000, byte)]);
     req.headers = { authorization: 'Bearer ' + TOKEN, 'content-type': 'image/jpeg' };
     req.url = '/api/camara/evento?puente=' + n + '&presente=' + (presente ? 1 : 0) + (revision ? '&revision=1' : '');
     await c.evento(req, {});
@@ -243,6 +245,36 @@ test('pendientes: lo que se le recuerda al encargado son las motos montadas más
   assert.equal(r.n, 2);
   assert.deepEqual(r.items.map(x => [x.id, x.estado, x.puente]), [['mwope000003', 'bajo', 3], ['mwope000001', 'montada', 1]]);
   assert.equal(r.items[1].lectura, 'AZ6B12A'); assert.ok(r.items[0].bajoMin >= 4);
+});
+
+// ---------- menos llamadas a la IA ----------
+test('una moto ya enlazada a una factura con placa no sigue con las lecturas lentas de su placa; una sin enlazar sí', async () => {
+  const base = { estado: 'esperando', origen: 'alarma', placa: '', parcial: 'AB12?3C', intentos: 3, leidoT: Date.now() - 600e3, relT: Date.now(), desde: new Date().toISOString() };
+  const v = { id: 'v5', num: 5, placa: 'AB12D3C' };
+  const enlazada = montar({ puentes: { 1: Object.assign({}, base, { estado: 'ok', num: 5, aprox: 'AB12D3C' }) }, ventas: [v], leer: haiku(() => ({ moto: true, placa: '', parcial: 'AB12?3C' })) });
+  await conHora(200e3, () => enlazada.ev(1));
+  assert.deepEqual(enlazada.llamadas.leer, [], 'enlazada: no se vuelve a leer');
+  const libre = montar({ puentes: { 1: Object.assign({}, base) }, ventas: [], leer: haiku(() => ({ moto: true, placa: '', parcial: 'AB12?3C' })) });
+  await conHora(200e3, () => libre.ev(1));
+  assert.ok(libre.llamadas.leer.length >= 1, 'sin enlazar: sigue leyendo');
+});
+
+test('puente libre que se ve igual que en la última revisión con la IA no vuelve a preguntar si hay moto; si cambia, o pasan 3 minutos, sí', async () => {
+  const shim = path.join(os.tmpdir(), 'motolavado-ffmpeg-miniatura.sh');
+  fs.writeFileSync(shim, '#!/bin/sh\ncase "$*" in\n *rawvideo*) b=$(dd bs=1 count=1 2>/dev/null | od -An -tu1 | tr -d " \\n"); cat >/dev/null; LC_ALL=C awk -v b="$b" \'BEGIN{for(i=0;i<576;i++) printf "%c", b+0}\' ;;\n *) cat ;;\nesac\n', { mode: 0o755 });
+  const t = montar({ ffmpeg: shim, leer: () => ({ moto: false }) });
+  await t.ev(1, { revision: true });
+  assert.equal(t.llamadas.leer.length, 1, 'primera revisión: pregunta');
+  await t.ev(1, { revision: true });
+  assert.equal(t.llamadas.leer.length, 1, 'misma escena: no pregunta');
+  await t.ev(1, { revision: true, byte: 90 });
+  assert.equal(t.llamadas.leer.length, 2, 'la escena cambió: pregunta');
+  await conHora(4 * 60e3, () => t.ev(1, { revision: true, byte: 90 }));
+  assert.equal(t.llamadas.leer.length, 3, 'pasaron más de 3 minutos: pregunta aunque se vea igual');
+  // si ffmpeg no puede sacar la miniatura, siempre pregunta (como antes)
+  const sin = montar({ leer: () => ({ moto: false }) });
+  await sin.ev(1, { revision: true }); await sin.ev(1, { revision: true });
+  assert.equal(sin.llamadas.leer.length, 2);
 });
 
 // ---------- Revalidar y validación manual ----------

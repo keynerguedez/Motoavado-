@@ -228,6 +228,23 @@ test('una factura sin placa que ya tiene su moto en el historial no se asigna a 
   assert.equal(libre.filas()[0].num, 11);
 });
 
+test('pendientes: lo que se le recuerda al encargado son las motos montadas más de 5 min o ya bajadas sin factura (no las recién llegadas, falsos positivos, descartadas ni facturadas)', () => {
+  const hace = n => new Date(Date.now() - n * 60e3).toISOString();
+  const t = montar({ historial: [
+    { id: 'mwope000001', puente: 1, placa: 'AZ6B12A', estado: 'esperando', llegada: hace(12) },
+    { id: 'mwope000002', puente: 2, estado: 'esperando', llegada: hace(2) },
+    { id: 'mwope000003', puente: 3, parcial: 'AB12?3C', estado: 'espera', llegada: hace(30), salida: hace(4) },
+    { id: 'mwope000004', puente: 1, estado: 'esperando', llegada: hace(40), salida: hace(35) },
+    { id: 'mwope000005', puente: 2, placa: 'XX1', estado: 'descartada', llegada: hace(50), salida: hace(45) },
+    { id: 'mwope000006', puente: 3, placa: 'AAA111', estado: 'ok', num: 7, llegada: hace(20) },
+    { id: 'mwope000007', puente: 5, estado: 'esperando', llegada: hace(20) },
+  ] });
+  const r = t.c.pendientes();
+  assert.equal(r.n, 2);
+  assert.deepEqual(r.items.map(x => [x.id, x.estado, x.puente]), [['mwope000003', 'bajo', 3], ['mwope000001', 'montada', 1]]);
+  assert.equal(r.items[1].lectura, 'AZ6B12A'); assert.ok(r.items[0].bajoMin >= 4);
+});
+
 // ---------- Revalidar y validación manual ----------
 test('Revalidar: encuentra la fila por placa parecida (0/O, 1/I) y la enlaza a la factura', async () => {
   const v = { id: 'abcdef123456', num: 9, placa: 'AE0I83J', fecha: new Date().toISOString() };

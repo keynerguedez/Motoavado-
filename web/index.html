@@ -123,6 +123,12 @@ details.grp summary{cursor:pointer;font-weight:600;font-size:.9rem;color:var(--m
 .wa img{width:100%;border-radius:8px}
 .logrow{display:flex;gap:10px;align-items:baseline;font-size:.92rem}
 .price input{width:84px;text-align:right}
+#pend-bar{position:sticky;top:0;z-index:30;background:var(--warn-bg);color:var(--ink);border-bottom:2px solid var(--warn);padding:8px 16px;cursor:pointer}
+#pend-bar.bad{background:var(--bad-bg);border-bottom-color:var(--bad)}
+#pend-bar b{font-family:var(--display);font-size:1.05rem}
+#pend-bar .pi{display:flex;gap:8px;flex-wrap:wrap;margin-top:4px;font-size:.92rem}
+#pend-bar .pi span{background:var(--surface);border:1px solid var(--line);border-radius:99px;padding:1px 10px}
+#pend-bar .pi span.bad{border-color:var(--bad);color:var(--bad)}
 </style>
 </head>
 <body>
@@ -145,6 +151,7 @@ details.grp summary{cursor:pointer;font-weight:600;font-size:.9rem;color:var(--m
   <button class="btn sm" id="btn-reset" data-act="reset">Vaciar el día</button>
   <button class="btn sm" id="btn-ejborrar" data-act="ejborrar" hidden>Borrar datos de ejemplo</button>
 </header>
+<div id="pend-bar" data-act="go" data-v="tablet" hidden></div>
 <main>
   <!-- ============ TABLET ============ -->
   <section class="view" id="v-tablet">
@@ -965,6 +972,22 @@ function loadHoyH(){
   if(!window.__yo)return;
   fetch("/api/camara/historial").then(function(r){return r.ok?r.json():null}).then(function(j){if(!j)return;HH=j;renderVigilante()}).catch(function(){});
 }
+var PEND=0, TITULO0=document.title;
+/* Recordatorio para el encargado: motos que la cámara ve montadas (o que ya bajaron) sin factura, en cualquier pantalla. */
+function loadPend(){
+  if(!window.__yo)return;
+  fetch("/api/camara/pendientes").then(function(r){return r.ok?r.json():null}).then(function(j){
+    if(!j)return; var bar=$("pend-bar"), n=j.n||0;
+    if(n>PEND&&navigator.vibrate)try{navigator.vibrate([200,100,200])}catch(e){}
+    PEND=n; document.title=(n?"("+n+") ":"")+TITULO0;
+    if(!n){bar.hidden=true;bar.innerHTML="";return}
+    var gr=j.items.some(function(x){return (x.estado==="bajo"?x.bajoMin:x.minutos)>=10});
+    bar.className=gr?"bad":""; bar.hidden=false;
+    bar.innerHTML='<b>Falta facturar: '+n+(n===1?' moto':' motos')+'</b><div class="pi">'+j.items.map(function(x){
+      var pu=x.puente===5?"Fuera del puente":"Puente "+x.puente, t=x.estado==="bajo"?"bajó hace "+x.bajoMin+" min":"lleva "+x.minutos+" min";
+      return '<span class="'+((x.estado==="bajo"?x.bajoMin:x.minutos)>=10?"bad":"")+'">'+esc(pu)+" · "+esc(x.lectura||"sin placa")+" · "+t+'</span>'}).join("")+'</div>';
+  }).catch(function(){});
+}
 var SF=null;
 /* Motos que la cámara vio (más de 5 min montadas) y todavía no tienen factura. */
 function loadSinFact(){
@@ -1436,6 +1459,7 @@ if(location.protocol!=="file:"&&window.fetch){fetch("/api/yo").then(function(r){
   $("btn-reset").hidden=true; applyRole(); renderAll();
   loadTasa(); setInterval(loadTasa,30*60*1000);
   loadDia().then(ejemploDesdeEnlace); loadAuts(); setInterval(loadAuts,5000); setInterval(refrescarDia,5000); setInterval(function(){if($("v-clientes").classList.contains("on"))loadClientes()},15000); iniciarEnVivo();
+  if(u.permisos.indexOf("tablet")>=0||u.permisos.indexOf("vigilante")>=0){loadPend();setInterval(loadPend,10000)}
   if(u.permisos.indexOf("vigilante")>=0){loadCam();setInterval(loadCam,2000);loadHist();setInterval(loadHist,5000);loadCruces();setInterval(loadCruces,5000);loadHoyH();setInterval(loadHoyH,5000);loadSinFact();setInterval(loadSinFact,5000);loadConsumo();setInterval(loadConsumo,30000);$("h-dia").addEventListener("change",function(){HIST=null;loadHist()});$("h-ahora").addEventListener("change",renderHist)}
 }).catch(function(){})}
  $("a-meta").value=S.meta; renderRules(); setInterval(function(){renderVigilante();renderMeta()},30000);

@@ -410,6 +410,7 @@ async function api(req, res, ruta) {
       if (!puede(yo, 'admin')) return json(res, 403, { error: 'No tienes permiso.' });
       return json(res, 200, consumo.resumen(new URL(req.url, 'http://localhost').searchParams.get('dia') || ''));
     }
+    if (ruta === '/api/camara/pendientes') return puede(yo, 'tablet') || puede(yo, 'vigilante') ? json(res, 200, camara.pendientes()) : json(res, 403, { error: 'No tienes permiso.' });
     if (ruta === '/api/camara/cruces') return puede(yo, 'vigilante') ? json(res, 200, camara.cruces()) : json(res, 403, { error: 'No tienes permiso.' });
     const cm = /^\/api\/camara\/(cruce|cruce-venta)\/([a-z0-9.-]+)$/.exec(ruta);
     if (cm) {

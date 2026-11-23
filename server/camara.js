@@ -603,7 +603,9 @@ function crear(ctx) {
     // Moto sin placa legible: si hoy hay una factura marcada "sin placa" que ningún otro puente tiene asignada, se da por registrada.
     if (!p.placa && !p.parcial) {
       const tomadas = new Set(S.puentes.filter(x => x !== p && (x.sinPlacaId || x.cruceId)).map(x => x.sinPlacaId || x.cruceId));
-      const sp = ctx.ventasDeHoy().find(x => x.sinPlaca && !tomadas.has(x.id) && (p.sinPlacaId ? x.id === p.sinPlacaId : true));
+      // Una factura sin placa que ya tiene su moto en otra fila del historial de hoy no se le da a la siguiente moto sin placa del puente.
+      const hoyH = ctx.fechaCaracas(new Date()), ligadas = new Set(H.filter(x => x.dia === hoyH && x.num != null && x.id !== p.hid && x.estado !== 'descartada').map(x => x.num));
+      const sp = ctx.ventasDeHoy().find(x => x.sinPlaca && !tomadas.has(x.id) && !ligadas.has(x.num) && (p.sinPlacaId ? x.id === p.sinPlacaId : true));
       if (sp) { if (p.estado !== 'ok') avisar('ok', nombre(p.n) + ': moto sin placa legible, coincide con la factura sin placa #' + sp.num + '.'); p.estado = 'ok'; p.num = sp.num; p.sinPlacaId = sp.id; return; }
     }
     const min = (Date.now() - new Date(p.desde).getTime()) / 60000;

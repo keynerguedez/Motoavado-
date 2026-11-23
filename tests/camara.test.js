@@ -211,6 +211,23 @@ test('una factura sin placa toma la placa que lee la cámara (si está enlazada 
   assert.deepEqual(llamadas, [['v3', 'AD7E96K']]);
 });
 
+test('una factura sin placa que ya tiene su moto en el historial no se asigna a la siguiente moto sin placa del mismo puente', async () => {
+  const venta = { id: 'v10', num: 10, placa: '', sinPlaca: true };
+  const hace = n => new Date(Date.now() - n * 60e3).toISOString();
+  const t = montar({ historial: [{ id: 'mwosp000001', puente: 1, estado: 'ok', num: 10, llegada: hace(30), salida: hace(1), motivo: 'ilegible' }], ventas: [venta],
+    comparar: () => ({ misma: false, confianza: 'alta', motivo: 'otra moto' }), leer: haiku(() => ({ moto: true, placa: '', parcial: '', motivo: 'ilegible' })) });
+  await t.ev(1);
+  const filas = t.filas().sort((a, b) => (a.llegada < b.llegada ? -1 : 1));
+  assert.equal(filas.length, 2, 'la segunda moto abre una fila nueva');
+  assert.equal(filas[0].num, 10);
+  assert.ok(filas[1].num == null, 'la factura #10 ya tiene su moto: la nueva moto no la hereda');
+  assert.equal(t.pub(1).estado, 'esperando');
+  // una factura sin placa sin moto todavía sí se asigna a una moto sin placa
+  const libre = montar({ ventas: [{ id: 'v11', num: 11, placa: '', sinPlaca: true }], leer: haiku(() => ({ moto: true, placa: '', parcial: '', motivo: 'ilegible' })) });
+  await libre.ev(1);
+  assert.equal(libre.filas()[0].num, 11);
+});
+
 // ---------- Revalidar y validación manual ----------
 test('Revalidar: encuentra la fila por placa parecida (0/O, 1/I) y la enlaza a la factura', async () => {
   const v = { id: 'abcdef123456', num: 9, placa: 'AE0I83J', fecha: new Date().toISOString() };

@@ -18,7 +18,7 @@ const ESPERA_BAJADA_MIN = 15;   // minutos que tiene una moto que ya bajó para 
 const MIN_GRACIA = 5;           // minutos que se le da a una moto montada para que la registren antes de alertar
 const MAX_FOTO = 3 * 1024 * 1024;
 const MAX_REINTENTOS_LECTURA = 3;   // lecturas seguidas al llegar la moto (el agente reenvía a los 8 y 20 s)
-const MAX_LECTURAS_LENTAS = 10;     // tope de lecturas por moto, contando las lentas
+const MAX_LECTURAS_LENTAS = 7;      // tope de lecturas por moto, contando las lentas (con la placa parcial rara vez se completa después de la 7.ª)
 const CADA_LECTURA_LENTA = 180000;  // ms: mientras siga sin placa completa, se reintenta cada 3 minutos (cada lectura es una llamada a Sonnet)
 const MAX_LOG = 100;
 
@@ -636,6 +636,24 @@ function crear(ctx) {
   // ---------- núcleo: una imagen de un puente, venga del agente o de la cámara directa ----------
   // opc: { revision: es una revisión de zona quieta, previo: pregunta primero al modelo barato si hay moto, origen: de dónde vino }
   // Devuelve el cuerpo de la respuesta.
+  // Moto ya enlazada a una factura con su propia placa (no a una factura "sin placa", que sí necesita que la cámara le complete la placa): las lecturas lentas de su placa ya no aportan nada.
+  const ligadaConPlaca = p => p.estado === 'ok' && p.num != null && !p.sinPlacaId;
+  // Miniatura gris de la zona: si un puente libre se ve igual que cuando se revisó con la IA hace poco, no hace falta volver a preguntar si hay moto.
+  const MINI_W = 32, MINI_H = 18, MINI_MAX_MS = Number(process.env.CAMARA_MINI_MS) || 3 * 60e3;
+  const miniRef = {};
+  function miniatura(jpeg) {
+    return new Promise(ok => {
+      let pr; try { pr = require('child_process').spawn(ffmpeg, ['-loglevel', 'error', '-i', 'pipe:0', '-vf', 'scale=' + MINI_W + ':' + MINI_H, '-pix_fmt', 'gray', '-f', 'rawvideo', 'pipe:1']); } catch (e) { return ok(null); }
+      const partes = []; const t = setTimeout(() => pr.kill('SIGKILL'), 8000);
+      pr.stdout.on('data', c => partes.push(c)); pr.stdin.on('error', () => {}); pr.on('error', () => { clearTimeout(t); ok(null); });
+      pr.on('close', () => { clearTimeout(t); const b = Buffer.concat(partes); ok(b.length === MINI_W * MINI_H ? b : null); });
+      pr.stdin.end(jpeg);
+    });
+  }
+  function casiIgual(a, b) {
+    let suma = 0, grandes = 0; for (let i = 0; i < a.length; i++) { const d = Math.abs(a[i] - b[i]); suma += d; if (d > 25) grandes++; }
+    return suma / a.length < 3 && grandes < 6;
+  }
   async function procesar(n, presente, jpeg, opc) {
     opc = opc || {};
     cambioDeDia();
@@ -652,7 +670,7 @@ function crear(ctx) {
     const guardarFoto = (hist) => { p.visto = ahora; if (hist) hFoto(p, jpeg); try { fs.writeFileSync(path.join(FOTOS, 'camara-puente-' + n + '.jpg'), jpeg, { mode: 0o600 }); } catch (e) {} };
     const llegada = (r, origen, nueva) => {
       Object.assign(p, { estado: 'esperando', desde: ahora, placa: '', parcial: '', intentos: 1, leidoT: Date.now(), relT: Date.now(), sinMoto: 0, origen }); delete p.num; delete p.otraMoto; delete p.cortadas; delete p.cortT; delete p.cruceId; delete p.cruce; delete p.cruceT; delete p.confirmada; delete p.dudas; delete p.alertado; delete p.motivo; delete p.aprox; delete p.sinPlacaId;
-      S.vistas++; avisar('info', nombre(n) + (origen === 'revision' ? ': se encontró una moto ya montada.' : ': llegó una moto.'));
+      delete miniRef[n]; S.vistas++; avisar('info', nombre(n) + (origen === 'revision' ? ': se encontró una moto ya montada.' : ': llegó una moto.'));
       if (nueva) hNuevo(p, jpeg); else hAbrir(p, jpeg);
       guardarLectura(p, r);
       guardarFoto(true);
@@ -663,12 +681,15 @@ function crear(ctx) {
     // o que el detector de movimiento no notó, y para saber si la moto que estaba ya se fue.
     if (opc.revision) {
       if (p.estado !== 'libre' && p.origen !== 'revision' && p.origen !== 'alarma') { guardar(); return { ok: true, estado: p.estado, revision: 'ignorada' }; } // llegó con movimiento del agente: su bajada la avisa el agente
+      // Puente libre que se ve igual que en la última revisión con la IA (que no encontró moto que registrar): no se vuelve a preguntar; como mucho cada 3 minutos se mira de verdad.
+      const mini = p.estado === 'libre' ? await miniatura(jpeg) : null, ref = miniRef[n];
+      if (mini && ref && Date.now() - ref.t < MINI_MAX_MS && casiIgual(mini, ref.m)) { p.revL = { t: ahora, h: false }; guardar(); return { ok: true, estado: 'libre', revision: 'sin-cambio' }; }
       const rapida = await leer(jpeg, modeloBarato); // primero el modelo barato: ¿hay moto?
       if (p.estado === 'libre') {
         p.revL = { t: ahora, h: rapida.moto }; // para que el panel muestre que el puente libre se está revisando
-        if (rapida.moto !== true) { guardar(); return { ok: true, estado: 'libre', revision: 'sin-moto' }; }
+        if (rapida.moto !== true) { if (mini) miniRef[n] = { m: mini, t: Date.now() }; guardar(); return { ok: true, estado: 'libre', revision: 'sin-moto' }; }
         const r = await leer(jpeg); // hay moto: la placa se lee con el modelo bueno
-        if (r.moto !== true || (n === EXTRA && !(r.placa || r.parcial)) || cortada1(n, r)) { guardar(); return { ok: true, estado: 'libre', revision: 'sin-moto' }; } // fuera del puente: sin placa legible no se registra nada
+        if (r.moto !== true || (n === EXTRA && !(r.placa || r.parcial)) || cortada1(n, r)) { if (mini) miniRef[n] = { m: mini, t: Date.now() }; guardar(); return { ok: true, estado: 'libre', revision: 'sin-moto' }; } // fuera del puente: sin placa legible no se registra nada
         llegada(r, 'revision', await otraMoto(n, r, jpeg)); evaluar(p); guardar();
         return { ok: true, estado: p.estado, placa: p.placa || null, revision: 'moto-encontrada' };
       }
@@ -727,7 +748,7 @@ function crear(ctx) {
         } else if (rc.moto === true) p.cortadas = 0;
       }
       // Mientras siga sin placa completa, la revisión también sirve de intento de lectura.
-      if (!p.placa && p.intentos < MAX_LECTURAS_LENTAS && rapida.moto !== false) { p.intentos++; p.leidoT = Date.now(); guardarLectura(p, await leer(jpeg)); guardarFoto(true); }
+      if (!p.placa && !ligadaConPlaca(p) && p.intentos < MAX_LECTURAS_LENTAS && rapida.moto !== false) { p.intentos++; p.leidoT = Date.now(); guardarLectura(p, await leer(jpeg)); guardarFoto(true); }
       evaluar(p); guardar();
       return { ok: true, estado: p.estado, placa: p.placa || null, revision: 'vigente' };
     }
@@ -738,7 +759,7 @@ function crear(ctx) {
       llegada(r, opc.origen || 'movimiento', await otraMoto(n, r, jpeg));
     } else {
       guardarFoto();
-      const toca = p.intentos < MAX_REINTENTOS_LECTURA || (p.intentos < MAX_LECTURAS_LENTAS && Date.now() - (p.leidoT || 0) >= CADA_LECTURA_LENTA);
+      const toca = p.intentos < MAX_REINTENTOS_LECTURA || (p.intentos < MAX_LECTURAS_LENTAS && Date.now() - (p.leidoT || 0) >= CADA_LECTURA_LENTA && !ligadaConPlaca(p));
       if (!p.placa && toca) {
         p.intentos++; p.leidoT = Date.now();
         const r = await leer(jpeg);

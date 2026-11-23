@@ -198,6 +198,7 @@ details.grp summary{cursor:pointer;font-weight:600;font-size:.9rem;color:var(--m
           <button class="btn" data-act="addpend" style="flex:1">Registrar, pago pendiente</button>
         </div>
       </div>
+      <div class="card stack" id="t-caja"></div>
       <div class="card">
         <div class="row"><h2 style="margin-right:auto">Motos de hoy</h2><span class="pill mut num" id="t-count"></span></div>
         <div id="t-list"></div>
@@ -443,8 +444,24 @@ function groupOrders(){
   if(by.__pend&&openT.__pend===undefined)openT.__pend=true;
   return gs;
 }
+/* Caja del día: lo cobrado por cada método en la moneda en que se recibió (Bs, $ o USDT) para saber cuánto debe haber en cada uno. */
+function cajaMetodos(){
+  var M={}; S.orders.filter(function(o){return o.pay}).forEach(function(o){var a=paidAmt(o),m=o.pay.method,r=M[m]||(M[m]={n:0,cur:a.cur,val:0,usd:0});r.n++;r.val+=a.val;r.usd+=total(o)});
+  return M;
+}
+function cajaTxt(r){return r.cur==="Bs"?"Bs "+fmtN(r.val):r.cur==="USDT"?fmtN(r.val)+" USDT":usd(r.val)}
+function renderCaja(){
+  var el=$("t-caja"); if(!el)return; var M=cajaMetodos(), por=S.orders.filter(function(o){return !o.pay});
+  var ms=METHODS.filter(function(m){return M[m]}); if(!ms.length&&!por.length){el.innerHTML="";el.hidden=true;return} el.hidden=false;
+  var tot=ms.reduce(function(a,m){return a+M[m].usd},0);
+  el.innerHTML='<div class="row"><h2 style="margin-right:auto">Caja del día</h2><span class="pill mut num">'+usd(tot)+' cobrado</span></div>'
+    +'<div class="tablewrap"><table style="min-width:320px"><thead><tr><th>Método</th><th class="r">Motos</th><th class="r">Debe haber</th><th class="r">Equivale a</th></tr></thead><tbody>'
+    +ms.map(function(m){var r=M[m];return '<tr><td>'+esc(m)+'</td><td class="r num">'+r.n+'</td><td class="r num"><b>'+cajaTxt(r)+'</b></td><td class="r num">'+usd(r.usd)+'</td></tr>'}).join("")
+    +'</tbody></table></div>'
+    +(por.length?'<div class="note">Por cobrar: '+por.length+(por.length===1?' moto':' motos')+' · '+usd(por.reduce(function(a,o){return a+total(o)},0))+' (no incluidas arriba).</div>':'');
+}
 function renderTablet(){
-  precargarWa();
+  precargarWa(); renderCaja();
   $("who").textContent=S.user;
   $("t-count").textContent=S.orders.length+" motos";
   if(!S.orders.length){$("t-list").innerHTML='<p class="note">Todavía no hay motos facturadas hoy.</p>';return}
@@ -738,7 +755,7 @@ function renderAdminBase(){
   }).join("");
   var byM={},maxM=0; paid.forEach(function(o){byM[o.pay.method]=(byM[o.pay.method]||0)+total(o)});
   METHODS.forEach(function(m){maxM=Math.max(maxM,byM[m]||0)});
-  $("a-pay").innerHTML=METHODS.map(function(m){var v=byM[m]||0;return '<div class="bar"><span>'+m+'</span><i style="width:'+(maxM?v/maxM*100:0)+'%"></i><span class="num" style="text-align:right">'+usd(v)+'</span></div>'}).join("");
+  $("a-pay").innerHTML=METHODS.map(function(m){var v=byM[m]||0;var cm=cajaMetodos()[m];return '<div class="bar"><span>'+m+'</span><i style="width:'+(maxM?v/maxM*100:0)+'%"></i><span class="num" style="text-align:right">'+(cm&&cm.cur!=="$"?cajaTxt(cm)+" · ":"")+usd(v)+'</span></div>'}).join("");
   var byS={},maxS=0; S.orders.forEach(function(o){o.svc.forEach(function(id){byS[id]=(byS[id]||0)+1})});
   S.services.forEach(function(s){maxS=Math.max(maxS,byS[s.id]||0)});
   $("a-svc").innerHTML=S.services.filter(function(s){return byS[s.id]}).map(function(s){var v=byS[s.id];return '<div class="bar"><span>'+esc(s.name)+'</span><i style="width:'+(v/maxS*100)+'%"></i><span class="num" style="text-align:right">'+v+'</span></div>'}).join("");
@@ -791,6 +808,7 @@ function cierreText(){
   var L=["CIERRE MOTO LAVADO · "+new Date().toLocaleDateString("es-VE"),"Motos atendidas: "+S.orders.length,"Cobrado: "+usd(ing)+" ("+bs(ing)+")",""];
   METHODS.forEach(function(m){if(byM[m])L.push("  "+m+": "+usd(byM[m]))});
   var rb=0,ru=0; paid.forEach(function(o){var a=paidAmt(o);if(a.cur==="Bs")rb+=a.val;else if(a.cur==="USDT")ru+=a.val});
+  var cmj=cajaMetodos(); L.push("","CAJA: lo que debe haber por método"); METHODS.forEach(function(m){if(cmj[m])L.push("  "+m+": "+cajaTxt(cmj[m])+" ("+cmj[m].n+" motos"+(cmj[m].cur!=="$"?", equivale a "+usd(cmj[m].usd):"")+")")});
   L.push("","Recibido en bolívares: Bs "+fmtN(rb),"Recibido en USDT: "+fmtN(ru),"Tasa euro BCV del día: Bs "+fmtN(S.tasa));
   var go_=gastosOk(), gt=go_.reduce(function(a,g){return a+gAmt(g)},0);
   L.push("","Gastos autorizados: "+usd(gt)+" ("+go_.length+")"); go_.forEach(function(g){L.push("  "+g.desc+": "+usd(gAmt(g))+" · "+g.pago+(g.status==="done"?(g.aceptado?" · diferencia aceptada (autorizado "+usd(g.monto)+")":" · factura coincide"):g.status==="approved"?" · FALTA REGISTRAR LA COMPRA":" · NO COINCIDE (autorizado "+usd(g.monto)+")"))});

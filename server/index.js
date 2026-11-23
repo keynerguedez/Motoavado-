@@ -83,6 +83,17 @@ function guardarClientes(c) { const tmp = CLIENTES + '.tmp'; fs.writeFileSync(tm
 function limpio(v, max) { return String(v == null ? '' : v).replace(/[\r\n\t]+/g, ' ').trim().slice(0, max); }
 function dinero(v) { const n = Math.round(Number(v) * 100) / 100; return n >= 0 && n < 100000 ? n : null; }
 function fechaCaracas(d) { return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Caracas' }).format(d); }
+const METODOS_PAGO = ['Pago móvil', 'Binance', 'Efectivo $', 'Efectivo Bs', 'Zelle'];
+// Pago dividido en dos métodos (por ejemplo mitad en efectivo y mitad en pago móvil): cada parte lleva su método, su referencia, la moneda en que se recibió y su equivalente en dólares; los dólares suman el total de la factura.
+function limpiarPagos(pagos, total) {
+  if (pagos == null) return null;
+  if (!Array.isArray(pagos) || pagos.length !== 2) return { error: 'El pago dividido debe tener dos partes.' };
+  const partes = pagos.map(x => ({ metodo: limpio(x && x.metodo, 20), ref: limpio(x && x.ref, 30), moneda: limpio(x && x.moneda, 6), monto: dinero(x && x.monto), usd: dinero(x && x.usd) }));
+  if (partes.some(x => !METODOS_PAGO.includes(x.metodo) || !x.usd || x.usd <= 0 || x.monto == null)) return { error: 'Cada parte del pago necesita su método y su monto.' };
+  if (partes[0].metodo === partes[1].metodo) return { error: 'Elige dos métodos distintos para dividir el pago.' };
+  if (Math.abs(partes[0].usd + partes[1].usd - total) > 0.05) return { error: 'Las dos partes no suman el total de la factura.' };
+  return partes;
+}
 const TIPOS_LAVADO = ['normal', 'garantia', 'autorizado'];
 const ETIQUETA_TIPO = { garantia: 'Garantía', autorizado: 'Lavado autorizado' };
 function registrarVenta(d, yo, extra) {
@@ -97,6 +108,7 @@ function registrarVenta(d, yo, extra) {
   // Tipo de lavado: garantía y autorizado solo los crea el servidor al aprobarse una autorización.
   const tipo = extra.tipo || 'normal';
   const pendiente = !extra.tipo && d.estado === 'pendiente';
+  const pagos = pendiente || extra.tipo ? null : limpiarPagos(d.pagos, total); if (pagos && pagos.error) return pagos;
   const nota = limpio(d.nota, 200);
   if (pendiente && nota.length < 3) return { error: 'Escribe una nota que explique por qué el pago queda pendiente.' };
   const ahora = new Date(), dia = fechaCaracas(ahora), archivo = path.join(DATA, 'ventas-' + dia.slice(0, 7) + '.jsonl');
@@ -105,6 +117,7 @@ function registrarVenta(d, yo, extra) {
     servicios, total, descuento: limpio(d.descuento, 10), lavador: limpio(d.lavador, 40), metodo: limpio(d.metodo, 20), ref: limpio(d.ref, 30), moneda: limpio(d.moneda, 6), monto: dinero(d.monto), esperado: dinero(d.esperado), tasa: Number(d.tasa) > 0 ? Number(d.tasa) : null,
     estado: pendiente ? 'pendiente' : 'pagada', tipo };
   if (nota) v.nota = nota;
+  if (pagos) Object.assign(v, { metodo: 'Mixto', pagos, ref: pagos.map(x => x.ref).filter(Boolean).join(' / '), moneda: '', monto: null, esperado: null });
   if (extra.autId) { v.autId = extra.autId; v.metodo = ETIQUETA_TIPO[tipo] || tipo; v.descuento = '100%'; v.monto = 0; }
   fs.appendFileSync(archivo, JSON.stringify(v) + '\n', { mode: 0o600 });
   const cs = leerClientes(), c = cs[tel] || { telefono: tel, nombre: '', motos: [], visitas: 0, gastado: 0, primera: v.fecha };
@@ -124,8 +137,10 @@ function cobrarPendiente(d, yo) {
     const filas = leerLineas(archivo), v = filas.find(x => x.id === id);
     if (!v) continue;
     if (v.estado !== 'pendiente') return { error: 'Esa factura ya está cobrada.' };
-    if (!limpio(d.metodo, 20)) return { error: 'Falta el método de pago.' };
+    const pagos = limpiarPagos(d.pagos, v.total); if (pagos && pagos.error) return pagos;
+    if (!pagos && !limpio(d.metodo, 20)) return { error: 'Falta el método de pago.' };
     Object.assign(v, { estado: 'pagada', metodo: limpio(d.metodo, 20), ref: limpio(d.ref, 30), moneda: limpio(d.moneda, 6), monto: dinero(d.monto), esperado: dinero(d.esperado), tasa: Number(d.tasa) > 0 ? Number(d.tasa) : null, cobradaPor: yo.nombre, cobradaFecha: new Date().toISOString(), cobradaDia: hoy });
+    if (pagos) Object.assign(v, { metodo: 'Mixto', pagos, ref: pagos.map(x => x.ref).filter(Boolean).join(' / '), moneda: '', monto: null, esperado: null });
     escribirLineas(archivo, filas);
     return { ok: true, id: v.id, num: v.num };
   }

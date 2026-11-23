@@ -372,7 +372,7 @@ var METHODS=["Pago móvil","Binance","Efectivo $","Efectivo Bs","Zelle"];
 var NEEDREF={"Pago móvil":1,"Binance":1,"Zelle":1};
 var S={
   user:"Operador 1", tasa:1003.49, recordDias:15, meta:30, encPct:2, encFijo:200, lavPago:1, pulPago:1.5, prodPct:10, prestamos:{}, abre:8, cierra:18, closed:null,
-  lavadores:["Yonaiker","Keive","Yondri"],
+  lavadores:["Yonaiker","Keive","Darwin","Yonathan"], lavAntiguos:["Yondri"], /* lavAntiguos: ya no atienden, pero conservan sus facturas y comisiones */
   services:[
     {id:"lp",cod:"LAV-01",name:"Lavado moto pequeña",price:5,cat:"Lavados",pay:"lav"},{id:"la",cod:"LAV-02",name:"Lavado moto grande",price:6,cat:"Lavados",pay:"lav"},
     {id:"rp",cod:"RID-01",name:"Ridery moto pequeña",price:4,cat:"Promoción Ridery",pay:"lav"},{id:"ra",cod:"RID-02",name:"Ridery moto grande",price:5,cat:"Promoción Ridery",pay:"lav"},
@@ -795,7 +795,7 @@ function cierreText(){
   L.push("","Meta del día: "+S.orders.length+" de "+S.meta+" motos"+(S.orders.length>=S.meta?" (cumplida)":""));
   var ops={}; S.orders.forEach(function(o){ops[o.op]=(ops[o.op]||0)+1});
   L.push("","Encargado ("+S.encPct+"% de lo que factura):"); Object.keys(ops).forEach(function(k){var tv=S.orders.filter(function(o){return o.op===k}).reduce(function(a,o){return a+total(o)},0);L.push("  "+k+": "+ops[k]+" motos, vendió "+usd(tv)+", gana "+usd(tv*S.encPct/100))});
-  L.push("","Lavadores ("+usd(S.lavPago)+" por lavado, "+usd(S.pulPago)+" por pulitura):"); S.lavadores.forEach(function(l){var c=lavCalc(l);if(c.n)L.push("  "+l+": "+c.n+" motos, "+usd(c.bruto)+" - productos "+usd(c.prod)+" - préstamo "+usd(c.pres)+" = "+usd(c.neto))});
+  L.push("","Lavadores ("+usd(S.lavPago)+" por lavado, "+usd(S.pulPago)+" por pulitura):"); S.lavadores.concat(S.lavAntiguos).forEach(function(l){var c=lavCalc(l);if(c.n)L.push("  "+l+": "+c.n+" motos, "+usd(c.bruto)+" - productos "+usd(c.prod)+" - préstamo "+usd(c.pres)+" = "+usd(c.neto))});
   L.push("","Servicios:"); S.services.forEach(function(s){if(byS[s.id])L.push("  "+s.name+": "+byS[s.id])});
   return L.join("\n");
 }
@@ -1111,7 +1111,7 @@ function lavCalc(l){
 var comSel=null;
 function renderCom(){
   var eo=mine(), et=eo.reduce(function(a,o){return a+total(o)},0), rw=function(a,b,strong){return '<div class="row" style="justify-content:space-between"><span>'+a+'</span><'+(strong?'b':'span')+' class="num">'+b+'</'+(strong?'b':'span')+'></div>'};
-  $("q-list").innerHTML='<button class="btn'+(comSel==="__enc"?' pri':'')+'" data-act="lavdet" data-l="__enc" style="display:flex;justify-content:space-between;gap:12px"><span>'+esc(S.user)+' (encargado)</span><span class="num">'+eo.length+' motos facturadas</span></button>'+S.lavadores.map(function(l){var c=lavCalc(l);return '<button class="btn'+(comSel===l?' pri':'')+'" data-act="lavdet" data-l="'+esc(l)+'" style="display:flex;justify-content:space-between;gap:12px"><span>'+esc(l)+'</span><span class="num">'+c.n+' motos</span></button>'}).join("");
+  $("q-list").innerHTML='<button class="btn'+(comSel==="__enc"?' pri':'')+'" data-act="lavdet" data-l="__enc" style="display:flex;justify-content:space-between;gap:12px"><span>'+esc(S.user)+' (encargado)</span><span class="num">'+eo.length+' motos facturadas</span></button>'+S.lavadores.concat(S.lavAntiguos).map(function(l){var c=lavCalc(l);return '<button class="btn'+(comSel===l?' pri':'')+'" data-act="lavdet" data-l="'+esc(l)+'" style="display:flex;justify-content:space-between;gap:12px"><span>'+esc(l)+'</span><span class="num">'+c.n+' motos</span></button>'}).join("");
   if(!comSel){$("q-det").innerHTML="";return}
   if(comSel==="__enc"){$("q-det").innerHTML='<div class="card stack" style="gap:6px"><h3>'+esc(S.user)+' (encargado)</h3>'+rw("Motos facturadas",eo.length)+rw("Total vendido",usd(et))+rw("Porcentaje sobre las ventas",S.encPct+"%")+'<div style="border-top:1px solid var(--line);padding-top:6px">'+rw("Le toca cobrar",usd(encGain()),true)+'</div><span class="note">Se calcula sobre todo lo que facturó. Aparte tiene su sueldo fijo de '+usd(S.encFijo)+' al mes.</span></div>';return}
   var c=lavCalc(comSel), row=function(a,b,strong){return '<div class="row" style="justify-content:space-between"><span>'+a+'</span><'+(strong?'b':'span')+' class="num">'+b+'</'+(strong?'b':'span')+'></div>'};
@@ -1119,12 +1119,12 @@ function renderCom(){
 }
 function renderAdminCom(){
   var eo=mine(), et=eo.reduce(function(a,o){return a+total(o)},0);
-  $("a-com").innerHTML='<div class="row" style="justify-content:space-between"><span>'+esc(S.user)+' (encargado) <span class="note">· '+eo.length+' motos · vendió '+usd(et)+' · '+S.encPct+'%</span></span><b class="num">'+usd(encGain())+'</b></div>'+S.lavadores.map(function(l){var c=lavCalc(l);return '<div class="row" style="justify-content:space-between"><span>'+esc(l)+' <span class="note">· '+c.n+' motos · bruto '+usd(c.bruto)+'</span></span><b class="num">'+usd(c.neto)+'</b></div>'}).join("");
+  $("a-com").innerHTML='<div class="row" style="justify-content:space-between"><span>'+esc(S.user)+' (encargado) <span class="note">· '+eo.length+' motos · vendió '+usd(et)+' · '+S.encPct+'%</span></span><b class="num">'+usd(encGain())+'</b></div>'+S.lavadores.concat(S.lavAntiguos).map(function(l){var c=lavCalc(l);return '<div class="row" style="justify-content:space-between"><span>'+esc(l)+' <span class="note">· '+c.n+' motos · bruto '+usd(c.bruto)+'</span></span><b class="num">'+usd(c.neto)+'</b></div>'}).join("");
 }
 function renderRules(){
   var f=function(label,attr,val,step){return '<label class="row price" style="justify-content:space-between"><span>'+label+'</span><input type="number" min="0" step="'+step+'" '+attr+' value="'+val+'"></label>'};
   $("a-rules").innerHTML=f("Encargado: % de lo que factura",'id="r-enc"',S.encPct,"0.1")+f("Lavador: $ por lavado",'id="r-lav"',S.lavPago,"0.25")+f("Lavador: $ por pulitura",'id="r-pul"',S.pulPago,"0.25")+f("Lavador: % que paga por productos",'id="r-prod"',S.prodPct,"1")
-    +S.lavadores.map(function(l,i){return f("Préstamo a descontar: "+esc(l),'id="r-pres-'+i+'" data-pres="'+esc(l)+'"',S.prestamos[l]||0,"1")}).join("");
+    +S.lavadores.concat(S.lavAntiguos).map(function(l,i){return f("Préstamo a descontar: "+esc(l),'id="r-pres-'+i+'" data-pres="'+esc(l)+'"',S.prestamos[l]||0,"1")}).join("");
 }
 function renderMeta(){
   var n=S.orders.length, d=new Date(), h=d.getHours()+d.getMinutes()/60;

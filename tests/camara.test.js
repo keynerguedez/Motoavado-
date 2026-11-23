@@ -547,8 +547,10 @@ test('enlazar a mano una moto vista sin factura con una factura: queda validada;
   const f = t.filas().find(x => x.id === 'mwoenl00001'); assert.equal(f.num, 17); assert.equal(f.estado, 'tarde');
   assert.match(t.c.cruces().items[0].nota, /moto vista AE4D41J en el puente 1 con la factura #17/);
   assert.match(t.c.enlazarFila('mwoenl00001', v, 'Raúl').error, /ya está enlazada/);
-  assert.match(t.c.enlazarFila('mwoenl00002', v, 'Raúl').error, /ya tiene su moto/);
-  assert.match(t.c.enlazarFila('mwoenl00002', v2, 'Raúl').error, /ya tiene su moto/);
+  // La factura ya tiene su moto en otra fila: la lectura es la misma moto con otra placa; se descarta del conteo sin enlazar nada.
+  assert.deepEqual(t.c.enlazarFila('mwoenl00002', v, 'Raúl'), { ok: true, fusionada: true });
+  const f2 = t.filas().find(x => x.id === 'mwoenl00002'); assert.equal(f2.estado, 'descartada'); assert.equal(f2.mismaDe, 17); assert.ok(f2.num == null);
+  assert.equal(t.c.cierre([v, v2], f2.dia).motosSinFactura, 0);
 });
 
 // ---------- llamadas a la API: esfuerzo bajo con respaldo y consumo registrado ----------

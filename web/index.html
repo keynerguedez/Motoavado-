@@ -1281,10 +1281,10 @@ document.addEventListener("click",function(ev){
     var lect=(fl.placa||fl.parcial||"").replace(/[^A-Z0-9]/g,"");
     var cand=S.orders.filter(function(o){return o.srvId&&!ya[o.num]}).map(function(o){var p=String(o.placa||"").replace(/[^A-Z0-9]/g,""),c=0;for(var i=0;i<Math.min(p.length,lect.length);i++)if(p[i]===lect[i])c++;return{o:o,c:c}}).sort(function(a,b){return b.c-a.c||b.o.num-a.o.num}).slice(0,8);
     var lista=cand.map(function(x){return "#"+x.o.num+" "+(x.o.placa||"sin placa")+" · "+x.o.time}).join("\n");
-    var num=window.prompt("¿Con qué factura de hoy se enlaza la moto vista "+(lect||"sin placa legible")+"?\nEscribe el número (sin #). Facturas sin moto enlazada, las más parecidas primero:\n"+lista);
+    var num=window.prompt("¿Con qué factura de hoy se enlaza la moto vista "+(lect||"sin placa legible")+"?\nEscribe el número (sin #). Si es la misma moto de una factura que ya tiene otra lectura, escribe el número de esa factura. Facturas sin moto enlazada, las más parecidas primero:\n"+lista);
     if(!num)return; num=parseInt(String(num).replace(/\D/g,""),10);
     var of=S.orders.filter(function(o){return o.num===num&&o.srvId})[0]; if(!of){toastWa("No se encontró la factura #"+num+" de hoy.");return}
-    jpost("/api/camara/historial/enlazar",{fila:fl.id,venta:of.srvId}).then(function(r){toastWa(r.ok?"Moto enlazada con la factura #"+num+" y validada.":(r.j.error||"No se pudo enlazar."));loadSinFact();loadCruces();loadHoyH()});
+    jpost("/api/camara/historial/enlazar",{fila:fl.id,venta:of.srvId}).then(function(r){toastWa(r.ok?(r.j&&r.j.fusionada?"Listo: esa lectura es la misma moto de la factura #"+num+" y ya no cuenta como moto sin factura.":"Moto enlazada con la factura #"+num+" y validada."):(r.j.error||"No se pudo enlazar."));loadSinFact();loadCruces();loadHoyH()});
   }
   else if(a==="adiahoy"){$("a-dia").value=hoyCaracas();elegirDiaAdmin("")}
   else if(a==="xval"){jpost("/api/camara/cruces/validar",{id:t.dataset.id,ok:t.dataset.v==="1"}).then(function(){loadCruces()})}

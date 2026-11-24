@@ -375,6 +375,19 @@ test('Revalidar: una factura sin placa enlazada a una moto se compara solo con e
   const n = await sola.c.revalidar(v, { soloPlaca: true }); assert.equal(n.tipo, 'ninguna'); assert.equal(sola.llamadas.comparar.length, 0);
 });
 
+test('Revalidar con la moto todavía en el puente: el puente también queda enlazado (no sigue "esperando") y una lectura posterior no lo deshace', async () => {
+  const hace = n => new Date(Date.now() - n * 60e3).toISOString();
+  const v = { id: 'abcdef123458', num: 2, placa: 'AB123CD', fecha: new Date().toISOString() };
+  const t = montar({ historial: [{ id: 'mwolv000001', puente: 2, placa: 'AD1Z3CD', estado: 'esperando', llegada: hace(5) }],
+    puentes: { 2: { estado: 'esperando', hid: 'mwolv000001', desde: hace(5), origen: 'alarma', placa: 'AD1Z3CD', confirmada: true, intentos: 3, leidoT: Date.now() } },
+    ventaFotos: [v], ventas: [() => v].map(f => f()), comparar: () => ({ misma: true, confianza: 'alta', motivo: 'igual' }), leer: haiku(() => ({ moto: true, placa: 'AD1Z3CD', parcial: '' })) });
+  const r = await t.c.revalidar(v); assert.equal(r.tipo, 'coincide');
+  assert.equal(t.pub(2).estado, 'ok'); assert.equal(t.pub(2).num, 2);
+  const f = t.filas()[0]; assert.equal(f.num, 2); assert.equal(f.estado, 'ok');
+  await t.ev(2); // otra lectura que no encaja con la placa de la factura
+  assert.equal(t.pub(2).estado, 'ok'); assert.equal(t.filas()[0].num, 2);
+});
+
 test('Revalidar: sin lecturas con esa placa busca entre todas las fotos de hoy, empezando por las más cercanas en el tiempo', async () => {
   const v = { id: 'abcdef123456', num: 4, placa: 'AJ0002E', fecha: new Date().toISOString() };
   const ruido = Array.from({ length: 30 }, (_, i) => ({ id: 'mwo9' + String(i).padStart(5, '0'), puente: 2, estado: 'esperando', llegada: new Date(Date.now() + (i + 60) * 60e3).toISOString(), foto: 'RUIDO' }));

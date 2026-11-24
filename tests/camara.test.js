@@ -363,6 +363,18 @@ test('Revalidar: encuentra la fila por placa parecida (0/O, 1/I) y la enlaza a l
   const f = t.filas()[0]; assert.equal(f.estado, 'tarde'); assert.equal(f.num, 9);
 });
 
+test('Revalidar: una factura sin placa enlazada a una moto se compara solo con esa moto: coincide la valida; si es otra moto lo marca "distinta"; sin moto enlazada no gasta comparaciones', async () => {
+  const v = { id: 'abcdef123457', num: 1, placa: '', sinPlaca: true, fecha: new Date().toISOString() };
+  const fila = { id: 'mwosp111111', puente: 2, estado: 'ok', num: 1, llegada: new Date(Date.now() - 60e3).toISOString() };
+  const si = montar({ historial: [fila], ventaFotos: [v], ventas: [v], comparar: () => ({ misma: true, confianza: 'alta', motivo: 'igual' }) });
+  const r = await si.c.revalidar(v, { soloPlaca: true });
+  assert.equal(r.tipo, 'coincide'); assert.equal(r.comparadas, 1); assert.equal(si.llamadas.comparar.length, 1);
+  const no = montar({ historial: [fila], ventaFotos: [v], ventas: [v], comparar: () => ({ misma: false, confianza: 'alta', motivo: 'otra moto' }) });
+  assert.equal((await no.c.revalidar(v, { soloPlaca: true })).tipo, 'distinta');
+  const sola = montar({ historial: [Object.assign({}, fila, { num: null })], ventaFotos: [v], ventas: [v] });
+  const n = await sola.c.revalidar(v, { soloPlaca: true }); assert.equal(n.tipo, 'ninguna'); assert.equal(sola.llamadas.comparar.length, 0);
+});
+
 test('Revalidar: sin lecturas con esa placa busca entre todas las fotos de hoy, empezando por las más cercanas en el tiempo', async () => {
   const v = { id: 'abcdef123456', num: 4, placa: 'AJ0002E', fecha: new Date().toISOString() };
   const ruido = Array.from({ length: 30 }, (_, i) => ({ id: 'mwo9' + String(i).padStart(5, '0'), puente: 2, estado: 'esperando', llegada: new Date(Date.now() + (i + 60) * 60e3).toISOString(), foto: 'RUIDO' }));

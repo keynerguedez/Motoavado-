@@ -400,8 +400,10 @@ function crear(ctx) {
     const tF = Date.parse(v.fecha) || Date.now(), margen = 30 * 60e3;
     const cercaEnHora = (e, m) => { const a = Date.parse(e.llegada), b = e.salida ? Date.parse(e.salida) : Date.now(); return tF >= a - (m == null ? margen : m) && tF <= b + (m == null ? margen : m); };
     const aproximada = e => { const lectura = limpiarPlaca(e.placa) || String(e.parcial || '').toUpperCase().replace(/[^A-Z0-9?]/g, ''); return lectura.length >= 5 && distSuave(lectura, placa) <= 2; };
+    // Factura sin placa: solo se compara con la(s) moto(s) que ya están enlazadas a ella (una llamada, no una búsqueda en todas las fotos del día).
     const filas = placa ? H.filter(e => e.dia === hoy && (exacta(e) || (cercaEnHora(e) && aproximada(e))))
-      .sort((a, b) => (exacta(b) - exacta(a)) || (Math.abs(Date.parse(a.llegada) - tF) - Math.abs(Date.parse(b.llegada) - tF))).slice(0, 3) : [];
+      .sort((a, b) => (exacta(b) - exacta(a)) || (Math.abs(Date.parse(a.llegada) - tF) - Math.abs(Date.parse(b.llegada) - tF))).slice(0, 3)
+      : H.filter(e => e.dia === hoy && e.num === v.num && e.estado !== 'descartada').slice(0, 2);
     const vistas = new Set(); let comparadas = 0, prev = [];
     if (filas.length) {
       const comps = (await Promise.all(filas.map(async e => { const f = fotoHist(e.id); vistas.add(e.id); return f ? { e, p: { n: e.puente }, r: await comparar(jpeg, f), foto: f } : null; }))).filter(Boolean);

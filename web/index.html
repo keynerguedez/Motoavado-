@@ -327,7 +327,7 @@ details.grp summary{cursor:pointer;font-weight:600;font-size:.9rem;color:var(--m
         <p class="note">Cada moto que la cámara detecta queda aquí con la foto que se usó para leer la placa. Escribe la placa real para medir los aciertos. Se guardan las últimas 600 lecturas.</p>
       </div>
       <div class="card stack" id="x-card">
-        <div class="row" style="flex-wrap:wrap;gap:10px"><h3 style="margin-right:auto">Cruce de fotos: la del encargado contra la de la cámara</h3><label class="row note" style="gap:6px"><input type="checkbox" id="x-todos" style="width:auto"> Mostrar también los que no coinciden</label><span class="pill mut" id="x-res">–</span></div>
+        <div class="row" style="flex-wrap:wrap;gap:10px"><h3 style="margin-right:auto">Cruce de fotos: la del encargado contra la de la cámara</h3><label class="row note" style="gap:6px">Día <input type="date" id="x-dia" style="width:auto"></label><button class="btn sm" data-act="xdiahoy">Todos los recientes</button><label class="row note" style="gap:6px"><input type="checkbox" id="x-todos" style="width:auto"> Mostrar también los que no coinciden</label><span class="pill mut" id="x-res">–</span></div>
         <div id="x-pend" class="row" style="flex-wrap:wrap;gap:6px"></div><div class="note" id="x-msg"></div>
         <div class="tablewrap"><table style="min-width:760px"><thead><tr><th>Hora</th><th>Factura</th><th>Foto del encargado</th><th>Foto del puente</th><th>Lo que dijo Claude</th><th>Resultado</th><th>¿Acertó?</th></tr></thead><tbody id="x-rows"><tr><td colspan="7" class="note">Cargando…</td></tr></tbody></table></div>
         <p class="note">Cuando el encargado registra una moto con foto, Claude la compara solo con la moto del puente que tiene la misma placa. Aquí ves las dos fotos, lo que respondió y por qué. Marca si acertó para medir la fiabilidad. Se guardan los últimos 100 cruces. <b>Revalidación automática:</b> cada minuto el sistema reintenta solo validar las facturas sin cruce (hasta 4 intentos por factura); las que queden sin resolver las validas tú a ojo.</p>
@@ -1118,7 +1118,7 @@ function renderSinFact(){
 var XR=null;
 function loadCruces(){
   if(!window.__yo)return;
-  fetch("/api/camara/cruces").then(function(r){return r.ok?r.json():null}).then(function(j){if(!j)return;XR=j;renderCruces()}).catch(function(){});
+  fetch("/api/camara/cruces"+($("x-dia")&&$("x-dia").value?"?dia="+encodeURIComponent($("x-dia").value):"")).then(function(r){return r.ok?r.json():null}).then(function(j){if(!j)return;XR=j;renderCruces()}).catch(function(){});
 }
 function renderCruces(){
   if(!XR||!$("x-rows"))return; var r=XR.resumen;
@@ -1126,7 +1126,7 @@ function renderCruces(){
   $("x-res").textContent=r.total+" cruces · "+(r.validados?r.acertó+" de "+r.validados+" validados bien":"sin validar");
   // Facturas de hoy con foto que todavía no tienen un cruce que coincida: se pueden revalidar contra las lecturas de hoy.
   var okIds={}; XR.items.forEach(function(x){if(x.tipo==="coincide"||x.tipo==="enlazada"||x.tipo==="manual"||x.tipo==="placa")okIds[x.venta.id]=1});
-  var pend=S.orders.filter(function(o){return o.srvId&&!o.sin&&o.placa&&!okIds[o.srvId]});
+  var pend=(XR.dia&&XR.dia!==hoyCaracas())?[]:S.orders.filter(function(o){return o.srvId&&!o.sin&&o.placa&&!okIds[o.srvId]}); // las facturas por revalidar son las de hoy
   $("x-pend").innerHTML=pend.length?'<span class="note">Sin cruce que coincida:</span>'+pend.map(function(o){return '<button class="btn sm" data-act="xrev" data-id="'+esc(o.srvId)+'" data-n="'+o.num+'">#'+o.num+' '+esc(o.placa)+' · Revalidar</button>'+(window.__yo&&window.__yo.rol==="dueno"?'<button class="btn sm" data-act="xman" data-id="'+esc(o.srvId)+'" data-n="'+o.num+'">Validar a ojo</button>':"")}).join(""):"";
   var TIPO={"placa":'<span class="pill ok">Validada por placa</span>',"manual":'<span class="pill ok">Validada a ojo</span>',"coincide":'<span class="pill ok">Misma moto</span>',"distinta":'<span class="pill bad">Otra moto con la misma placa</span>',"duda":'<span class="pill warn">Sin certeza</span>',"enlazada":'<span class="pill ok">Enlazada al puente</span>',"sin-coincidencia":'<span class="pill bad">No coincide</span>',"ambigua":'<span class="pill warn">Dudosa: varias</span>'};
   // Por defecto solo se muestra el cruce que coincide (uno por factura); los intentos que no coinciden se ocultan para no confundir.
@@ -1140,7 +1140,7 @@ function renderCruces(){
     var pu=(x.comps.length?"":'<span class="note">Sin foto de la cámara</span>')+x.comps.map(function(c){var d=c.misma===true?"misma":c.misma===false?"distinta":"no sabe";return '<div style="display:inline-block;margin:0 6px 6px 0;vertical-align:top">'+ph(c.url,(c.puente===5?"Fuera del puente":"Puente "+c.puente)+" · "+d)+'<div class="note">'+(c.puente===5?"Fuera":"Puente "+c.puente)+' · '+d+(c.confianza?' ('+c.confianza+')':'')+'</div></div>'}).join("");
     var mot=(x.tipo==="manual"?'<div class="note"><b>'+esc(x.por||"Dueño")+':</b> '+esc(x.nota||"")+'</div>':x.nota?'<div class="note">'+esc(x.nota)+'</div>':"")+x.comps.map(function(c){return '<div class="note"><b>'+(c.puente===5?"Fuera":"P"+c.puente)+':</b> '+esc(c.motivo||"–")+'</div>'}).join("");
     var v=x.valido, bt=function(val,txt,cls){return '<button class="btn sm'+(v===val?' '+cls:'')+'" data-act="xval" data-id="'+esc(x.id)+'" data-v="'+(val?1:0)+'">'+txt+'</button>'};
-    return '<tr><td class="num">'+hora+'<br><span class="note">'+esc(x.origen)+'</span></td><td><b>'+esc(tit)+'</b></td><td>'+ph(x.fotoVenta,tit)+'</td><td>'+pu+'</td><td>'+mot+'</td><td>'+(TIPO[x.tipo]||esc(x.tipo))+(x.puente?'<br><span class="note">'+(x.puente===5?"Fuera del puente":"Puente "+x.puente)+'</span>':"")+'</td><td><div class="row" style="gap:4px;flex-wrap:wrap">'+bt(true,"Sí","ok")+bt(false,"No","bad")+'</div></td></tr>'}).join(""):'<tr><td colspan="7" class="note">'+(XR.items.length?"Ningún cruce coincide todavía. Marca \"Mostrar también los que no coinciden\" para verlos.":"Todavía no hay cruces. Aparecen cuando el encargado registra una moto con foto.")+'</td></tr>';
+    return '<tr><td class="num">'+hora+'<br><span class="note">'+esc(x.origen)+'</span></td><td><b>'+esc(tit)+'</b></td><td>'+ph(x.fotoVenta,tit)+'</td><td>'+pu+'</td><td>'+mot+'</td><td>'+(TIPO[x.tipo]||esc(x.tipo))+(x.puente?'<br><span class="note">'+(x.puente===5?"Fuera del puente":"Puente "+x.puente)+'</span>':"")+'</td><td><div class="row" style="gap:4px;flex-wrap:wrap">'+bt(true,"Sí","ok")+bt(false,"No","bad")+'</div></td></tr>'}).join(""):'<tr><td colspan="7" class="note">'+(XR.dia&&!XR.items.length?"No hay cruces guardados de ese día (se guardan los últimos 300).":XR.items.length?"Ningún cruce coincide todavía. Marca \"Mostrar también los que no coinciden\" para verlos.":"Todavía no hay cruces. Aparecen cuando el encargado registra una moto con foto.")+'</td></tr>';
 }
 function renderHist(){
   if(!HIST)return; var a=document.activeElement; if(a&&a.id&&a.id.indexOf("hr-")===0)return;
@@ -1432,6 +1432,7 @@ document.addEventListener("click",function(ev){
     jpost("/api/camara/historial/reasignar",{fila:t.dataset.id,num:cn?+cn:null}).then(function(r){toastWa(r.ok?(cn?"Listo: esa moto quedó con la factura #"+cn+(r.j.liberadas?". La otra moto que tenía esa factura quedó sin factura.":"."):"Listo: la moto quedó sin factura."):(r.j.error||"No se pudo corregir."));loadHist();loadSinFact();loadHoyH()});
   }
   else if(a==="colareint"){vaciarCola()}
+  else if(a==="xdiahoy"){$("x-dia").value="";loadCruces()}
   else if(a==="elegircam"){FILACAM=FILACAM===t.dataset.id?"":t.dataset.id;renderCam()}
   else if(a==="adiahoy"){$("a-dia").value=hoyCaracas();elegirDiaAdmin("")}
   else if(a==="xval"){jpost("/api/camara/cruces/validar",{id:t.dataset.id,ok:t.dataset.v==="1"}).then(function(){loadCruces()})}
@@ -1554,6 +1555,7 @@ document.addEventListener("input",function(ev){
   else if(t.id==="p-monto")montoDif();
   else if(t.id==="p-usd1")renderSplit();
   else if(t.id==="x-todos")renderCruces();
+  else if(t.id==="x-dia")loadCruces();
   else if(t.id==="a-dia")elegirDiaAdmin(t.value);
   else if(t.id==="vv-z")actualizarVivo();
   else if(t.id==="a-tasa"){var x=parseFloat(t.value);if(x>0){S.tasa=x;draftTotal();renderAll()}}

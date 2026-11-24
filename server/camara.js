@@ -66,7 +66,9 @@ function crear(ctx) {
         hNuevo(p, f); const e0 = H[H.length - 1]; if (p.desde) { e0.llegada = p.desde; e0.dia = ctx.fechaCaracas(new Date(p.desde)); }
       }
       if (!p.hid) return; const e = H.find(x => x.id === p.hid); if (!e) return;
-      const nuevo = { placa: p.placa || e.placa || '', parcial: p.placa ? '' : (p.parcial || e.parcial || ''), motivo: p.motivo || '', estado: p.estado === 'libre' ? e.estado : p.estado, num: p.num == null ? null : p.num, aprox: p.aprox || '', sinPlaca: !!p.sinPlacaId };
+      // Una factura solo tiene una moto activa: si esta fila se enlaza a una factura que una fila anterior de hoy ya tiene, es la misma moto vista otra vez (por ejemplo en el área fuera del puente) y se descarta del conteo.
+      const repetida = p.num != null && H.some(x => x !== e && x.dia === e.dia && x.num === p.num && x.estado !== 'descartada' && String(x.llegada) < String(e.llegada));
+      const nuevo = { placa: p.placa || e.placa || '', parcial: p.placa ? '' : (p.parcial || e.parcial || ''), motivo: p.motivo || '', estado: repetida ? 'descartada' : (p.estado === 'libre' ? e.estado : p.estado), num: p.num == null ? null : p.num, aprox: p.aprox || '', sinPlaca: !!p.sinPlacaId, razon: p.razon || '', mismaDe: repetida ? p.num : '' };
       if (Object.keys(nuevo).some(k => (e[k] == null ? '' : e[k]) !== (nuevo[k] == null ? '' : nuevo[k]))) { Object.assign(e, nuevo); hSucio = true; }
     });
     try { hTarde(); } catch (e) {}
@@ -83,7 +85,7 @@ function crear(ctx) {
     const desde = vs.filter(x => String(x.fecha || '') >= e.llegada && !usadas.has(x.num));
     if (e.placa) return desde.find(x => limpiarPlaca(x.placa) === limpiarPlaca(e.placa)) || null;
     if (e.parcial) { const m = desde.filter(x => parcialSuave(e.parcial, limpiarPlaca(x.placa))); return m.length === 1 ? m[0] : null; }
-    return desde.find(x => x.sinPlaca) || null;
+    const sp = desde.filter(x => x.sinPlaca); return sp.length === 1 ? sp[0] : null; // con dos o más facturas sin placa no se adivina: queda por confirmar
   }
   // Una moto que bajó sin factura y se factura después queda "facturada después"; si pasan ESPERA_BAJADA_MIN minutos sin factura, salta la alerta.
   function hTarde() {
@@ -110,7 +112,14 @@ function crear(ctx) {
       if (e.estado === 'ok') r.verificadas++; else if (e.estado === 'alerta') r.sinFactura++; else if (e.estado === 'tarde') r.tarde++; else if (e.estado === 'espera') r.espera++; else r.esperando++;
       if (e.real) { r.conReal++; const real = limpiarPlaca(e.real); if (real && (limpiarPlaca(e.placa) === real || (e.parcial && coincideParcial(e.parcial, real)))) r.aciertos++; }
     });
-    return { dia: d, hoy, resumen: r, items: items.slice(0, 200).map(e => Object.assign({}, e, { foto: '/api/camara/hist/' + e.id + '.jpg' })) };
+    // Moto sin factura y sin placa legible: las facturas "sin placa" de hoy, aún sin moto, que podrían ser la suya (para que el dueño elija).
+    let libresSP = null;
+    const candidatas = e => {
+      if (d !== hoy || e.num != null || e.estado === 'descartada' || e.placa || e.parcial) return undefined;
+      if (!libresSP) { const ligadas = new Set(H.filter(x => x.dia === hoy && x.num != null && x.estado !== 'descartada').map(x => x.num)); libresSP = ctx.ventasDeHoy().filter(x => x.sinPlaca && !ligadas.has(x.num)); }
+      const c = libresSP.filter(x => String(x.fecha || '') >= e.llegada).map(x => x.num); return c.length ? c : undefined;
+    };
+    return { dia: d, hoy, resumen: r, items: items.slice(0, 200).map(e => Object.assign({}, e, { foto: '/api/camara/hist/' + e.id + '.jpg', candidatas: candidatas(e) })) };
   }
   function coincideParcial(parcial, real) { const nucleo = parcial.replace(/\?+$/, ''), abierta = nucleo.length < parcial.length; return (abierta ? real.length >= nucleo.length : real.length === nucleo.length) && [...nucleo].every((c, i) => c === '?' || c === real[i]); }
   function marcarReal(id, real) { const e = H.find(x => x.id === String(id)); if (!e) return false; e.real = limpiarPlaca(real).slice(0, 10); hSucio = true; hGuardar(); return true; }
@@ -596,9 +605,13 @@ function crear(ctx) {
   }
 
   // ---------- comparación con lo registrado hoy ----------
-  function registrada(placa) {
+  function registrada(placa, p) {
     if (!placa) return null;
-    return ctx.ventasDeHoy().find(v => limpiarPlaca(v.placa) === placa) || null;
+    const l = ctx.ventasDeHoy().filter(v => limpiarPlaca(v.placa) === placa);
+    if (l.length < 2) return l[0] || null;
+    // La misma placa tiene varias facturas hoy (la moto volvió): se queda con la que ya tenía, o con una que ninguna otra moto tiene.
+    const hoy = ctx.fechaCaracas(new Date()), ligadas = new Set(H.filter(x => x.dia === hoy && x.num != null && x.id !== (p && p.hid) && x.estado !== 'descartada').map(x => x.num));
+    return (p && l.find(v => v.num === p.num)) || l.find(v => !ligadas.has(v.num)) || l[0];
   }
   // Con una lectura parcial solo se da por registrada si UNA sola placa de hoy encaja (cada "?" vale cualquier carácter).
   function registradaParcial(parcial) {
@@ -617,26 +630,31 @@ function crear(ctx) {
       const vs = ctx.ventasDeHoy().find(x => x.id === vid);
       if (vs && vs.sinPlaca && !vs.placa && ctx.completarPlaca(vs.id, p.placa)) avisar('info', nombre(p.n) + ': la factura #' + vs.num + ' no tenía placa; la cámara leyó ' + p.placa + ' y se la completó.');
     }
-    let v = registrada(p.placa) || (vid && ctx.ventasDeHoy().find(x => x.id === vid)) || null, aprox = false;
-    if (!v && !p.placa && p.parcial) { v = registradaParcial(p.parcial); aprox = !!v; }
+    let v = registrada(p.placa, p), razon = v ? 'placa igual' : '', aprox = false;
+    if (!v && vid) { v = ctx.ventasDeHoy().find(x => x.id === vid) || null; if (v) razon = 'foto u orden'; }
+    if (!v && !p.placa && p.parcial) { v = registradaParcial(p.parcial); aprox = !!v; if (v) razon = 'placa parcial'; }
     // Placa completa que difiere en un solo carácter de UNA sola factura de hoy (la cámara confunde M/H, 0/O…) y que ningún otro puente tiene asignada: se da por registrada como aproximada.
     if (!v && p.placa) {
       const tomadas = new Set(S.puentes.filter(x => x !== p && x.estado === 'ok' && x.num != null).map(x => x.num));
       const cerca1 = ctx.ventasDeHoy().filter(x => x.placa && !tomadas.has(x.num) && limpiarPlaca(x.placa) !== p.placa && cerca(limpiarPlaca(x.placa), p.placa));
-      if (cerca1.length === 1) { v = cerca1[0]; aprox = true; }
+      if (cerca1.length === 1) { v = cerca1[0]; aprox = true; razon = 'placa parecida'; }
     }
     // Estaba enlazada a una factura y la lectura ya no encaja (cambió la moto o se corrigió la lectura): vuelve a "esperando" y se reevalúa.
     if (!v && p.estado === 'ok' && p.num != null && !p.sinPlacaId) { avisar('info', nombre(p.n) + ': la moto ya no coincide con la factura #' + p.num + '; se vuelve a evaluar.'); p.estado = 'esperando'; delete p.num; delete p.aprox; }
     if (v) {
       if (p.estado !== 'ok') avisar('ok', nombre(p.n) + ': ' + (aprox ? 'la lectura ' + (p.placa || p.parcial) + ' casi coincide con la moto ' + limpiarPlaca(v.placa) : 'se registró la moto ' + p.placa) + ' (#' + v.num + ').');
-      p.estado = 'ok'; p.num = v.num; if (aprox) p.aprox = limpiarPlaca(v.placa); else delete p.aprox; return;
+      p.estado = 'ok'; p.num = v.num; p.razon = razon; if (aprox) p.aprox = limpiarPlaca(v.placa); else delete p.aprox; return;
     }
     // Moto sin placa legible: si hoy hay una factura marcada "sin placa" que ningún otro puente tiene asignada, se da por registrada.
     if (!p.placa && !p.parcial) {
       const tomadas = new Set(S.puentes.filter(x => x !== p && (x.sinPlacaId || x.cruceId)).map(x => x.sinPlacaId || x.cruceId));
       // Una factura sin placa que ya tiene su moto en otra fila del historial de hoy no se le da a la siguiente moto sin placa del puente.
       const hoyH = ctx.fechaCaracas(new Date()), ligadas = new Set(H.filter(x => x.dia === hoyH && x.num != null && x.id !== p.hid && x.estado !== 'descartada').map(x => x.num));
-      const sp = ctx.ventasDeHoy().find(x => x.sinPlaca && !tomadas.has(x.id) && !ligadas.has(x.num) && (p.sinPlacaId ? x.id === p.sinPlacaId : true));
+      const libres = ctx.ventasDeHoy().filter(x => x.sinPlaca && !tomadas.has(x.id) && !ligadas.has(x.num) && (p.sinPlacaId ? x.id === p.sinPlacaId : true));
+      // Con dos o más facturas sin placa libres no se adivina cuál es: la moto queda por confirmar y el dueño elige (se anotan las candidatas).
+      const sp = libres.length === 1 ? libres[0] : null;
+      if (libres.length > 1) { const c = libres.map(x => x.num).join(','); if (p.candidatas !== c) { p.candidatas = c; avisar('info', nombre(p.n) + ': moto sin placa legible; podría ser la factura sin placa ' + libres.map(x => '#' + x.num).join(' o ') + '. Hay que confirmar cuál.'); } }
+      if (sp) { if (p.estado !== 'ok') avisar('ok', nombre(p.n) + ': moto sin placa legible, coincide con la factura sin placa #' + sp.num + '.'); p.estado = 'ok'; p.num = sp.num; p.sinPlacaId = sp.id; p.razon = 'única factura sin placa'; delete p.candidatas; return; }
       if (sp) { if (p.estado !== 'ok') avisar('ok', nombre(p.n) + ': moto sin placa legible, coincide con la factura sin placa #' + sp.num + '.'); p.estado = 'ok'; p.num = sp.num; p.sinPlacaId = sp.id; return; }
     }
     const min = (Date.now() - new Date(p.desde).getTime()) / 60000;

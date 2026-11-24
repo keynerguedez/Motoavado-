@@ -230,6 +230,38 @@ test('una factura sin placa que ya tiene su moto en el historial no se asigna a 
   assert.equal(libre.filas()[0].num, 11);
 });
 
+test('varias facturas sin placa libres: no se adivina cuál es, queda por confirmar con las candidatas; con una sola se enlaza y se anota la razón', async () => {
+  const sinLeer = haiku(() => ({ moto: true, placa: '', parcial: '', motivo: 'ilegible' }));
+  const dos = montar({ ventas: [{ id: 'v20', num: 20, placa: '', sinPlaca: true, fecha: new Date().toISOString() }, { id: 'v21', num: 21, placa: '', sinPlaca: true, fecha: new Date().toISOString() }], leer: sinLeer });
+  await dos.ev(1);
+  const f = dos.filas()[0]; assert.ok(f.num == null, 'con dos candidatas no se enlaza'); assert.deepEqual(f.candidatas, [20, 21]);
+  assert.ok(dos.log().some(l => /podría ser la factura sin placa #20 o #21/.test(l)));
+  const una = montar({ ventas: [{ id: 'v22', num: 22, placa: '', sinPlaca: true, fecha: new Date().toISOString() }], leer: sinLeer });
+  await una.ev(1);
+  assert.equal(una.filas()[0].num, 22); assert.equal(una.filas()[0].razon, 'única factura sin placa');
+});
+
+test('la misma placa con dos facturas hoy: la segunda visita toma la factura libre, no la que ya tiene la primera', async () => {
+  const hace = n => new Date(Date.now() - n * 60e3).toISOString();
+  const leer = haiku(() => ({ moto: true, placa: 'AB123CD', parcial: '' }));
+  const t = montar({ historial: [{ id: 'mwodu000001', puente: 1, placa: 'AB123CD', estado: 'ok', num: 30, llegada: hace(60), salida: hace(30) }],
+    ventas: [{ id: 'v30', num: 30, placa: 'AB123CD', fecha: hace(55) }, { id: 'v31', num: 31, placa: 'AB123CD', fecha: hace(2) }], leer, comparar: () => ({ misma: false, confianza: 'alta', motivo: 'otra visita' }) });
+  await t.ev(1);
+  const nueva = t.filas().find(x => x.id !== 'mwodu000001'); assert.equal(nueva.num, 31); assert.equal(nueva.razon, 'placa igual');
+  assert.equal(t.filas().find(x => x.id === 'mwodu000001').num, 30);
+});
+
+test('una factura solo tiene una moto activa: la segunda fila que se enlaza a la misma factura queda descartada como "misma moto"', async () => {
+  const hace = n => new Date(Date.now() - n * 60e3).toISOString();
+  const leer = haiku(() => ({ moto: true, placa: 'AB123CD', parcial: '' }));
+  const t = montar({ historial: [{ id: 'mwodu000002', puente: 1, placa: 'AB123CD', estado: 'ok', num: 30, llegada: hace(40), salida: hace(20) }],
+    ventas: [{ id: 'v30', num: 30, placa: 'AB123CD', fecha: hace(35) }], leer });
+  await t.ev(5);
+  const dup = t.filas().find(x => x.puente === 5); assert.equal(dup.estado, 'descartada'); assert.equal(dup.mismaDe, 30);
+  assert.equal(t.filas().find(x => x.id === 'mwodu000002').estado, 'ok');
+  assert.equal(t.c.cierre([{ id: 'v30', num: 30, placa: 'AB123CD', fecha: hace(35) }], HOY).motosSinFactura, 0);
+});
+
 test('pendientes: lo que se le recuerda al encargado son las motos montadas más de 5 min o ya bajadas sin factura (no las recién llegadas, falsos positivos, descartadas ni facturadas)', () => {
   const hace = n => new Date(Date.now() - n * 60e3).toISOString();
   const t = montar({ historial: [

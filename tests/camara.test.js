@@ -619,6 +619,21 @@ test('enlazar a mano una moto vista sin factura con una factura: queda validada;
   assert.equal(t.c.cierre([v, v2], f2.dia).motosSinFactura, 0);
 });
 
+test('corregir el enlace de una moto: pasa la factura a otra fila (la anterior queda sin factura), valida que exista y se puede quitar', () => {
+  const v17 = { id: 'cccccccccc17', num: 17, placa: 'AD5N53J', fecha: haceMin(5), estado: 'pagada' }, v10 = { id: 'cccccccccc10', num: 10, placa: 'AAA111', fecha: haceMin(9), estado: 'pagada' };
+  const t = montar({ historial: [{ id: 'mwocor00001', puente: 1, placa: 'AD5N53J', estado: 'tarde', num: 10, llegada: haceMin(200), salida: haceMin(180) }, { id: 'mwocor00002', puente: 2, placa: 'QWE789', estado: 'tarde', num: 17, llegada: haceMin(100), salida: haceMin(90) }, { id: 'mwocor00003', puente: 3, estado: 'alerta', llegada: haceMin(60), salida: haceMin(50) }], ventas: [v17, v10] });
+  const ventasDe = () => [v17, v10], fila = id => t.filas().find(x => x.id === id);
+  assert.ok(t.c.reasignarEnlace('no-existe', 17, ventasDe, 'Raúl').error);
+  assert.match(t.c.reasignarEnlace('mwocor00001', 99, ventasDe, 'Raúl').error, /No existe la factura #99/);
+  assert.deepEqual(t.c.reasignarEnlace('mwocor00001', 17, ventasDe, 'Raúl'), { ok: true, antes: 10, num: 17, liberadas: 1 });
+  assert.equal(fila('mwocor00001').num, 17); assert.equal(fila('mwocor00001').estado, 'tarde'); assert.equal(fila('mwocor00001').corregida.por, 'Raúl');
+  assert.ok(fila('mwocor00002').num == null); assert.equal(fila('mwocor00002').estado, 'alerta'); // quedó sin factura, a la vista
+  assert.deepEqual(t.c.reasignarEnlace('mwocor00002', 10, ventasDe, 'Raúl'), { ok: true, antes: null, num: 10, liberadas: 0 });
+  assert.deepEqual(t.c.reasignarEnlace('mwocor00003', null, ventasDe, 'Raúl'), { ok: true, antes: null, num: null, liberadas: 0 });
+  assert.equal(fila('mwocor00003').estado, 'alerta');
+  assert.equal(t.c.reasignarEnlace('mwocor00001', null, ventasDe, 'Raúl').ok, true); assert.ok(fila('mwocor00001').num == null);
+});
+
 // ---------- llamadas a la API: esfuerzo bajo con respaldo y consumo registrado ----------
 test('leerPlaca manda el esfuerzo de razonamiento configurado a Sonnet (no a Haiku), registra el consumo y, si la API rechaza el parámetro, reintenta sin él y deja de mandarlo', async () => {
   const https = require('https'), original = https.request, EventEmitter = require('events');

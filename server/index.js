@@ -549,6 +549,11 @@ async function api(req, res, ruta) {
     const r = camara.enlazarFila(d.fila, v, yo.nombre);
     return json(res, r.error ? 400 : 200, r);
   }
+  if (ruta === '/api/camara/historial/reasignar') {
+    if (yo.rol !== 'dueno') return json(res, 403, { error: 'Solo el dueño puede corregir un enlace.' });
+    const r = camara.reasignarEnlace(d.fila, d.num == null || d.num === '' ? null : d.num, dia => diaDeHoy(dia).ventas, yo.nombre);
+    return json(res, r.error ? 400 : 200, r);
+  }
   if (ruta === '/api/camara/historial/real') {
     if (!puede(yo, 'vigilante')) return json(res, 403, { error: 'No tienes permiso.' });
     return camara.marcarReal(d.id, d.real) ? json(res, 200, { ok: true }) : json(res, 404, { error: 'No se encontró la lectura.' });

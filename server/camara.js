@@ -89,7 +89,7 @@ function crear(ctx) {
   function hTarde() {
     const hoy = ctx.fechaCaracas(new Date()); let vs = null, usadas = null;
     H.forEach(e => {
-      if (e.dia !== hoy || !e.salida || (e.estado !== 'alerta' && e.estado !== 'espera')) return;
+      if (e.dia !== hoy || !e.salida || (e.estado !== 'alerta' && e.estado !== 'espera') || e.corregida) return; // una fila corregida a mano no se vuelve a enlazar sola
       vs = vs || ctx.ventasDeHoy(); usadas = usadas || new Set(H.filter(x => x.dia === hoy && x.num != null).map(x => x.num));
       const v = ventaDeFila(e, vs, usadas);
       if (v) { e.estado = 'tarde'; e.num = v.num; usadas.add(v.num); hSucio = true; return; }
@@ -552,6 +552,26 @@ function crear(ctx) {
     return { ok: true };
   }
 
+  // El dueño corrige a mano con qué factura quedó enlazada una moto ya vista, de cualquier día (por ejemplo cuando se enlazó a la factura equivocada). num = null quita el enlace.
+  // Si esa factura ya estaba en otra fila, esa fila queda sin factura. Solo toca el historial de la cámara, no las facturas ni los cobros.
+  function reasignarEnlace(idFila, num, ventasDe, quien) {
+    const e = H.find(x => x.id === String(idFila));
+    if (!e) return { error: 'No se encontró esa moto en el historial.' };
+    if (e.estado === 'descartada') return { error: 'Esa lectura está descartada.' };
+    const antes = e.num == null ? null : e.num;
+    if (num != null) {
+      num = parseInt(num, 10);
+      if (!(num > 0) || !ventasDe(e.dia).some(v => v.num === num)) return { error: 'No existe la factura #' + num + ' en ese día.' };
+    }
+    const libres = [];
+    if (num != null) H.forEach(x => { if (x !== e && x.dia === e.dia && x.num === num && x.estado !== 'descartada') { x.num = null; x.estado = x.salida ? 'alerta' : 'esperando'; x.corregida = { t: new Date().toISOString(), por: quien, antes: num }; libres.push(x.id); } });
+    e.num = num;
+    e.estado = num == null ? (e.salida ? 'alerta' : 'esperando') : (e.salida ? 'tarde' : 'ok');
+    e.corregida = { t: new Date().toISOString(), por: quien, antes };
+    hSucio = true; hGuardar();
+    return { ok: true, antes, num, liberadas: libres.length };
+  }
+
   // El dueño valida a ojo una factura cuando la cámara no guardó una foto de esa moto: queda registrado con su nombre y una nota.
   function validarManual(v, nota, quien) {
     nota = String(nota || '').trim().slice(0, 200); if (nota.length < 3) return { error: 'Escribe una nota (por qué la validas a ojo).' };
@@ -973,7 +993,7 @@ function crear(ctx) {
   }
   function foto(n) { try { return fs.readFileSync(path.join(FOTOS, 'camara-puente-' + Number(n) + '.jpg')); } catch (e) { return null; } }
 
-  return { cierre, pendientes, enlazarFila, autoEmparejarInversa, tieneFotoVenta, autoRevalidar, ventasValidadas, validarManual, revalidar, liberarPuente, cruces, validarCruce, fotoCruce, fotoVentaId, cruzar, leerFoto, evento, vista, fotoVista, publico, foto, historial, marcarReal, fotoHist, alarma, fotoRecibida, leerPlaca, FOTOS4K, PUENTES };
+  return { cierre, pendientes, enlazarFila, reasignarEnlace, autoEmparejarInversa, tieneFotoVenta, autoRevalidar, ventasValidadas, validarManual, revalidar, liberarPuente, cruces, validarCruce, fotoCruce, fotoVentaId, cruzar, leerFoto, evento, vista, fotoVista, publico, foto, historial, marcarReal, fotoHist, alarma, fotoRecibida, leerPlaca, FOTOS4K, PUENTES };
 }
 
 module.exports = { crear };

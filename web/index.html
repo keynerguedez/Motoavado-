@@ -1112,6 +1112,7 @@ function renderHist(){
   swapImgs($("h-rows"),items.length?items.map(function(e){
     var leida=e.placa?'<b>'+esc(e.placa)+'</b>':e.parcial?'<b>'+esc(e.parcial)+'</b> <span class="note">parcial</span>':'<span class="note">No legible'+(e.sinPlaca?" (factura sin placa)":"")+'</span>';
     var est=e.estado==="ok"?'<span class="pill ok">Con factura #'+esc(e.num)+(e.aprox?" · "+esc(e.aprox):"")+'</span>':e.estado==="alerta"?'<span class="pill bad">Sin factura</span>':e.estado==="espera"?'<span class="pill warn">Bajó · esperando factura</span>':e.estado==="descartada"?'<span class="pill mut">Lectura descartada</span>':e.estado==="tarde"?'<span class="pill warn">Facturada después #'+esc(e.num)+'</span>':'<span class="pill warn">Esperando</span>';
+    if(window.__yo&&window.__yo.rol==="dueno"&&e.estado!=="descartada")est+='<br><button class="btn sm" data-act="corregirenlace" data-id="'+esc(e.id)+'" data-n="'+esc(e.num==null?"":e.num)+'">Corregir enlace</button>';
     var hora=new Date(e.llegada).toLocaleTimeString("es-VE",{hour:"2-digit",minute:"2-digit",timeZone:"America/Caracas"});
     var real=e.real?'<b>'+esc(e.real)+'</b>':"";
     var ahora=ahoraIds[e.id]?'<span class="pill ok" style="margin-top:4px">En el puente ahora</span>':"";
@@ -1375,6 +1376,11 @@ document.addEventListener("click",function(ev){
     if(!num)return; num=parseInt(String(num).replace(/\D/g,""),10);
     var of=S.orders.filter(function(o){return o.num===num&&o.srvId})[0]; if(!of){toastWa("No se encontró la factura #"+num+" de hoy.");return}
     jpost("/api/camara/historial/enlazar",{fila:fl.id,venta:of.srvId}).then(function(r){toastWa(r.ok?(r.j&&r.j.fusionada?"Listo: esa lectura es la misma moto de la factura #"+num+" y ya no cuenta como moto sin factura.":"Moto enlazada con la factura #"+num+" y validada."):(r.j.error||"No se pudo enlazar."));loadSinFact();loadCruces();loadHoyH()});
+  }
+  else if(a==="corregirenlace"){
+    var cn=window.prompt("Corregir con qué factura de ese día queda esta moto.\nEscribe el número (sin #). Déjalo vacío para quitarle la factura."+(t.dataset.n?"\nAhora tiene la #"+t.dataset.n+".":"\nAhora no tiene factura."),t.dataset.n||"");
+    if(cn===null)return; cn=String(cn).replace(/\D/g,"");
+    jpost("/api/camara/historial/reasignar",{fila:t.dataset.id,num:cn?+cn:null}).then(function(r){toastWa(r.ok?(cn?"Listo: esa moto quedó con la factura #"+cn+(r.j.liberadas?". La otra moto que tenía esa factura quedó sin factura.":"."):"Listo: la moto quedó sin factura."):(r.j.error||"No se pudo corregir."));loadHist();loadSinFact();loadHoyH()});
   }
   else if(a==="adiahoy"){$("a-dia").value=hoyCaracas();elegirDiaAdmin("")}
   else if(a==="xval"){jpost("/api/camara/cruces/validar",{id:t.dataset.id,ok:t.dataset.v==="1"}).then(function(){loadCruces()})}

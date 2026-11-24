@@ -122,7 +122,25 @@ function crear(ctx) {
     return { dia: d, hoy, resumen: r, items: items.slice(0, 200).map(e => Object.assign({}, e, { foto: '/api/camara/hist/' + e.id + '.jpg', candidatas: candidatas(e) })) };
   }
   function coincideParcial(parcial, real) { const nucleo = parcial.replace(/\?+$/, ''), abierta = nucleo.length < parcial.length; return (abierta ? real.length >= nucleo.length : real.length === nucleo.length) && [...nucleo].every((c, i) => c === '?' || c === real[i]); }
-  function marcarReal(id, real) { const e = H.find(x => x.id === String(id)); if (!e) return false; e.real = limpiarPlaca(real).slice(0, 10); hSucio = true; hGuardar(); return true; }
+  // La placa real que anota quien mira el historial también sirve para enlazar: si la moto aún no tiene factura y UNA factura de ese día lleva esa placa, queda enlazada
+  // (si esa factura ya tenía otra fila, esta es la misma moto leída mal y se descarta del conteo). Devuelve false si no existe la fila.
+  function marcarReal(id, real, ventasDe, quien) {
+    const e = H.find(x => x.id === String(id)); if (!e) return false;
+    e.real = limpiarPlaca(real).slice(0, 10); hSucio = true;
+    const r = { ok: true };
+    if (ventasDe && e.real.length >= 5 && e.num == null && e.estado !== 'descartada') {
+      const l = ventasDe(e.dia).filter(v => limpiarPlaca(v.placa) === e.real);
+      const ligadas = new Set(H.filter(x => x !== e && x.dia === e.dia && x.num != null && x.estado !== 'descartada').map(x => x.num));
+      const v = l.length === 1 ? l[0] : l.filter(x => !ligadas.has(x.num)).length === 1 ? l.find(x => !ligadas.has(x.num)) : null;
+      if (v) {
+        const info = { t: new Date().toISOString(), por: quien || '', antes: null };
+        if (ligadas.has(v.num)) { e.estado = 'descartada'; e.mismaDe = v.num; r.fusionada = v.num; }
+        else { e.num = v.num; e.estado = e.salida ? 'tarde' : 'ok'; e.razon = 'placa real anotada'; r.enlazada = v.num; }
+        e.corregida = info;
+      }
+    }
+    hGuardar(); return r;
+  }
   function fotoHist(id) { if (!/^[a-z0-9]{6,20}$/.test(String(id))) return null; try { return fs.readFileSync(path.join(HFOTOS, id + '.jpg')); } catch (e) { return null; } }
   function avisar(kind, txt) { S.log.unshift({ t: new Date().toISOString(), kind, txt }); S.log.length = Math.min(S.log.length, MAX_LOG); }
   function cambioDeDia() { const d = ctx.fechaCaracas(new Date()); if (S.dia !== d) { S.dia = d; S.vistas = 0; S.autorev = {}; S.autoinv = {}; } }

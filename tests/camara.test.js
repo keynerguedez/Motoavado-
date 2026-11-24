@@ -231,12 +231,13 @@ test('una factura sin placa que ya tiene su moto en el historial no se asigna a 
 });
 
 test('varias facturas sin placa libres: no se adivina cuál es, queda por confirmar con las candidatas; con una sola se enlaza y se anota la razón', async () => {
+  const despues = new Date(Date.now() + 60e3).toISOString(); // facturas hechas después de que llegó la moto
   const sinLeer = haiku(() => ({ moto: true, placa: '', parcial: '', motivo: 'ilegible' }));
-  const dos = montar({ ventas: [{ id: 'v20', num: 20, placa: '', sinPlaca: true, fecha: new Date().toISOString() }, { id: 'v21', num: 21, placa: '', sinPlaca: true, fecha: new Date().toISOString() }], leer: sinLeer });
+  const dos = montar({ ventas: [{ id: 'v20', num: 20, placa: '', sinPlaca: true, fecha: despues }, { id: 'v21', num: 21, placa: '', sinPlaca: true, fecha: despues }], leer: sinLeer });
   await dos.ev(1);
   const f = dos.filas()[0]; assert.ok(f.num == null, 'con dos candidatas no se enlaza'); assert.deepEqual(f.candidatas, [20, 21]);
   assert.ok(dos.log().some(l => /podría ser la factura sin placa #20 o #21/.test(l)));
-  const una = montar({ ventas: [{ id: 'v22', num: 22, placa: '', sinPlaca: true, fecha: new Date().toISOString() }], leer: sinLeer });
+  const una = montar({ ventas: [{ id: 'v22', num: 22, placa: '', sinPlaca: true, fecha: despues }], leer: sinLeer });
   await una.ev(1);
   assert.equal(una.filas()[0].num, 22); assert.equal(una.filas()[0].razon, 'única factura sin placa');
 });
@@ -260,6 +261,29 @@ test('una factura solo tiene una moto activa: la segunda fila que se enlaza a la
   const dup = t.filas().find(x => x.puente === 5); assert.equal(dup.estado, 'descartada'); assert.equal(dup.mismaDe, 30);
   assert.equal(t.filas().find(x => x.id === 'mwodu000002').estado, 'ok');
   assert.equal(t.c.cierre([{ id: 'v30', num: 30, placa: 'AB123CD', fecha: hace(35) }], HOY).motosSinFactura, 0);
+});
+
+test('placa real anotada en el historial: enlaza la moto con la factura de esa placa, o la descarta como misma moto si esa factura ya tiene otra fila; sin factura única no enlaza', () => {
+  const hace = n => new Date(Date.now() - n * 60e3).toISOString();
+  const v33 = { id: 'v33', num: 33, placa: 'AV2J16V', fecha: hace(30) }, v40 = { id: 'v40', num: 40, placa: 'ZZ9Z99Z', fecha: hace(20) };
+  const t = montar({ historial: [
+    { id: 'mworl000001', puente: 2, parcial: 'AY2J16A?', estado: 'alerta', llegada: hace(50), salida: hace(25) },
+    { id: 'mworl000002', puente: 2, placa: 'AV2J16V', estado: 'tarde', num: 33, llegada: hace(24), salida: hace(10) },
+    { id: 'mworl000003', puente: 3, parcial: 'QQ?Q9?Q', estado: 'alerta', llegada: hace(40), salida: hace(30) },
+    { id: 'mworl000004', puente: 1, placa: 'NOHAY12', estado: 'alerta', llegada: hace(40), salida: hace(30) }], ventas: [v33, v40] });
+  const ventasDe = () => [v33, v40], fila = id => t.filas().find(x => x.id === id);
+  assert.equal(t.c.marcarReal('no-existe', 'X', ventasDe, 'Daniel'), false);
+  // la factura #33 ya tiene su fila (la lectura buena): esta es la misma moto leída mal
+  assert.deepEqual(t.c.marcarReal('mworl000001', 'av2j16v', ventasDe, 'Daniel'), { ok: true, fusionada: 33 });
+  assert.equal(fila('mworl000001').estado, 'descartada'); assert.equal(fila('mworl000001').mismaDe, 33); assert.equal(fila('mworl000001').real, 'AV2J16V');
+  // factura libre con esa placa: se enlaza y queda anotado quién lo hizo
+  assert.deepEqual(t.c.marcarReal('mworl000003', 'ZZ9Z99Z', ventasDe, 'Daniel'), { ok: true, enlazada: 40 });
+  assert.equal(fila('mworl000003').num, 40); assert.equal(fila('mworl000003').estado, 'tarde'); assert.equal(fila('mworl000003').corregida.por, 'Daniel');
+  // sin factura con esa placa: solo se anota la placa real, como antes
+  assert.deepEqual(t.c.marcarReal('mworl000004', 'NOHAY12', ventasDe, 'Daniel'), { ok: true });
+  assert.ok(fila('mworl000004').num == null); assert.equal(fila('mworl000004').estado, 'alerta');
+  // sin la función de facturas (uso antiguo) solo anota
+  assert.deepEqual(t.c.marcarReal('mworl000004', 'AAAAA11'), { ok: true });
 });
 
 test('pendientes: lo que se le recuerda al encargado son las motos montadas más de 5 min o ya bajadas sin factura (no las recién llegadas, falsos positivos, descartadas ni facturadas)', () => {

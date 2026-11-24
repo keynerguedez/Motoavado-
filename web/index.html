@@ -1017,7 +1017,7 @@ function toastWa(m,enlace){
   var t=document.getElementById("toast-wa"); if(!t){t=document.createElement("div");t.id="toast-wa";t.style.cssText="position:fixed;left:50%;bottom:24px;transform:translateX(-50%);max-width:min(92vw,520px);background:#0b0b0b;color:#fff;padding:12px 16px;border-radius:10px;font-size:.95rem;z-index:50;box-shadow:0 4px 18px rgba(0,0,0,.35)";document.body.appendChild(t)}
   t.textContent=m; t.style.display="";
   if(enlace){ // un enlace que la persona toca no lo bloquea el navegador como ventana emergente
-    var a=document.createElement("a"); a.href=enlace.href; a.target="_blank"; a.rel="noopener"; a.textContent=enlace.texto; a.style.cssText="display:inline-block;margin-left:10px;padding:6px 12px;border-radius:8px;background:#25d366;color:#08202B;font-weight:700;text-decoration:none";
+    var a=document.createElement("a"); a.href=enlace.href||"#"; if(enlace.click)a.onclick=function(ev){ev.preventDefault();enlace.click()}; else{a.target="_blank"; a.rel="noopener"} a.textContent=enlace.texto; a.style.cssText="display:inline-block;margin-left:10px;padding:6px 12px;border-radius:8px;background:#25d366;color:#08202B;font-weight:700;text-decoration:none";
     t.appendChild(a);
   }
   clearTimeout(t._h); t._h=setTimeout(function(){t.style.display="none"},enlace?20000:7000);
@@ -1050,7 +1050,8 @@ function compartirWa(o){
       if(w)toastWa("Texto copiado y WhatsApp abierto. Elige el grupo y pega el texto.");
       else toastWa("El texto quedó copiado. Si WhatsApp no se abrió, toca el botón:",{href:enlace,texto:"Abrir WhatsApp"}); // sin esto un bloqueo del navegador dejaba el botón sin hacer nada
     };
-    var fin=function(e){if(e&&e.name==="AbortError")return;plan()};
+    // Safari/Chrome en teléfono no abren el menú de compartir si pasó tiempo bajando la foto: ya quedó guardada, así que un toque nuevo la comparte al instante (en vez de mandar solo el texto).
+    var fin=function(e){if(e&&e.name==="AbortError")return; if(file&&e&&e.name==="NotAllowedError"){toastWa("La foto de la moto #"+o.num+" ya está lista.",{click:function(){compartirWa(o)},texto:"Compartir con foto"});return} plan()};
     if(file&&navigator.canShare&&navigator.canShare({files:[file]}))navigator.share({files:[file],text:texto,title:"Moto #"+o.num}).then(function(){toastWa("Moto #"+o.num+" compartida.")}).catch(fin);
     else if(navigator.share)navigator.share({text:texto}).then(function(){toastWa("Moto #"+o.num+" compartida (sin foto).")}).catch(fin);
     else plan();

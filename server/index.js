@@ -384,6 +384,19 @@ async function api(req, res, ruta) {
       dia.ventas = dia.ventas.map(v => Object.assign({}, v, { validada: !!(v.validada || val.has(v.id)), conFoto: camara.tieneFotoVenta(v.id) })); // validada: la factura ya cruzó su foto con la cámara
       return json(res, 200, dia);
     }
+    if (ruta === '/api/semana') { // motos facturadas por día en los 7 días que terminan en el día elegido (para el gráfico de Administración)
+      if (!puede(yo, 'tablet')) return json(res, 403, { error: 'No tienes permiso.' });
+      const hoy = fechaCaracas(new Date()), pedido = new URL(req.url, 'http://localhost').searchParams.get('dia') || '';
+      const fin = /^\d{4}-\d{2}-\d{2}$/.test(pedido) ? pedido : hoy;
+      if (fin !== hoy && !puede(yo, 'admin')) return json(res, 403, { error: 'Solo Administración puede ver otros días.' });
+      const meses = {}, nombres = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'], dias = [];
+      for (let i = 6; i >= 0; i--) {
+        const f = new Date(Date.parse(fin + 'T12:00:00Z') - i * 864e5), d = f.toISOString().slice(0, 10), m = d.slice(0, 7);
+        meses[m] = meses[m] || leerLineas(path.join(DATA, 'ventas-' + m + '.jsonl'));
+        dias.push({ dia: d, etiqueta: nombres[f.getUTCDay()], n: meses[m].filter(v => v.dia === d && !v.ejemplo).length });
+      }
+      return json(res, 200, { dias, fin });
+    }
     if (ruta === '/api/cliente') {
       if (!puede(yo, 'tablet')) return json(res, 403, { error: 'No tienes permiso.' });
       const q = new URL(req.url, 'http://localhost').searchParams;

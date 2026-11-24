@@ -751,7 +751,8 @@ function validadaO(o){
 }
 function pendientesValidacion(){return window.__yo?S.orders.filter(function(o){return o.pay&&o.srvId&&!validadaO(o)}):[]}
 /* Filtro de fecha de Administración: se muestra otro día intercambiando por un momento los datos (S.orders, S.clients, S.gastos) solo mientras se dibuja esa pantalla; la tablet y lo demás siguen con los de hoy. */
-var ADIA="", ADATA=null;
+var ADIA="", ADATA=null, WEEK=null;
+function loadSemana(){fetch("/api/semana"+(ADIA?"?dia="+encodeURIComponent(ADIA):"")).then(function(r){return r.ok?r.json():null}).then(function(j){if(!j)return;WEEK=j;renderAdmin()}).catch(function(){})}
 function hoyCaracas(){return new Date().toLocaleDateString("en-CA",{timeZone:"America/Caracas"})}
 function construirDia(d){
   var cols=["#2f3b46","#a8443c","#2b5f9e","#8a9aa5","#6b7780","#3f7a52"], R={orders:[],clients:{},gastos:[]};
@@ -771,8 +772,8 @@ function conDiaAdmin(fn){
   try{return fn()}finally{S.orders=o;S.clients=c;S.gastos=g}
 }
 function elegirDiaAdmin(v){
-  if(!v||v===hoyCaracas()){ADIA="";ADATA=null;renderAdmin();loadSinFact();loadConsumo();return}
-  fetch("/api/dia?dia="+encodeURIComponent(v)).then(function(r){return r.ok?r.json():null}).then(function(d){if(!d)return;ADIA=v;ADATA=construirDia(d);renderAdmin();loadSinFact();loadConsumo()}).catch(function(){});
+  if(!v||v===hoyCaracas()){ADIA="";ADATA=null;renderAdmin();loadSinFact();loadConsumo();loadSemana();return}
+  fetch("/api/dia?dia="+encodeURIComponent(v)).then(function(r){return r.ok?r.json():null}).then(function(d){if(!d)return;ADIA=v;ADATA=construirDia(d);renderAdmin();loadSinFact();loadConsumo();loadSemana()}).catch(function(){});
 }
 function renderAdmin(){
   conDiaAdmin(renderAdminBase);
@@ -809,7 +810,7 @@ function renderAdminBase(){
   S.services.forEach(function(s){maxS=Math.max(maxS,byS[s.id]||0)});
   $("a-svc").innerHTML=S.services.filter(function(s){return byS[s.id]}).map(function(s){var v=byS[s.id];return '<div class="bar"><span>'+esc(s.name)+'</span><i style="width:'+(v/maxS*100)+'%"></i><span class="num" style="text-align:right">'+v+'</span></div>'}).join("");
   renderAdminCom();
-  var w=S.week.concat([["Hoy",S.orders.length]]),mw=Math.max(1,Math.max.apply(null,w.map(function(x){return x[1]})));
+  var w=WEEK?WEEK.dias.map(function(x,i){return [i===WEEK.dias.length-1?(ADIA?x.etiqueta:"Hoy"):x.etiqueta,i===WEEK.dias.length-1?S.orders.length:x.n]}):S.week.concat([["Hoy",S.orders.length]]),mw=Math.max(1,Math.max.apply(null,w.map(function(x){return x[1]})));
   $("a-week").innerHTML=w.map(function(x,i){return '<div class="'+(i===w.length-1?"hoy":"")+'"><span class="num">'+x[1]+'</span><i style="height:'+(x[1]/mw*75)+'%"></i><span>'+x[0]+'</span></div>'}).join("");
   $("a-cli").innerHTML=Object.keys(S.clients).map(function(tel){
     var os=S.orders.filter(function(o){return o.tel===tel}), pl={}; os.forEach(function(o){pl[o.placa]=1});
@@ -1209,8 +1210,11 @@ function renderCom(){
   $("q-det").innerHTML='<div class="card stack" style="gap:6px"><h3>'+esc(comSel)+'</h3>'+row("Motos atendidas",c.n)+row("Lavados ("+c.nl+" × "+usd(S.lavPago)+")",usd(c.nl*S.lavPago))+row("Pulituras ("+c.np+" × "+usd(S.pulPago)+")",usd(c.np*S.pulPago))+row("Menos productos ("+S.prodPct+"%)","- "+usd(c.prod))+row("Menos préstamo","- "+usd(c.pres))+'<div style="border-top:1px solid var(--line);padding-top:6px">'+row("Le toca cobrar",usd(c.neto),true)+'</div>'+(c.debe>c.pres?'<span class="note">Le quedan '+usd(c.debe-c.pres)+' de préstamo por descontar.</span>':'')+'<span class="note">Sin sueldo fijo. Sale de las motos facturadas a su nombre.</span></div>';
 }
 function renderAdminCom(){
-  var eo=mine(), et=eo.reduce(function(a,o){return a+total(o)},0);
-  $("a-com").innerHTML='<div class="row" style="justify-content:space-between"><span>'+esc(S.user)+' (encargado) <span class="note">· '+eo.length+' motos · vendió '+usd(et)+' · '+S.encPct+'%</span></span><b class="num">'+usd(encGain())+'</b></div>'+S.lavadores.concat(S.lavAntiguos).map(function(l){var c=lavCalc(l);return '<div class="row" style="justify-content:space-between"><span>'+esc(l)+' <span class="note">· '+c.n+' motos · bruto '+usd(c.bruto)+'</span></span><b class="num">'+usd(c.neto)+'</b></div>'}).join("");
+  // El dueño ve a cada encargado que facturó ese día (no solo a quien tiene la sesión abierta); el encargado se ve a sí mismo.
+  var ops=window.__yo&&window.__yo.rol==="dueno"?S.orders.map(function(o){return o.op}).filter(function(x,i,a){return x&&a.indexOf(x)===i}):[S.user];
+  var encRows=ops.map(function(u){var eo=S.orders.filter(function(o){return o.op===u}),et=eo.reduce(function(a,o){return a+total(o)},0);
+    return '<div class="row" style="justify-content:space-between"><span>'+esc(u)+' (encargado) <span class="note">· '+eo.length+' motos · vendió '+usd(et)+' · '+S.encPct+'%</span></span><b class="num">'+usd(et*S.encPct/100)+'</b></div>'}).join("");
+  $("a-com").innerHTML=encRows+S.lavadores.concat(S.lavAntiguos).map(function(l){var c=lavCalc(l);return '<div class="row" style="justify-content:space-between"><span>'+esc(l)+' <span class="note">· '+c.n+' motos · bruto '+usd(c.bruto)+'</span></span><b class="num">'+usd(c.neto)+'</b></div>'}).join("");
 }
 function renderRules(){
   var f=function(label,attr,val,step){return '<label class="row price" style="justify-content:space-between"><span>'+label+'</span><input type="number" min="0" step="'+step+'" '+attr+' value="'+val+'"></label>'};
@@ -1536,6 +1540,7 @@ if(location.protocol!=="file:"&&window.fetch){fetch("/api/yo").then(function(r){
   loadTasa(); setInterval(loadTasa,30*60*1000);
   loadDia().then(ejemploDesdeEnlace); loadAuts(); setInterval(loadAuts,5000); setInterval(refrescarDia,5000); setInterval(function(){if($("v-clientes").classList.contains("on"))loadClientes()},15000); iniciarEnVivo();
   if(u.permisos.indexOf("tablet")>=0||u.permisos.indexOf("vigilante")>=0){loadPend();setInterval(loadPend,10000)}
+  if(u.permisos.indexOf("admin")>=0)loadSemana();
   if(u.permisos.indexOf("vigilante")>=0){loadCam();setInterval(loadCam,2000);loadHist();setInterval(loadHist,5000);loadCruces();setInterval(loadCruces,5000);loadHoyH();setInterval(loadHoyH,5000);loadSinFact();setInterval(loadSinFact,5000);loadConsumo();setInterval(loadConsumo,30000);$("h-dia").addEventListener("change",function(){HIST=null;loadHist()});$("h-ahora").addEventListener("change",renderHist)}
 }).catch(function(){})}
  $("a-meta").value=S.meta; renderRules(); setInterval(function(){renderVigilante();renderMeta()},30000);

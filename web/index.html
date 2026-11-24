@@ -124,6 +124,7 @@ details.grp summary{cursor:pointer;font-weight:600;font-size:.9rem;color:var(--m
 .logrow{display:flex;gap:10px;align-items:baseline;font-size:.92rem}
 .price input{width:84px;text-align:right}
 #pend-bar{position:sticky;top:0;z-index:30;background:var(--warn-bg);color:var(--ink);border-bottom:2px solid var(--warn);padding:8px 16px;cursor:pointer}
+#cola-bar{position:sticky;top:0;z-index:31;background:var(--bad-bg);color:var(--ink);border-bottom:2px solid var(--bad);padding:8px 16px;cursor:pointer;font-weight:600}
 #pend-bar.bad{background:var(--bad-bg);border-bottom-color:var(--bad)}
 #pend-bar b{font-family:var(--display);font-size:1.05rem}
 #pend-bar .pi{display:flex;gap:8px;flex-wrap:wrap;margin-top:4px;font-size:.92rem}
@@ -151,6 +152,7 @@ details.grp summary{cursor:pointer;font-weight:600;font-size:.9rem;color:var(--m
   <button class="btn sm" id="btn-reset" data-act="reset">Vaciar el día</button>
   <button class="btn sm" id="btn-ejborrar" data-act="ejborrar" hidden>Borrar datos de ejemplo</button>
 </header>
+<div id="cola-bar" data-act="colareint" hidden></div>
 <div id="pend-bar" data-act="go" data-v="tablet" hidden></div>
 <main>
   <!-- ============ TABLET ============ -->
@@ -626,8 +628,34 @@ function enviarFoto(o,id){
 function saveSale(o,sigue){
   if(!window.__yo){sigue();return} var a=paidAmt(o), pg=o.pay.parts?o.pay.parts.map(function(p){return{metodo:p.method,ref:p.ref,moneda:p.cur,monto:p.val,usd:p.usd}}):undefined;
   if(o.srvId){jpost("/api/ventas/cobrar",{id:o.srvId,metodo:o.pay.method,ref:o.pay.ref,moneda:a.cur,monto:a.val,esperado:o.pay.esp,tasa:o.pay.tasa,pagos:pg}).then(function(r){if(!r.ok)$("f-err").textContent="Ojo: el cobro de la moto #"+o.num+" no se guardó en el servidor ("+(r.j.error||"error")+"). Avisa al dueño.";sigue(r.ok?o.num:null)}).catch(function(){$("f-err").textContent="Ojo: sin conexión, el cobro de la moto #"+o.num+" no se guardó.";sigue(null)});return}
-  fetch("/api/ventas",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({telefono:o.tel,cliente:cliName(o),placa:o.sin?"":o.placa,sinPlaca:!!o.sin,modelo:o.modelo,servicios:o.svc.map(function(id){return{id:id,nombre:svc(id).name,precio:svc(id).price}}),total:total(o),descuento:o.disc&&o.disc.status==="approved"?o.disc.pct+"%":"",lavador:o.lav,metodo:o.pay.method,ref:o.pay.ref,moneda:a.cur,monto:a.val,esperado:o.pay.esp,tasa:o.pay.tasa,pagos:pg})})
-  .then(function(r){return r.json().then(function(j){if(!r.ok)$("f-err").textContent="Ojo: la moto #"+o.num+" no se guardó en el servidor. Avisa al dueño.";else enviarFoto(o,j.id);sigue(r.ok?j.num:null)})}).catch(function(){$("f-err").textContent="Ojo: sin conexión, la moto #"+o.num+" no se guardó en el servidor.";sigue(null)});
+  o.cid=o.cid||(Date.now().toString(36)+Math.random().toString(36).slice(2,10)); o.creadaEn=o.creadaEn||new Date().toISOString();
+  var cuerpo={telefono:o.tel,cliente:cliName(o),placa:o.sin?"":o.placa,sinPlaca:!!o.sin,modelo:o.modelo,servicios:o.svc.map(function(id){return{id:id,nombre:svc(id).name,precio:svc(id).price}}),total:total(o),descuento:o.disc&&o.disc.status==="approved"?o.disc.pct+"%":"",lavador:o.lav,metodo:o.pay.method,ref:o.pay.ref,moneda:a.cur,monto:a.val,esperado:o.pay.esp,tasa:o.pay.tasa,pagos:pg,cid:o.cid,creadaEn:o.creadaEn};
+  var sinEnviar=function(){encolarVenta(o,cuerpo);$("f-err").textContent="Sin conexión: la moto #"+o.num+" ("+(o.sin?"sin placa":o.placa)+") quedó guardada en este equipo y se enviará sola cuando vuelva la conexión. No la factures otra vez.";sigue(null)};
+  fetch("/api/ventas",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(cuerpo)})
+  .then(function(r){if(r.status>=500)return sinEnviar();return r.json().then(function(j){if(!r.ok)$("f-err").textContent="Ojo: la moto #"+o.num+" no se guardó en el servidor. Avisa al dueño.";else enviarFoto(o,j.id);sigue(r.ok?j.num:null)})}).catch(sinEnviar);
+}
+/* Facturas que no se pudieron enviar por falta de conexión: quedan guardadas en este equipo y se reintentan solas (cada 15 s y al volver la red). El servidor ignora una repetida (mismo cid). */
+var COLA_BUSY=false;
+function colaLeer(){try{return JSON.parse(localStorage.getItem("ml_cola")||"[]")}catch(e){return[]}}
+function colaGuardar(l){try{localStorage.setItem("ml_cola",JSON.stringify(l))}catch(e){}}
+function encolarVenta(o,cuerpo){var l=colaLeer(); if(!l.some(function(x){return x.cuerpo.cid===cuerpo.cid})){l.push({num:o.num,placa:o.sin?"sin placa":o.placa,cuerpo:cuerpo});colaGuardar(l)} renderCola()}
+function renderCola(){
+  var l=colaLeer(), b=$("cola-bar"); if(!b)return; b.hidden=!l.length;
+  if(l.length)b.textContent="⚠ "+l.length+(l.length===1?" factura sin enviar":" facturas sin enviar")+" al servidor ("+l.map(function(x){return "#"+x.num+" "+x.placa}).join(", ")+"). Se reintenta sola; toca aquí para reintentar ya.";
+}
+function vaciarCola(){
+  if(COLA_BUSY||!window.__yo)return; var l=colaLeer(); if(!l.length){renderCola();return} COLA_BUSY=true;
+  var paso=function(){
+    l=colaLeer(); if(!l.length){COLA_BUSY=false;renderCola();return} var it=l[0];
+    fetch("/api/ventas",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(it.cuerpo)}).then(function(r){
+      if(r.status>=500){COLA_BUSY=false;renderCola();return}
+      return r.json().then(function(j){
+        colaGuardar(colaLeer().filter(function(x){return x.cuerpo.cid!==it.cuerpo.cid}));
+        toastWa(r.ok?"Se guardó la factura que estaba sin enviar ("+it.placa+") como #"+j.num+".":"No se pudo guardar la factura sin enviar de "+it.placa+": "+(j.error||"error")+". Avisa al dueño.");
+        loadDia(); paso();
+      });
+    }).catch(function(){COLA_BUSY=false;renderCola()});
+  }; paso();
 }
 /* Pago que guardó el servidor: normal (un método) o dividido (v.pagos con dos partes). */
 function payDeSrv(v){
@@ -1072,7 +1100,7 @@ function renderSinFact(){
     var pu=e.puente===5?"Fuera del puente":"Puente "+e.puente, pl=e.placa||e.parcial||"placa no legible";
     var fin=e.salida?new Date(e.salida).getTime():Date.now(), min=Math.max(0,Math.round((fin-new Date(e.llegada).getTime())/60000));
     var est=e.estado==="esperando"?'<span class="pill warn">Esperando factura</span><br><span class="note">Llegó hace '+min+' min · está en el puente</span>':e.estado==="lavando"?'<span class="pill warn">En lavado · sin factura</span><br><span class="note">Lleva '+min+' min en el puente</span>':e.estado==="espera"?'<span class="pill warn">Bajó · esperando factura</span><br><span class="note">Estuvo '+min+' min</span>':'<span class="pill bad">Sin factura</span><br><span class="note">'+(e.salida?"Ya bajó · estuvo ":"Lleva ")+min+' min</span>';
-    return '<tr><td><img class="thumb" style="width:96px;height:72px;object-fit:cover;cursor:zoom-in" loading="lazy" src="'+esc(e.foto)+'" alt="Ampliar" data-act="foto" data-src="'+esc(e.foto)+'" data-t="'+esc(pu+" · "+hh(e.llegada)+" · "+pl)+'"></td><td class="num">'+hh(e.llegada)+(e.salida?'<br><span class="note">salió '+hh(e.salida)+'</span>':"")+'</td><td>'+pu+'</td><td><b>'+esc(pl)+'</b></td><td>'+est+(window.__yo&&window.__yo.rol==="dueno"&&!ADIA&&e.salida?'<br><button class="btn sm" data-act="enlazarfila" data-id="'+esc(e.id)+'">Enlazar a una factura</button>':"")+'</td></tr>';
+    return '<tr><td><img class="thumb" style="width:96px;height:72px;object-fit:cover;cursor:zoom-in" loading="lazy" src="'+esc(e.foto)+'" alt="Ampliar" data-act="foto" data-src="'+esc(e.foto)+'" data-t="'+esc(pu+" · "+hh(e.llegada)+" · "+pl)+'"></td><td class="num">'+hh(e.llegada)+(e.salida?'<br><span class="note">salió '+hh(e.salida)+'</span>':"")+'</td><td>'+pu+'</td><td><b>'+esc(pl)+'</b></td><td>'+est+(e.candidatas?'<br><span class="note">Podría ser la factura sin placa '+e.candidatas.map(function(n){return "#"+n}).join(" o ")+'</span>':"")+(window.__yo&&window.__yo.rol==="dueno"&&!ADIA&&e.salida?'<br><button class="btn sm" data-act="enlazarfila" data-id="'+esc(e.id)+'">Enlazar a una factura</button>':"")+'</td></tr>';
   }).join(""):'<tr><td colspan="5"><span class="pill ok">Todas las motos vistas por la cámara tienen factura</span></td></tr>';
 }
 var XR=null;
@@ -1113,6 +1141,9 @@ function renderHist(){
   swapImgs($("h-rows"),items.length?items.map(function(e){
     var leida=e.placa?'<b>'+esc(e.placa)+'</b>':e.parcial?'<b>'+esc(e.parcial)+'</b> <span class="note">parcial</span>':'<span class="note">No legible'+(e.sinPlaca?" (factura sin placa)":"")+'</span>';
     var est=e.estado==="ok"?'<span class="pill ok">Con factura #'+esc(e.num)+(e.aprox?" · "+esc(e.aprox):"")+'</span>':e.estado==="alerta"?'<span class="pill bad">Sin factura</span>':e.estado==="espera"?'<span class="pill warn">Bajó · esperando factura</span>':e.estado==="descartada"?'<span class="pill mut">Lectura descartada</span>':e.estado==="tarde"?'<span class="pill warn">Facturada después #'+esc(e.num)+'</span>':'<span class="pill warn">Esperando</span>';
+    if(e.razon&&e.num!=null&&e.estado!=="descartada")est+='<br><span class="note">Enlazada por: '+esc(e.razon)+'</span>';
+    if(e.estado==="descartada"&&e.mismaDe)est+='<br><span class="note">Misma moto de la factura #'+esc(e.mismaDe)+'</span>';
+    if(e.candidatas)est+='<br><span class="note">Podría ser la factura sin placa '+e.candidatas.map(function(n){return "#"+n}).join(" o ")+'</span>';
     if(window.__yo&&window.__yo.rol==="dueno"&&e.estado!=="descartada")est+='<br><button class="btn sm" data-act="corregirenlace" data-id="'+esc(e.id)+'" data-n="'+esc(e.num==null?"":e.num)+'">Corregir enlace</button>';
     var hora=new Date(e.llegada).toLocaleTimeString("es-VE",{hour:"2-digit",minute:"2-digit",timeZone:"America/Caracas"});
     var real=e.real?'<b>'+esc(e.real)+'</b>':"";
@@ -1388,6 +1419,7 @@ document.addEventListener("click",function(ev){
     if(cn===null)return; cn=String(cn).replace(/\D/g,"");
     jpost("/api/camara/historial/reasignar",{fila:t.dataset.id,num:cn?+cn:null}).then(function(r){toastWa(r.ok?(cn?"Listo: esa moto quedó con la factura #"+cn+(r.j.liberadas?". La otra moto que tenía esa factura quedó sin factura.":"."):"Listo: la moto quedó sin factura."):(r.j.error||"No se pudo corregir."));loadHist();loadSinFact();loadHoyH()});
   }
+  else if(a==="colareint"){vaciarCola()}
   else if(a==="adiahoy"){$("a-dia").value=hoyCaracas();elegirDiaAdmin("")}
   else if(a==="xval"){jpost("/api/camara/cruces/validar",{id:t.dataset.id,ok:t.dataset.v==="1"}).then(function(){loadCruces()})}
   else if(a==="hreal"){var hi=$("hr-"+t.dataset.id);if(hi)jpost("/api/camara/historial/real",{id:t.dataset.id,real:hi.value}).then(function(){hi.blur();loadHist()})}
@@ -1542,6 +1574,7 @@ if(location.protocol!=="file:"&&window.fetch){fetch("/api/yo").then(function(r){
   loadTasa(); setInterval(loadTasa,30*60*1000);
   loadDia().then(ejemploDesdeEnlace); loadAuts(); setInterval(loadAuts,5000); setInterval(refrescarDia,5000); setInterval(function(){if($("v-clientes").classList.contains("on"))loadClientes()},15000); iniciarEnVivo();
   if(u.permisos.indexOf("tablet")>=0||u.permisos.indexOf("vigilante")>=0){loadPend();setInterval(loadPend,10000)}
+  renderCola();vaciarCola();setInterval(vaciarCola,15000);window.addEventListener("online",vaciarCola);
   if(u.permisos.indexOf("admin")>=0)loadSemana();
   if(u.permisos.indexOf("vigilante")>=0){loadCam();setInterval(loadCam,2000);loadHist();setInterval(loadHist,5000);loadCruces();setInterval(loadCruces,5000);loadHoyH();setInterval(loadHoyH,5000);loadSinFact();setInterval(loadSinFact,5000);loadConsumo();setInterval(loadConsumo,30000);$("h-dia").addEventListener("change",function(){HIST=null;loadHist()});$("h-ahora").addEventListener("change",renderHist)}
 }).catch(function(){})}

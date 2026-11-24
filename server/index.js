@@ -111,12 +111,18 @@ function registrarVenta(d, yo, extra) {
   const pagos = pendiente || extra.tipo ? null : limpiarPagos(d.pagos, total); if (pagos && pagos.error) return pagos;
   const nota = limpio(d.nota, 200);
   if (pendiente && nota.length < 3) return { error: 'Escribe una nota que explique por qué el pago queda pendiente.' };
-  const ahora = new Date(), dia = fechaCaracas(ahora), archivo = path.join(DATA, 'ventas-' + dia.slice(0, 7) + '.jsonl');
+  // Factura que la tablet no pudo enviar (se cortó la conexión) y reintenta sola: trae un identificador (cid) para no duplicarla si la primera vez sí llegó, y la hora en que se hizo.
+  const cid = limpio(d.cid, 40).replace(/[^A-Za-z0-9-]/g, ''), creada = Date.parse(d.creadaEn);
+  const tardia = !extra.tipo && cid && creada && Date.now() - creada > 120e3 && Date.now() - creada < 36 * 3600e3;
+  const ahora = tardia ? new Date(creada) : new Date(), dia = fechaCaracas(ahora), archivo = path.join(DATA, 'ventas-' + dia.slice(0, 7) + '.jsonl');
+  if (cid) { try { const l = fs.readFileSync(archivo, 'utf8').split('\n').find(x => x.includes('"cid":"' + cid + '"')); if (l) { const o = JSON.parse(l); return { ok: true, id: o.id, num: o.num, repetida: true }; } } catch (e) {} }
   let delDia = 0; try { delDia = fs.readFileSync(archivo, 'utf8').split('\n').filter(l => l.includes('"dia":"' + dia + '"')).length; } catch (e) {}
   const v = { id: crypto.randomBytes(6).toString('hex'), num: delDia + 1, dia, fecha: ahora.toISOString(), usuario: yo.nombre, usuarioId: yo.id, telefono: tel, cliente: limpio(d.cliente, 60), placa, sinPlaca, modelo: limpio(d.modelo, 60),
     servicios, total, descuento: limpio(d.descuento, 10), lavador: limpio(d.lavador, 40), metodo: limpio(d.metodo, 20), ref: limpio(d.ref, 30), moneda: limpio(d.moneda, 6), monto: dinero(d.monto), esperado: dinero(d.esperado), tasa: Number(d.tasa) > 0 ? Number(d.tasa) : null,
     estado: pendiente ? 'pendiente' : 'pagada', tipo };
   if (nota) v.nota = nota;
+  if (cid) v.cid = cid;
+  if (tardia) v.tardia = true;
   if (pagos) Object.assign(v, { metodo: 'Mixto', pagos, ref: pagos.map(x => x.ref).filter(Boolean).join(' / '), moneda: '', monto: null, esperado: null });
   if (extra.autId) { v.autId = extra.autId; v.metodo = ETIQUETA_TIPO[tipo] || tipo; v.descuento = '100%'; v.monto = 0; }
   fs.appendFileSync(archivo, JSON.stringify(v) + '\n', { mode: 0o600 });

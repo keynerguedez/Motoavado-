@@ -608,8 +608,14 @@ function crear(ctx) {
     e.num = num;
     e.estado = num == null ? (e.salida ? 'alerta' : 'esperando') : (e.salida ? 'tarde' : 'ok');
     e.corregida = { t: new Date().toISOString(), por: quien, antes };
+    // La factura que esta fila deja libre pudo haber quedado "ocupada" por error mientras la moto verdadera se leyó aparte y se descartó como repetida (mismaDe): esa lectura recupera la factura.
+    let reabierta = null;
+    if (antes != null && antes !== num && !H.some(x => x.dia === e.dia && x.num === antes && x.estado !== 'descartada')) {
+      const r = H.find(x => x !== e && x.dia === e.dia && x.estado === 'descartada' && x.mismaDe === antes && x.num == null);
+      if (r) { r.num = antes; r.estado = r.salida ? 'tarde' : 'ok'; r.mismaDe = ''; r.razon = 'enlace corregido'; r.corregida = { t: new Date().toISOString(), por: quien, antes: null }; reabierta = r.id; }
+    }
     hSucio = true; hGuardar();
-    return { ok: true, antes, num, liberadas: libres.length };
+    return reabierta ? { ok: true, antes, num, liberadas: libres.length, reabierta } : { ok: true, antes, num, liberadas: libres.length };
   }
 
   // El encargado indica, al facturar, cuál de las motos que la cámara ve sin factura es esta (por si leyó mal la placa): se enlaza al momento y queda anotado.

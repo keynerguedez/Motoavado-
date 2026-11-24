@@ -755,6 +755,16 @@ test('corregir el enlace de una moto: pasa la factura a otra fila (la anterior q
   assert.equal(t.c.reasignarEnlace('mwocor00001', null, ventasDe, 'Raúl').ok, true); assert.ok(fila('mwocor00001').num == null);
 });
 
+test('corregir el enlace: la lectura descartada como repetida de esa factura (mismaDe) recupera la factura cuando la otra fila la deja libre', () => {
+  const v8 = { id: 'dddddddddd08', num: 8, placa: 'AG6O41M', fecha: haceMin(5), estado: 'pagada' }, v7 = { id: 'dddddddddd07', num: 7, placa: 'AV4I90F', fecha: haceMin(9), estado: 'pagada' };
+  const t = montar({ historial: [{ id: 'mworea00001', puente: 1, parcial: 'AV4I9G?', estado: 'tarde', num: 8, llegada: haceMin(200), salida: haceMin(150) }, { id: 'mworea00002', puente: 2, parcial: 'AG6041H?', estado: 'descartada', mismaDe: 8, real: 'AG6041H', llegada: haceMin(180), salida: haceMin(120) }], ventas: [v7, v8] });
+  const ventasDe = () => [v7, v8], fila = id => t.filas().find(x => x.id === id);
+  const r = t.c.reasignarEnlace('mworea00001', 7, ventasDe, 'Raúl');
+  assert.equal(r.reabierta, 'mworea00002');
+  assert.equal(fila('mworea00001').num, 7);
+  assert.equal(fila('mworea00002').num, 8); assert.equal(fila('mworea00002').estado, 'tarde'); assert.ok(!fila('mworea00002').mismaDe);
+});
+
 // ---------- llamadas a la API: esfuerzo bajo con respaldo y consumo registrado ----------
 test('leerPlaca manda el esfuerzo de razonamiento configurado a Sonnet (no a Haiku), registra el consumo y, si la API rechaza el parámetro, reintenta sin él y deja de mandarlo', async () => {
   const https = require('https'), original = https.request, EventEmitter = require('events');

@@ -388,6 +388,9 @@ function crear(ctx) {
   // o ya enlazada a esa factura. 2) Si no hay ninguna o ninguna coincide, busca entre TODAS las fotos de la cámara guardadas hoy (historial y cruces), por si la fila de esa moto se reescribió.
   function vincularFila(e, v) {
     if (e && (e.num == null || e.num === v.num)) { e.num = v.num; if (e.estado === 'alerta' || e.estado === 'espera') e.estado = e.salida ? 'tarde' : 'ok'; hSucio = true; hGuardar(); }
+    // Si la moto sigue en un puente, el puente también queda enlazado: si no, el puente sigue en "esperando" y su siguiente lectura (que no encaja con la factura) deshace el enlace de la fila.
+    const p = e && S.puentes.find(x => x.hid === e.id && x.estado !== 'libre');
+    if (p && (p.num == null || p.num === v.num)) { p.num = v.num; p.estado = 'ok'; p.cruceId = v.id; p.razon = p.razon || 'foto validada'; delete p.aprox; if (e.num === v.num && e.estado === 'esperando') e.estado = 'ok'; hSucio = true; }
   }
   async function revalidar(v, opc) {
     opc = opc || {}; const org = opc.origen || 'revalidación';

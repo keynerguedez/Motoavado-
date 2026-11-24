@@ -1337,8 +1337,10 @@ function loadAuts(){
 }
 function renderAll(){
   renderMeta();renderTablet();renderAdmin();renderAuts();renderGastos();renderMis();renderCom();renderVigilante();
-  if(!S.orders.length){$("a-rows").innerHTML='<tr><td colspan="9" class="note">Sin motos facturadas todavía.</td></tr>';$("a-svc").innerHTML='<span class="note">Sin ventas todavía.</span>'}
-  if(!Object.keys(S.clients).length)$("a-cli").innerHTML='<tr><td colspan="5" class="note">Se llena sola con cada moto que factures.</td></tr>';
+  conDiaAdmin(function(){ // con un día anterior elegido se mira ese día, no el de hoy (que puede estar vacío)
+    if(!S.orders.length){$("a-rows").innerHTML='<tr><td colspan="9" class="note">'+(ADIA?"Ese día no hubo motos facturadas.":"Sin motos facturadas todavía.")+'</td></tr>';$("a-svc").innerHTML='<span class="note">'+(ADIA?"Sin ventas ese día.":"Sin ventas todavía.")+'</span>'}
+    if(!Object.keys(S.clients).length)$("a-cli").innerHTML='<tr><td colspan="5" class="note">Se llena sola con cada moto que factures.</td></tr>';
+  });
 }
 function isEnc(){return $("role").value==="enc"}
 function allowed(v){var y=window.__yo; if(y&&y.rol!=="dueno")return y.permisos.indexOf(v)>=0; return !(isEnc()&&(v==="admin"||v==="vigilante"||v==="clientes"||v==="autorizar"))}

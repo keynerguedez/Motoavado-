@@ -95,7 +95,7 @@ function limpiarPagos(pagos, total) {
   return partes;
 }
 const TIPOS_LAVADO = ['normal', 'garantia', 'autorizado'];
-const ETIQUETA_TIPO = { garantia: 'Garantía', autorizado: 'Lavado autorizado' };
+const ETIQUETA_TIPO = { garantia: 'Garantía', autorizado: 'Regalo' };
 function registrarVenta(d, yo, extra) {
   extra = extra || {};
   const tel = String(d.telefono || '').replace(/\D/g, '');
@@ -325,6 +325,18 @@ async function waEnviar(para, cuerpo) {
   } catch (e) { return { ok: false, error: 'No se pudo llegar a Meta. Intenta de nuevo.' }; }
 }
 
+// Aviso a los dueños cuando se pide un regalo o una garantía: números en AVISO_DUENOS (separados por coma) del archivo vault/.env. La decisión se toma en la pestaña Autorizaciones.
+function avisarDuenosAut(id) {
+  try {
+    const a = leerAuts().find(x => x.id === id); if (!a || a.tipo === 'descuento') return;
+    const nums = String(process.env.AVISO_DUENOS || '').split(',').map(waNumero).filter(Boolean);
+    if (!nums.length || !waqr || !waqr.conectado()) return;
+    const que = a.tipo === 'garantia' ? 'una GARANTÍA (el lavado salió mal)' : 'un REGALO (lavado sin cobro)';
+    const texto = '*Motolavado R1 · por autorizar*\n' + a.pidio + ' pide ' + que + '.\nMoto: ' + (a.placa || 'sin placa') + (a.modelo ? ' · ' + a.modelo : '') + '\nServicios: ' + a.servicios.map(x => x.nombre).join(' + ') + ' (valor $' + a.lista + ')\nMotivo: ' + a.motivo + '\n\nEntra a la pestaña *Autorizaciones* para aprobar o negar.';
+    nums.forEach(n => waqr.enviarTexto(n, texto).catch(() => {}));
+  } catch (e) {}
+}
+
 // ---------- WhatsApp por QR (provisional) y ticket ----------
 // Un fallo de la librería de WhatsApp nunca debe tumbar la facturación.
 process.on('unhandledRejection', (r) => console.error('rechazo sin atender:', r && r.message || r));
@@ -526,6 +538,7 @@ async function api(req, res, ruta) {
   if (ruta === '/api/autorizaciones') {
     if (!puede(yo, 'tablet')) return json(res, 403, { error: 'No tienes permiso.' });
     const r = pedirAut(d, yo);
+    if (r.ok) avisarDuenosAut(r.id); // garantías y regalos: el aviso por WhatsApp no frena ni rompe la solicitud
     return json(res, r.error ? 400 : 200, r);
   }
   if (ruta === '/api/autorizaciones/decidir') {

@@ -184,7 +184,7 @@ details.grp summary{cursor:pointer;font-weight:600;font-size:.9rem;color:var(--m
         <div class="note" id="f-cli"></div>
         <div><div class="note" style="margin-bottom:6px;font-weight:600">2. ¿Qué se le va a hacer?</div><div class="stack" style="gap:8px" id="f-chips"></div></div>
         <div class="row"><label class="f">Lavador que la atiende<select id="f-lav"></select></label>
-          <label class="f">Tipo de lavado<select id="f-tipo"><option value="normal">Normal</option><option value="garantia">Garantía (el lavado salió mal)</option><option value="autorizado">Lavado autorizado (apoyo o regalo)</option></select></label></div>
+          <label class="f">Tipo de lavado<select id="f-tipo"><option value="normal">Normal</option><option value="garantia">Garantía (el lavado salió mal)</option><option value="autorizado">Regalo (lavado autorizado, sin cobro)</option></select></label></div>
         <div class="row">
           <label class="f">Descuento (requiere autorización)
             <select id="f-desc"><option value="0">Sin descuento</option><option value="10">10%</option><option value="20">20%</option><option value="50">50%</option><option value="100">Cortesía (100%)</option></select></label>
@@ -524,7 +524,7 @@ function addOrder(pend){
     jpost("/api/autorizaciones",authBody(o,motivo)).then(function(r){
       if(!r.ok){$("f-err").textContent=r.j.error||"No se pudo pedir la autorización.";return}
       o.autId=r.j.id; commitOrder(o);
-      $("f-err").textContent=tipo==="normal"?"Moto #"+o.num+" en espera: se pidió autorización del descuento. Se cobra cuando respondan.":"Solicitud enviada ("+(tipo==="garantia"?"garantía":"lavado autorizado")+"). Cuando un dueño o administrador la apruebe, la moto queda registrada sin cobro.";
+      $("f-err").textContent=tipo==="normal"?"Moto #"+o.num+" en espera: se pidió autorización del descuento. Se cobra cuando respondan.":"Solicitud enviada ("+(tipo==="garantia"?"garantía":"regalo")+"). Cuando un dueño o administrador la apruebe, la moto queda registrada sin cobro.";
     });return}
   pendingNew=o; openPayObj(o);
 }
@@ -1310,7 +1310,7 @@ function readInvoice(g,u){
   }).catch(function(){g.ai={total:null};renderAll()});
 }
 var AUTS=[];
-function autTxt(a){return a.tipo==="descuento"?a.pct+"% de descuento":a.tipo==="garantia"?"una garantía":"un lavado autorizado (sin cobro)"}
+function autTxt(a){return a.tipo==="descuento"?a.pct+"% de descuento":a.tipo==="garantia"?"una garantía":"un regalo (lavado autorizado, sin cobro)"}
 function autInfo(a){return esc(a.sinPlaca?"SIN PLACA":a.placa)+" · "+esc(a.servicios.map(function(x){return x.nombre}).join(" + "))+" · "+usd(a.lista||0)+"<br>Cliente: "+esc(a.cliente||"Sin nombre")+" · Motivo: "+esc(a.motivo)}
 function renderAuts(){
   var yo=window.__yo, pend=AUTS.filter(function(a){return a.estado==="pendiente"}), hist=AUTS.filter(function(a){return a.estado!=="pendiente"});
@@ -1329,7 +1329,7 @@ function loadAuts(){
       if(!o.autId)return; var a=l.filter(function(x){return x.id===o.autId})[0]; if(!a||a.estado==="pendiente")return;
       if(a.tipo==="descuento"){ if(o.disc&&o.disc.status==="pending")o.disc.status=a.estado==="aprobada"?"approved":"rejected"; return }
       S.orders=S.orders.filter(function(x){return x!==o});
-      if(a.estado==="aprobada")recargar=true; else msg="Solicitud de "+(a.tipo==="garantia"?"garantía":"lavado autorizado")+" de "+a.placa+" negada por "+a.decidio+(a.nota?": "+a.nota:".");
+      if(a.estado==="aprobada")recargar=true; else msg="Solicitud de "+(a.tipo==="garantia"?"garantía":"regalo")+" de "+a.placa+" negada por "+a.decidio+(a.nota?": "+a.nota:".");
     });
     if(msg)$("f-err").textContent=msg;
     if(recargar){loadDia();$("f-err").textContent="Autorización aprobada: la moto quedó registrada sin cobro."} else renderAll();

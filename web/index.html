@@ -1013,9 +1013,14 @@ function textoWa(o){
 }
 function esc0(x){return String(x==null?"":x)}
 var ESMOVIL=/Android|iPhone|iPad|iPod/i.test(navigator.userAgent)||(navigator.maxTouchPoints>1&&/Macintosh/.test(navigator.userAgent)), WAB={};
-function toastWa(m){
+function toastWa(m,enlace){
   var t=document.getElementById("toast-wa"); if(!t){t=document.createElement("div");t.id="toast-wa";t.style.cssText="position:fixed;left:50%;bottom:24px;transform:translateX(-50%);max-width:min(92vw,520px);background:#0b0b0b;color:#fff;padding:12px 16px;border-radius:10px;font-size:.95rem;z-index:50;box-shadow:0 4px 18px rgba(0,0,0,.35)";document.body.appendChild(t)}
-  t.textContent=m; t.style.display=""; clearTimeout(t._h); t._h=setTimeout(function(){t.style.display="none"},7000);
+  t.textContent=m; t.style.display="";
+  if(enlace){ // un enlace que la persona toca no lo bloquea el navegador como ventana emergente
+    var a=document.createElement("a"); a.href=enlace.href; a.target="_blank"; a.rel="noopener"; a.textContent=enlace.texto; a.style.cssText="display:inline-block;margin-left:10px;padding:6px 12px;border-radius:8px;background:#25d366;color:#08202B;font-weight:700;text-decoration:none";
+    t.appendChild(a);
+  }
+  clearTimeout(t._h); t._h=setTimeout(function(){t.style.display="none"},enlace?20000:7000);
 }
 function fotoWa(o){
   if(o.fotoGrande)return Promise.resolve(o.fotoGrande);
@@ -1032,14 +1037,19 @@ function compartirWa(o){
   var texto=textoWa(o), enlace="https://wa.me/?text="+encodeURIComponent(texto), enlaceWeb="https://web.whatsapp.com/send?text="+encodeURIComponent(texto);
   try{navigator.clipboard&&navigator.clipboard.writeText(texto)}catch(e){}
   if(!ESMOVIL){ // computador: WhatsApp Web se abre ya con la lista de chats y el texto puesto (sin la página intermedia de wa.me); la foto se baja para adjuntarla
-    window.open(enlaceWeb,"_blank");
-    toastWa("Se abrió WhatsApp Web con el texto (también quedó copiado). Elige el grupo.");
+    var ww=null; try{ww=window.open(enlaceWeb,"_blank")}catch(e){}
+    if(ww)toastWa("Se abrió WhatsApp Web con el texto (también quedó copiado). Elige el grupo.");
+    else toastWa("El navegador bloqueó la ventana (el texto quedó copiado). Toca el botón:",{href:enlaceWeb,texto:"Abrir WhatsApp Web"});
     fotoWa(o).then(function(blob){if(blob){descargarFotoWa(o,blob);toastWa("Se abrió WhatsApp con el texto. La foto de la moto #"+o.num+" se descargó: adjúntala al chat.")}});
     return;
   }
   var enviar=function(blob){
     var file=blob&&window.File?new File([blob],"moto-"+o.num+".jpg",{type:"image/jpeg"}):null;
-    var plan=function(){window.open(enlace,"_blank");toastWa("Texto copiado y WhatsApp abierto. Elige el grupo y pega el texto.")};
+    var plan=function(){
+      var w=null; try{w=window.open(enlace,"_blank")}catch(e){}
+      if(w)toastWa("Texto copiado y WhatsApp abierto. Elige el grupo y pega el texto.");
+      else toastWa("El texto quedó copiado. Si WhatsApp no se abrió, toca el botón:",{href:enlace,texto:"Abrir WhatsApp"}); // sin esto un bloqueo del navegador dejaba el botón sin hacer nada
+    };
     var fin=function(e){if(e&&e.name==="AbortError")return;plan()};
     if(file&&navigator.canShare&&navigator.canShare({files:[file]}))navigator.share({files:[file],text:texto,title:"Moto #"+o.num}).then(function(){toastWa("Moto #"+o.num+" compartida.")}).catch(fin);
     else if(navigator.share)navigator.share({text:texto}).then(function(){toastWa("Moto #"+o.num+" compartida (sin foto).")}).catch(fin);

@@ -1422,7 +1422,7 @@ document.addEventListener("click",function(ev){
   else if(a==="colareint"){vaciarCola()}
   else if(a==="adiahoy"){$("a-dia").value=hoyCaracas();elegirDiaAdmin("")}
   else if(a==="xval"){jpost("/api/camara/cruces/validar",{id:t.dataset.id,ok:t.dataset.v==="1"}).then(function(){loadCruces()})}
-  else if(a==="hreal"){var hi=$("hr-"+t.dataset.id);if(hi)jpost("/api/camara/historial/real",{id:t.dataset.id,real:hi.value}).then(function(){hi.blur();loadHist()})}
+  else if(a==="hreal"){var hi=$("hr-"+t.dataset.id);if(hi)jpost("/api/camara/historial/real",{id:t.dataset.id,real:hi.value}).then(function(r){hi.blur();if(r.ok&&r.j.enlazada)toastWa("Listo: esa moto quedó enlazada con la factura #"+r.j.enlazada+".");else if(r.ok&&r.j.fusionada)toastWa("Listo: es la misma moto de la factura #"+r.j.fusionada+" y ya no cuenta como moto sin factura.");loadHist();loadSinFact();loadHoyH()})}
   else if(a==="aprobar"||a==="negar")decidir(t.dataset.aid,a==="aprobar");
   else if(a==="pay")openPay(n);
   else if(a==="method"){payMethod=t.dataset.m;if(payMethod2===payMethod)payMethod2=null;setMonto();renderMethods();renderSplit()}

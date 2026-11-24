@@ -307,6 +307,14 @@ test('al facturar, el encargado elige la moto que la cámara ve (placa mal leíd
   assert.equal(t.filas().find(x => x.id === 'mwoal000002').estado, 'tarde');
 });
 
+test('cruces de fotos: filtra por día (hora de Caracas); sin día devuelve los recientes y un día sin cruces sale vacío', () => {
+  const t = montar({ cruces: [{ foto: 'aaa111-p1.jpg' }, { foto: 'bbb222-p2.jpg' }] });
+  const todos = t.c.cruces(); assert.equal(todos.dia, null); assert.equal(todos.items.length, todos.resumen.total);
+  const hoy = t.c.cruces(HOY); assert.equal(hoy.dia, HOY); assert.equal(hoy.items.length, todos.items.length);
+  const otro = t.c.cruces('2020-01-01'); assert.equal(otro.dia, '2020-01-01'); assert.equal(otro.items.length, 0); assert.equal(otro.resumen.total, 0);
+  assert.equal(t.c.cruces('no-es-fecha').dia, null, 'una fecha inválida se ignora');
+});
+
 test('pendientes: lo que se le recuerda al encargado son las motos montadas más de 5 min o ya bajadas sin factura (no las recién llegadas, falsos positivos, descartadas ni facturadas)', () => {
   const hace = n => new Date(Date.now() - n * 60e3).toISOString();
   const t = montar({ historial: [

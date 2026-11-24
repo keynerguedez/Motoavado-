@@ -299,6 +299,7 @@ function crear(ctx) {
   // Registro de cada cruce (con las fotos comparadas y lo que dijo Claude) para que el dueño valide si acertó.
   const CRU = path.join(ctx.DATA, 'camara-cruces.json'), CFOTOS = path.join(FOTOS, 'cruce');
   fs.mkdirSync(CFOTOS, { recursive: true });
+  const MAX_CRUCES = 300; // unos 6 días de cruces: alcanza para filtrar por día sin llenar el disco
   let C = []; try { C = JSON.parse(fs.readFileSync(CRU, 'utf8')); if (!Array.isArray(C)) C = []; } catch (e) {}
   function cGuardar() { try { const tmp = CRU + '.tmp'; fs.writeFileSync(tmp, JSON.stringify(C), { mode: 0o600 }); fs.renameSync(tmp, CRU); } catch (e) { console.error('camara cruces:', e.message); } }
   // Un cruce valida la factura si es de uno de estos tipos: fotos iguales, enlace directo, validación a ojo del dueño o validación por placa (ver revalidar).
@@ -309,11 +310,12 @@ function crear(ctx) {
     C.unshift(Object.assign({ id, t: new Date().toISOString(), origen, venta: { id: v.id, num: v.num, placa: v.placa || '', sinPlaca: !!v.sinPlaca }, comps: cs, tipo, puente: puente || null, valido: null }, extra || {}));
     // Un cruce bueno deja la factura marcada como validada (queda en la propia factura, aunque el registro de cruces se recorte).
     if (TIPOS_VALIDOS.includes(tipo) && ctx.marcarValidada) { try { ctx.marcarValidada(v.id, { tipo, t: new Date().toISOString(), por: (extra && extra.por) || 'cámara' }); } catch (e) {} }
-    while (C.length > 100) { const x = C.pop(); x.comps.forEach(k => { try { fs.unlinkSync(path.join(CFOTOS, k.foto)); } catch (e) {} }); }
+    while (C.length > MAX_CRUCES) { const x = C.pop(); x.comps.forEach(k => { try { fs.unlinkSync(path.join(CFOTOS, k.foto)); } catch (e) {} }); }
     cGuardar();
   }
   const ventasValidadas = () => new Set(C.filter(x => TIPOS_VALIDOS.includes(x.tipo) && x.valido !== false).map(x => x.venta.id));
-  const cruces = () => { const v = C.filter(x => x.valido !== null); return { resumen: { total: C.length, validados: v.length, acertó: v.filter(x => x.valido === true).length }, items: C.slice(0, 50).map(x => Object.assign({}, x, { fotoVenta: '/api/camara/cruce-venta/' + x.venta.id + '.jpg', comps: x.comps.map(k => Object.assign({}, k, { url: '/api/camara/cruce/' + k.foto })) })) }; };
+  // dia (AAAA-MM-DD, hora de Caracas): solo los cruces de ese día; sin día, los 50 más recientes como siempre.
+  const cruces = dia => { const filtrado = /^\d{4}-\d{2}-\d{2}$/.test(dia || ''), L = filtrado ? C.filter(x => ctx.fechaCaracas(new Date(x.t)) === dia) : C, v = L.filter(x => x.valido !== null); return { dia: filtrado ? dia : null, resumen: { total: L.length, validados: v.length, acertó: v.filter(x => x.valido === true).length }, items: L.slice(0, filtrado ? 150 : 50).map(x => Object.assign({}, x, { fotoVenta: '/api/camara/cruce-venta/' + x.venta.id + '.jpg', comps: x.comps.map(k => Object.assign({}, k, { url: '/api/camara/cruce/' + k.foto })) })) }; };
   function validarCruce(id, ok) { const e = C.find(x => x.id === String(id)); if (!e) return false; e.valido = ok === true ? true : ok === false ? false : null; cGuardar(); return true; }
   const fotoCruce = nombre => /^[a-z0-9]+-p[1-5]\.jpg$/.test(String(nombre)) ? (() => { try { return fs.readFileSync(path.join(CFOTOS, nombre)); } catch (e) { return null; } })() : null;
   const tieneFotoVenta = id => /^[a-f0-9]{6,20}$/.test(String(id)) && fs.existsSync(path.join(FOTOS, 'venta', id + '.jpg'));

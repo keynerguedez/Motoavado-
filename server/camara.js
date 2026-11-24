@@ -560,10 +560,10 @@ function crear(ctx) {
     const hoy = ctx.fechaCaracas(new Date()), ahora = Date.now();
     const items = H.filter(e => e.dia === hoy && e.num == null && e.estado !== 'descartada' && !(e.puente === EXTRA && !e.placa && !e.parcial) && !(e.estado === 'esperando' && e.salida)).map(e => {
       const desde = Date.parse(e.llegada), min = Math.floor((ahora - desde) / 60000), bajo = !!e.salida;
-      if (!bajo && min < MIN_GRACIA) return null; // acaba de llegar: todavía puede facturarse sin molestar
-      return { id: e.id, puente: e.puente, lectura: e.placa || e.parcial || '', estado: bajo ? 'bajo' : 'montada', minutos: Math.max(0, min), bajoMin: bajo ? Math.floor((ahora - Date.parse(e.salida)) / 60000) : null, llegada: e.llegada };
-    }).filter(Boolean).sort((a, b) => b.minutos - a.minutos);
-    return { items, n: items.length, ahora: new Date(ahora).toISOString() };
+      return { nueva: !bajo && min < MIN_GRACIA, id: e.id, puente: e.puente, lectura: e.placa || e.parcial || '', estado: bajo ? 'bajo' : 'montada', minutos: Math.max(0, min), bajoMin: bajo ? Math.floor((ahora - Date.parse(e.salida)) / 60000) : null, llegada: e.llegada };
+    }).sort((a, b) => b.minutos - a.minutos);
+    const reales = items.filter(x => !x.nueva); // las recién llegadas (menos de MIN_GRACIA) todavía pueden facturarse sin molestar: no cuentan para el aviso, pero sí se ofrecen al facturar
+    return { items: reales, n: reales.length, todas: items, ahora: new Date(ahora).toISOString() };
   }
 
   // El dueño enlaza a mano una moto que la cámara vio y bajó sin factura con la factura que le corresponde (por ejemplo cuando la placa se leyó o se escribió distinta). La factura queda validada.
@@ -597,6 +597,21 @@ function crear(ctx) {
     e.corregida = { t: new Date().toISOString(), por: quien, antes };
     hSucio = true; hGuardar();
     return { ok: true, antes, num, liberadas: libres.length };
+  }
+
+  // El encargado indica, al facturar, cuál de las motos que la cámara ve sin factura es esta (por si leyó mal la placa): se enlaza al momento y queda anotado.
+  function enlazarAlFacturar(idFila, v, quien) {
+    const hoy = ctx.fechaCaracas(new Date()), e = H.find(x => x.id === String(idFila) && x.dia === hoy);
+    if (!e) return { error: 'No se encontró esa moto en el historial de hoy.' };
+    if (e.num != null || e.estado === 'descartada') return { error: 'Esa moto ya tiene factura o está descartada.' };
+    const real = limpiarPlaca(v.placa);
+    e.num = v.num; e.estado = e.salida ? 'tarde' : 'ok'; e.razon = 'elegida al facturar'; e.corregida = { t: new Date().toISOString(), por: quien || '', antes: null };
+    if (real) e.real = real.slice(0, 10);
+    // Si la moto sigue en el puente, el puente también queda enlazado (si no, la siguiente lectura lo deshace).
+    const p = S.puentes.find(x => x.hid === e.id && x.estado !== 'libre');
+    if (p) { p.estado = 'ok'; p.num = v.num; p.razon = 'elegida al facturar'; p.cruceId = v.id; delete p.aprox; }
+    hSucio = true; hGuardar(); guardar();
+    return { ok: true, num: v.num };
   }
 
   // El dueño valida a ojo una factura cuando la cámara no guardó una foto de esa moto: queda registrado con su nombre y una nota.
@@ -1029,7 +1044,7 @@ function crear(ctx) {
   }
   function foto(n) { try { return fs.readFileSync(path.join(FOTOS, 'camara-puente-' + Number(n) + '.jpg')); } catch (e) { return null; } }
 
-  return { cierre, pendientes, enlazarFila, reasignarEnlace, autoEmparejarInversa, tieneFotoVenta, autoRevalidar, ventasValidadas, validarManual, revalidar, liberarPuente, cruces, validarCruce, fotoCruce, fotoVentaId, cruzar, leerFoto, evento, vista, fotoVista, publico, foto, historial, marcarReal, fotoHist, alarma, fotoRecibida, leerPlaca, FOTOS4K, PUENTES };
+  return { cierre, pendientes, enlazarFila, enlazarAlFacturar, reasignarEnlace, autoEmparejarInversa, tieneFotoVenta, autoRevalidar, ventasValidadas, validarManual, revalidar, liberarPuente, cruces, validarCruce, fotoCruce, fotoVentaId, cruzar, leerFoto, evento, vista, fotoVista, publico, foto, historial, marcarReal, fotoHist, alarma, fotoRecibida, leerPlaca, FOTOS4K, PUENTES };
 }
 
 module.exports = { crear };

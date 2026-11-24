@@ -529,6 +529,9 @@ async function api(req, res, ruta) {
   if (ruta === '/api/ventas') {
     if (!puede(yo, 'tablet')) return json(res, 403, { error: 'No tienes permiso.' });
     const r = registrarVenta(d, yo);
+    if (r.ok && d.filaCam) { // el encargado marcó cuál es la moto que la cámara ve: se enlaza al facturar (si falla, la factura igual queda guardada)
+      try { const e = camara.enlazarAlFacturar(String(d.filaCam).slice(0, 30), { id: r.id, num: r.num, placa: d.sinPlaca === true ? '' : d.placa }, yo.nombre); if (e.ok) r.enlazada = true; } catch (x) {}
+    }
     return json(res, r.error ? 400 : 200, r);
   }
   if (ruta === '/api/ventas/placa') {

@@ -286,6 +286,27 @@ test('placa real anotada en el historial: enlaza la moto con la factura de esa p
   assert.deepEqual(t.c.marcarReal('mworl000004', 'AAAAA11'), { ok: true });
 });
 
+test('al facturar, el encargado elige la moto que la cámara ve (placa mal leída): se enlaza al momento, también si sigue en el puente, y se ofrece aunque acabe de llegar', async () => {
+  const hace = n => new Date(Date.now() - n * 60e3).toISOString();
+  const v = { id: 'v50', num: 50, placa: 'AV2J16V', fecha: new Date().toISOString() };
+  const t = montar({ historial: [
+    { id: 'mwoal000001', puente: 2, parcial: 'AY2J16A?', estado: 'esperando', llegada: hace(1) },
+    { id: 'mwoal000002', puente: 1, placa: 'XX11XX1', estado: 'alerta', llegada: hace(30), salida: hace(20), num: null }],
+    puentes: { 2: { estado: 'esperando', hid: 'mwoal000001', desde: hace(1), origen: 'alarma', parcial: 'AY2J16A?', intentos: 3, leidoT: Date.now() } }, ventas: [v],
+    leer: haiku(() => ({ moto: true, placa: '', parcial: 'AY2J16A?', motivo: 'dañada' })) });
+  const p = t.c.pendientes();
+  assert.equal(p.n, 1, 'la recién llegada no cuenta para el aviso (solo la que bajó)'); assert.equal(p.todas.length, 2, 'pero sí se ofrece al facturar');
+  assert.ok(t.c.enlazarAlFacturar('no-existe', v, 'Daniel').error);
+  assert.deepEqual(t.c.enlazarAlFacturar('mwoal000001', v, 'Daniel'), { ok: true, num: 50 });
+  const f = t.filas().find(x => x.id === 'mwoal000001'); assert.equal(f.num, 50); assert.equal(f.estado, 'ok'); assert.equal(f.real, 'AV2J16V'); assert.equal(f.corregida.por, 'Daniel'); assert.equal(f.razon, 'elegida al facturar');
+  assert.equal(t.pub(2).estado, 'ok'); assert.equal(t.pub(2).num, 50);
+  await t.ev(2); // una lectura posterior (otra vez parcial) no deshace el enlace
+  assert.equal(t.pub(2).estado, 'ok'); assert.equal(t.filas().find(x => x.id === 'mwoal000001').num, 50);
+  assert.match(t.c.enlazarAlFacturar('mwoal000001', v, 'Daniel').error, /ya tiene factura/);
+  assert.deepEqual(t.c.enlazarAlFacturar('mwoal000002', { id: 'v51', num: 51, placa: '' }, 'Daniel'), { ok: true, num: 51 }); // ya bajó: queda "facturada después"
+  assert.equal(t.filas().find(x => x.id === 'mwoal000002').estado, 'tarde');
+});
+
 test('pendientes: lo que se le recuerda al encargado son las motos montadas más de 5 min o ya bajadas sin factura (no las recién llegadas, falsos positivos, descartadas ni facturadas)', () => {
   const hace = n => new Date(Date.now() - n * 60e3).toISOString();
   const t = montar({ historial: [

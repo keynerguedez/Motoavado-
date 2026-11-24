@@ -410,6 +410,7 @@ function crear(ctx) {
       .sort((a, b) => (exacta(b) - exacta(a)) || (Math.abs(Date.parse(a.llegada) - tF) - Math.abs(Date.parse(b.llegada) - tF))).slice(0, 3)
       : H.filter(e => e.dia === hoy && e.num === v.num && e.estado !== 'descartada').slice(0, 2);
     const vistas = new Set(); let comparadas = 0, prev = [];
+    if (opc._vistos) filas.forEach(e => opc._vistos.push(e.id + (e.salida ? 's' : 'v'))); // para que la revisión automática sepa qué motos ya comparó
     if (filas.length) {
       const comps = (await Promise.all(filas.map(async e => { const f = fotoHist(e.id); vistas.add(e.id); return f ? { e, p: { n: e.puente }, r: await comparar(jpeg, f), foto: f } : null; }))).filter(Boolean);
       comparadas += comps.length; prev = comps;
@@ -462,16 +463,21 @@ function crear(ctx) {
     const hechos = []; let gastadas = 0;
     try {
       S.autorev = S.autorev || {};
-      const val = ventasValidadas(), ahora = Date.now();
+      const val = ventasValidadas(), ahora = Date.now(), hoy = ctx.fechaCaracas(new Date());
       const pendientes = ctx.ventasDeHoy().filter(v => v.estado !== 'pendiente' && !v.validada && !val.has(v.id) && fotoVenta(v.id));
       for (const v of pendientes) {
         if (gastadas >= COMPARACIONES_POR_VUELTA || hechos.length >= 40) break;
         const a = S.autorev[v.id] || { n: 0, t: 0 };
+        // Cuando cambia la moto enlazada a esta factura (se enlaza una fila, o la moto baja del puente) se vuelve a intentar enseguida, aunque ya se hubieran gastado los intentos: no hace falta revalidar a mano.
+        // Solo cuenta una moto que no se había comparado ya en ese mismo estado (en el puente o ya bajada).
+        const lig = H.filter(e => e.dia === hoy && e.num === v.num && e.estado !== 'descartada').map(e => e.id + (e.salida ? 's' : 'v'));
+        if (lig.some(k => !(a.vistos || []).includes(k)) && (a.cambios || 0) < 5) { a.cambios = (a.cambios || 0) + 1; a.n = 0; a.t = 0; a.fin = false; a.ya = true; S.autorev[v.id] = a; }
         if (a.fin) continue;
-        const toca = a.n === 0 ? ahora >= Date.parse(v.fecha) + 2 * 60e3 : ahora >= a.t + ESPERAS_AUTO[Math.min(a.n - 1, 2)] * 60e3;
+        const toca = a.n === 0 ? (a.ya || ahora >= Date.parse(v.fecha) + 2 * 60e3) : ahora >= a.t + ESPERAS_AUTO[Math.min(a.n - 1, 2)] * 60e3;
         if (!toca) continue;
-        const r = await revalidar(v, { soloPlaca: !(process.env.CAMARA_AUTOREV_TODAS === '1' && (a.n === 1 || a.n === 3)), origen: 'automática' }); // la búsqueda en todas las fotos (hasta 24 comparaciones) solo con CAMARA_AUTOREV_TODAS=1: por defecto es solo el botón Revalidar
-        a.n++; a.t = Date.now();
+        const vistos = [];
+        const r = await revalidar(v, { _vistos: vistos, soloPlaca: !(process.env.CAMARA_AUTOREV_TODAS === '1' && (a.n === 1 || a.n === 3)), origen: 'automática' }); // la búsqueda en todas las fotos (hasta 24 comparaciones) solo con CAMARA_AUTOREV_TODAS=1: por defecto es solo el botón Revalidar
+        a.n++; a.t = Date.now(); a.ya = false; a.vistos = (a.vistos || []).concat(vistos);
         if (r.error && /no tiene foto del encargado/.test(r.error)) a.fin = true;
         if (r.ok && (r.tipo === 'coincide' || r.tipo === 'distinta')) a.fin = true;
         if (a.n >= 4) a.fin = true;

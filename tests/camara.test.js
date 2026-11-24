@@ -315,6 +315,17 @@ test('cruces de fotos: filtra por día (hora de Caracas); sin día devuelve los 
   assert.equal(t.c.cruces('no-es-fecha').dia, null, 'una fecha inválida se ignora');
 });
 
+test('revalidación automática: cuando se enlaza (o baja) la moto de una factura se reintenta enseguida, sin esperar ni revalidar a mano', async () => {
+  const hace = n => new Date(Date.now() - n * 60e3).toISOString();
+  const v = { id: 'abcdef123459', num: 7, placa: 'AB123CD', fecha: hace(10), estado: 'pagada' };
+  const t = montar({ historial: [{ id: 'mwoar000001', puente: 1, placa: 'QQ9Q9QQ', estado: 'alerta', llegada: hace(20), salida: hace(12), foto: 'MOTO' }], ventaFotos: [v], ventas: [v] });
+  const r1 = await t.c.autoRevalidar(); assert.deepEqual(r1.hechos, [{ num: 7, tipo: 'ninguna' }], 'sin moto enlazada ni placa parecida no hay nada que comparar');
+  assert.deepEqual((await t.c.autoRevalidar()).hechos, [], 'sin cambios espera su turno (5 min)');
+  assert.equal(t.c.reasignarEnlace('mwoar000001', 7, () => [v], 'Daniel').ok, true); // se enlaza la moto a la factura
+  const r3 = await t.c.autoRevalidar(); assert.deepEqual(r3.hechos, [{ num: 7, tipo: 'coincide' }], 'al enlazarse se compara enseguida');
+  assert.ok(t.c.ventasValidadas().has('abcdef123459'));
+});
+
 test('pendientes: lo que se le recuerda al encargado son las motos montadas más de 5 min o ya bajadas sin factura (no las recién llegadas, falsos positivos, descartadas ni facturadas)', () => {
   const hace = n => new Date(Date.now() - n * 60e3).toISOString();
   const t = montar({ historial: [

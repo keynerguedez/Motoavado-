@@ -343,6 +343,15 @@ function avisarDuenosAut(id) {
   } catch (e) {}
 }
 
+// Aviso de texto a los dueños (AVISO_DUENOS en vault/.env), por ejemplo cuando la cámara se queda sin señal.
+function avisarDueno(texto) {
+  try {
+    const nums = String(process.env.AVISO_DUENOS || '').split(',').map(waNumero).filter(Boolean);
+    if (!nums.length || !waqr || !waqr.conectado()) return;
+    nums.forEach(n => waqr.enviarTexto(n, texto).catch(() => {}));
+  } catch (e) {}
+}
+
 // ---------- WhatsApp por QR (provisional) y ticket ----------
 // Un fallo de la librería de WhatsApp nunca debe tumbar la facturación.
 process.on('unhandledRejection', (r) => console.error('rechazo sin atender:', r && r.message || r));
@@ -687,7 +696,7 @@ async function api(req, res, ruta) {
 }
 
 const consumo = require('./consumo').crear({ DATA, fechaCaracas });
-const camara = require('./camara').crear({ DATA, json, fechaCaracas, registrarUso: consumo.registrar, ventasDeHoy: () => diaDeHoy().ventas, completarPlaca: (id, placa) => !corregirPlaca(id, placa, 'cámara', true).error, marcarValidada });
+const camara = require('./camara').crear({ DATA, json, fechaCaracas, registrarUso: consumo.registrar, ventasDeHoy: () => diaDeHoy().ventas, avisarDueno: texto => avisarDueno(texto), completarPlaca: (id, placa) => !corregirPlaca(id, placa, 'cámara', true).error, marcarValidada });
 // FTP para las fotos 4K de la cámara. Solo arranca si hay clave en vault/.env (CAMARA_FTP_CLAVE); no lleva nada más: la carpeta es propia y solo acepta subir .jpg.
 // CAMARA_FTP_USUARIO (por defecto "camara"), CAMARA_FTP_PUERTO (2121), CAMARA_FTP_PASIVO ("30000-30009"), CAMARA_FTP_IP (IP pública del servidor; si falta se usa la de la conexión).
 // Solo para pruebas locales: con CAMARA_PRUEBA=1 y sin clave acepta usuario anónimo.

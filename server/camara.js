@@ -46,6 +46,8 @@ function crear(ctx) {
   }
   // Si la moto de un puente desaparece y vuelve a verse en menos de 10 minutos, es la misma: se reabre su fila y su reloj (no empieza otra).
   const RELEER_MS = Number(process.env.CAMARA_RELEER_MS) || 10 * 60e3;
+  // Una factura sin placa hecha más de este tiempo antes de que la moto llegara al puente no es de esa moto.
+  const FACTURA_ANTES_MS = 3 * 60e3;
   const MISMA_MOTO_MS = 10 * 60e3;
   function hAbrir(p, jpeg) {
     let ult = null; for (let i = H.length - 1; i >= 0; i--) if (H[i].puente === p.n) { ult = H[i]; break; }
@@ -721,7 +723,7 @@ function crear(ctx) {
       const tomadas = new Set(S.puentes.filter(x => x !== p && (x.sinPlacaId || x.cruceId)).map(x => x.sinPlacaId || x.cruceId));
       // Una factura sin placa que ya tiene su moto en otra fila del historial de hoy no se le da a la siguiente moto sin placa del puente.
       const hoyH = ctx.fechaCaracas(new Date()), ligadas = new Set(H.filter(x => x.dia === hoyH && x.num != null && x.id !== p.hid && x.estado !== 'descartada').map(x => x.num));
-      const libres = ctx.ventasDeHoy().filter(x => x.sinPlaca && !tomadas.has(x.id) && !ligadas.has(x.num) && (p.sinPlacaId ? x.id === p.sinPlacaId : true));
+      const libres = ctx.ventasDeHoy().filter(x => x.sinPlaca && !tomadas.has(x.id) && !ligadas.has(x.num) && (p.sinPlacaId ? x.id === p.sinPlacaId : !p.desde || !x.fecha || Date.parse(x.fecha) >= Date.parse(p.desde) - FACTURA_ANTES_MS));
       // Con dos o más facturas sin placa libres no se adivina cuál es: la moto queda por confirmar y el dueño elige (se anotan las candidatas).
       const sp = libres.length === 1 ? libres[0] : null;
       if (libres.length > 1) { const c = libres.map(x => x.num).join(','); if (p.candidatas !== c) { p.candidatas = c; avisar('info', nombre(p.n) + ': moto sin placa legible; podría ser la factura sin placa ' + libres.map(x => '#' + x.num).join(' o ') + '. Hay que confirmar cuál.'); } }

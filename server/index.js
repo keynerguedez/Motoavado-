@@ -469,6 +469,12 @@ async function api(req, res, ruta) {
       if (!puede(yo, 'vigilante')) return json(res, 403, { error: 'No tienes permiso.' });
       return json(res, 200, camara.historial((/[?&]dia=([\d-]+)/.exec(req.url) || [])[1]));
     }
+    const hp = /^\/api\/camara\/histp\/([a-z0-9]+)\.jpg$/.exec(ruta); // el recorte ampliado de la placa con el que se leyó
+    if (hp) {
+      if (!puede(yo, 'vigilante')) return json(res, 403, { error: 'No tienes permiso.' });
+      const f = camara.fotoHistPlaca(hp[1]); if (!f) return json(res, 404, { error: 'Sin foto.' });
+      res.writeHead(200, { 'content-type': 'image/jpeg', 'cache-control': 'private, max-age=3600' }); return res.end(f);
+    }
     const hm = /^\/api\/camara\/hist\/([a-z0-9]+)\.jpg$/.exec(ruta);
     if (hm) {
       if (!puede(yo, 'vigilante')) return json(res, 403, { error: 'No tienes permiso.' });

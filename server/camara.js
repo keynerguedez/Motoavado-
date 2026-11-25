@@ -41,7 +41,7 @@ function crear(ctx) {
   function hNuevo(p, jpeg) {
     const id = Date.now().toString(36) + crypto.randomBytes(3).toString('hex');
     H.push({ id, puente: p.n, llegada: new Date().toISOString(), dia: ctx.fechaCaracas(new Date()), origen: p.origen || '', placa: '', parcial: '', motivo: '', estado: 'esperando', num: null, salida: null, real: '' });
-    while (H.length > MAX_HIST) { const v = H.shift(); try { fs.unlinkSync(path.join(HFOTOS, v.id + '.jpg')); } catch (e) {} }
+    while (H.length > MAX_HIST) { const v = H.shift(); try { fs.unlinkSync(path.join(HFOTOS, v.id + '.jpg')); } catch (e) {} try { fs.unlinkSync(path.join(HFOTOS, v.id + '.placa.jpg')); } catch (e) {} }
     p.hid = id; hSucio = true; hFoto(p, jpeg);
   }
   // Si la moto de un puente desaparece y vuelve a verse en menos de 10 minutos, es la misma: se reabre su fila y su reloj (no empieza otra).
@@ -58,6 +58,8 @@ function crear(ctx) {
     hNuevo(p, jpeg); return false;
   }
   function hFoto(p, jpeg) { if (p.hid && jpeg) try { fs.writeFileSync(path.join(HFOTOS, p.hid + '.jpg'), jpeg, { mode: 0o600 }); } catch (e) {} }
+  // Recorte ampliado de la placa con el que se leyó: la foto del puente es pequeña y la placa casi no se distingue, así que este recorte queda como evidencia visible de lo que leyó la cámara.
+  function hFotoPlaca(p, jpeg) { if (p.hid && jpeg) try { fs.writeFileSync(path.join(HFOTOS, p.hid + '.placa.jpg'), jpeg, { mode: 0o600 }); } catch (e) {} }
   function hSync() {
     S.puentes.forEach(p => {
       // Una moto que ya estaba en el puente antes de existir el historial también se anota, con la última foto de ese puente.
@@ -128,7 +130,7 @@ function crear(ctx) {
       if (!libresCP) { const ligadas = new Set(H.filter(x => x.dia === hoy && x.num != null && x.estado !== 'descartada').map(x => x.num)); libresCP = ctx.ventasDeHoy().filter(x => !x.sinPlaca && x.placa && !ligadas.has(x.num)); }
       const t = Date.parse(e.llegada), c = libresCP.filter(x => Math.abs(Date.parse(x.fecha) - t) <= 10 * 60e3).map(x => ({ num: x.num, placa: x.placa })); return c.length ? c : undefined;
     };
-    return { dia: d, hoy, resumen: r, items: items.slice(0, 200).map(e => Object.assign({}, e, { foto: '/api/camara/hist/' + e.id + '.jpg', candidatas: candidatas(e), candidatasPlaca: candidatasPlaca(e) })) };
+    return { dia: d, hoy, resumen: r, items: items.slice(0, 200).map(e => Object.assign({}, e, { foto: '/api/camara/hist/' + e.id + '.jpg', fotoPlaca: fs.existsSync(path.join(HFOTOS, e.id + '.placa.jpg')) ? '/api/camara/histp/' + e.id + '.jpg' : undefined, candidatas: candidatas(e), candidatasPlaca: candidatasPlaca(e) })) };
   }
   function coincideParcial(parcial, real) { const nucleo = parcial.replace(/\?+$/, ''), abierta = nucleo.length < parcial.length; return (abierta ? real.length >= nucleo.length : real.length === nucleo.length) && [...nucleo].every((c, i) => c === '?' || c === real[i]); }
   // La placa real que anota quien mira el historial también sirve para enlazar: si la moto aún no tiene factura y UNA factura de ese día lleva esa placa, queda enlazada
@@ -150,6 +152,7 @@ function crear(ctx) {
     }
     hGuardar(); return r;
   }
+  function fotoHistPlaca(id) { if (!/^[a-z0-9]{6,20}$/.test(String(id))) return null; try { return fs.readFileSync(path.join(HFOTOS, id + '.placa.jpg')); } catch (e) { return null; } }
   function fotoHist(id) { if (!/^[a-z0-9]{6,20}$/.test(String(id))) return null; try { return fs.readFileSync(path.join(HFOTOS, id + '.jpg')); } catch (e) { return null; } }
   function avisar(kind, txt) { S.log.unshift({ t: new Date().toISOString(), kind, txt }); S.log.length = Math.min(S.log.length, MAX_LOG); }
   function cambioDeDia() { const d = ctx.fechaCaracas(new Date()); if (S.dia !== d) { S.dia = d; S.vistas = 0; S.autorev = {}; S.autoinv = {}; } }
@@ -217,9 +220,14 @@ function crear(ctx) {
   }
   // Lectura con el modelo bueno: la placa se confirma con OTRA vista (el recorte ampliado de la placa), no con la misma imagen leída dos veces.
   async function leerConfirmada(jpeg, f) {
+    const ev = {}, r = await leerConfirmada0(jpeg, f, ev);
+    return r && r.moto === true && (r.placa || r.parcial) && ev.zoom ? Object.assign({}, r, { zoom: ev.zoom }) : r; // el recorte ampliado con el que se leyó queda como evidencia
+  }
+  async function leerConfirmada0(jpeg, f, ev) {
     const a = await f(jpeg);
     if (!a || a.moto !== true) return a;
     const zoom = a.caja ? await ampliar(jpeg, a.caja) : null, solo = { placaSolo: true };
+    if (zoom) ev.zoom = zoom;
     if (a.placa) return confirmar(a, await (zoom ? f(zoom, undefined, solo) : f(jpeg)));
     if (!zoom) return a;
     const b = await f(zoom, undefined, solo);
@@ -726,9 +734,9 @@ function crear(ctx) {
   }
   // Guarda lo que leyó el modelo: placa completa, o la lectura parcial con más caracteres conocidos.
   function guardarLectura(p, r) {
-    if (r.placa) { p.placa = r.placa; p.parcial = ''; p.confirmada = true; p.dudas = 0; avisar('info', nombre(p.n) + ': placa leída ' + r.placa + '.'); return; }
+    if (r.placa) { p.placa = r.placa; p.parcial = ''; p.confirmada = true; p.dudas = 0; hFotoPlaca(p, r.zoom); avisar('info', nombre(p.n) + ': placa leída ' + r.placa + '.'); return; }
     p.motivo = r.motivo;
-    if (r.parcial && conocidos(r.parcial) >= conocidos(p.parcial)) { if (r.parcial !== p.parcial) avisar('info', nombre(p.n) + ': placa leída en parte: ' + r.parcial + '.'); p.parcial = r.parcial; }
+    if (r.parcial && conocidos(r.parcial) >= conocidos(p.parcial)) { if (r.parcial !== p.parcial) avisar('info', nombre(p.n) + ': placa leída en parte: ' + r.parcial + '.'); p.parcial = r.parcial; hFotoPlaca(p, r.zoom); }
   }
 
   // El puente 1 está pegado a la zona de fuera del puente: una moto que se lava ahí aparece cortada en el borde del recorte del puente 1 y sin placa. Eso no es una moto del puente 1.
@@ -796,15 +804,17 @@ function crear(ctx) {
       }
       // Ya marcada por una revisión anterior: si deja de verse dos veces seguidas, se libera.
       // El modelo barato se equivoca a veces: un "no hay moto" se confirma con el modelo bueno antes de contarlo, y solo un "sí hay moto" claro reinicia la cuenta.
-      let sinMoto = rapida.moto === false, conf = null;
+      let sinMoto = rapida.moto === false, conf = null, volvio = false;
       if (sinMoto) { conf = await leer(jpeg); if (conf.moto === true) { sinMoto = false; if (!p.placa) { guardarLectura(p, conf); hFoto(p, jpeg); } } }
       const hayMoto = rapida.moto === true || (conf && conf.moto === true);
       p.rev = { t: ahora, h: rapida.moto, s: conf ? conf.moto : null };
       if (sinMoto) { p.sinMoto = (p.sinMoto || 0) + 1; p.rev.n = p.sinMoto; if (p.sinMoto >= 2) return libera(); }
-      else if (hayMoto) { p.sinMoto = 0; p.rev.n = 0; guardarFoto(); }
+      else if (hayMoto) { volvio = (p.sinMoto || 0) > 0; p.sinMoto = 0; p.rev.n = 0; guardarFoto(); }
       // Cada 5 minutos con la moto en el puente se vuelve a leer la placa: si sale una placa completa que no encaja con la guardada, es otra moto (la anterior se fue sin que el puente quedara vacío).
-      if (hayMoto && (p.placa || p.parcial) && Date.now() - (p.relT || 0) >= RELEER_MS) {
+      // Si el puente se vio vacío en una revisión y ahora hay moto otra vez, no se da por hecho que es la misma (pudo bajar una y subir otra entre dos revisiones): se verifica ya, con una sola comparación de fotos.
+      if (hayMoto && (p.placa || p.parcial || volvio) && (volvio || Date.now() - (p.relT || 0) >= RELEER_MS)) {
         p.relT = Date.now();
+        const sinLectura = !(p.placa || p.parcial);
         const r = await leer(jpeg);
         if (r.moto === true && r.placa && !encajaPuente(r.placa, p)) {
           avisar('info', nombre(n) + ': otra moto en el puente (placa ' + r.placa + ', antes ' + (p.placa || p.parcial) + ').');
@@ -812,22 +822,23 @@ function crear(ctx) {
           llegada(r, 'revision', true); evaluar(p); guardar();
           return { ok: true, estado: p.estado, placa: p.placa || null, revision: 'moto-nueva' };
         }
-        if (r.moto === true && r.placa && !p.placa) { guardarLectura(p, r); hFoto(p, jpeg); }
+        if (r.moto === true && r.placa && !p.placa && !(volvio && sinLectura)) { guardarLectura(p, r); hFoto(p, jpeg); }
         // Si no se volvió a confirmar la placa guardada, se compara la foto de ahora con la foto con la que se leyó: dos veces seguidas "otra moto" (confianza alta o media) = otra moto en el puente.
         const ref = p.hid && r.moto === true && !(r.placa && r.placa === p.placa) ? fotoHist(p.hid) : null;
         if (ref) {
           const cm = await comparar(ref, jpeg);
           if (cm.misma === false && cm.confianza !== 'baja') p.otraMoto = (p.otraMoto || 0) + 1; else if (cm.misma === true) p.otraMoto = 0;
-          if (p.otraMoto >= 2) {
-            avisar('info', nombre(n) + ': otra moto en el puente (la foto ya no coincide con la que se leyó; antes ' + (p.placa || p.parcial) + ').');
+          if (p.otraMoto >= (volvio ? 1 : 2)) {
+            avisar('info', nombre(n) + ': otra moto en el puente (la foto ya no coincide con la que se leyó; antes ' + (p.placa || p.parcial || 'sin placa leída') + ').');
             hSalida(p); S.vistas = Math.max(0, S.vistas - 1);
             llegada(r, 'revision', true); evaluar(p); guardar();
             return { ok: true, estado: p.estado, placa: p.placa || null, revision: 'moto-nueva' };
           }
         } else if (r.moto === true && r.placa && r.placa === p.placa) p.otraMoto = 0;
+        if (volvio && sinLectura && r.moto === true && r.placa && !p.placa) { guardarLectura(p, r); hFoto(p, jpeg); } // volvió a verse y es la misma moto: ahora sí se le anota la placa
         // Una placa que no se vuelve a confirmar dos relecturas seguidas se descarta (pudo ser inventada): la moto queda sin placa legible.
         if (r.moto === true && p.placa && r.placa === p.placa) { p.confirmada = true; p.dudas = 0; }
-        else if (r.moto === true && p.placa && !r.placa && !p.confirmada) {
+        else if (r.moto === true && p.placa && !r.placa && !p.confirmada && !volvio) {
           p.dudas = (p.dudas || 0) + 1;
           if (p.dudas >= 2) {
             // La placa no se pudo confirmar: se conserva su fila en el historial (marcada "descartada") y la moto sigue en una fila nueva sin placa; así una fila nunca cambia de moto ni pierde su lectura original.
@@ -1074,7 +1085,7 @@ function crear(ctx) {
   }
   function foto(n) { try { return fs.readFileSync(path.join(FOTOS, 'camara-puente-' + Number(n) + '.jpg')); } catch (e) { return null; } }
 
-  return { cierre, pendientes, enlazarFila, enlazarAlFacturar, reasignarEnlace, autoEmparejarInversa, tieneFotoVenta, autoRevalidar, ventasValidadas, validarManual, revalidar, liberarPuente, cruces, validarCruce, fotoCruce, fotoVentaId, cruzar, leerFoto, evento, vista, fotoVista, publico, foto, historial, marcarReal, fotoHist, alarma, fotoRecibida, leerPlaca, FOTOS4K, PUENTES };
+  return { cierre, pendientes, enlazarFila, enlazarAlFacturar, reasignarEnlace, autoEmparejarInversa, tieneFotoVenta, autoRevalidar, ventasValidadas, validarManual, revalidar, liberarPuente, cruces, validarCruce, fotoCruce, fotoVentaId, cruzar, leerFoto, evento, vista, fotoVista, publico, foto, historial, marcarReal, fotoHist, fotoHistPlaca, alarma, fotoRecibida, leerPlaca, FOTOS4K, PUENTES };
 }
 
 module.exports = { crear };

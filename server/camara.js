@@ -121,7 +121,14 @@ function crear(ctx) {
       if (!libresSP) { const ligadas = new Set(H.filter(x => x.dia === hoy && x.num != null && x.estado !== 'descartada').map(x => x.num)); libresSP = ctx.ventasDeHoy().filter(x => x.sinPlaca && !ligadas.has(x.num)); }
       const c = libresSP.filter(x => String(x.fecha || '') >= e.llegada).map(x => x.num); return c.length ? c : undefined;
     };
-    return { dia: d, hoy, resumen: r, items: items.slice(0, 200).map(e => Object.assign({}, e, { foto: '/api/camara/hist/' + e.id + '.jpg', candidatas: candidatas(e) })) };
+    // Una moto sin placa legible también pudo ser de una factura CON placa que aún no tiene moto y se hizo a los pocos minutos de su llegada (la cámara no vio la placa): se muestra como pista para el dueño, nunca se enlaza sola.
+    let libresCP = null;
+    const candidatasPlaca = e => {
+      if (d !== hoy || e.num != null || e.estado === 'descartada' || e.placa || e.parcial) return undefined;
+      if (!libresCP) { const ligadas = new Set(H.filter(x => x.dia === hoy && x.num != null && x.estado !== 'descartada').map(x => x.num)); libresCP = ctx.ventasDeHoy().filter(x => !x.sinPlaca && x.placa && !ligadas.has(x.num)); }
+      const t = Date.parse(e.llegada), c = libresCP.filter(x => Math.abs(Date.parse(x.fecha) - t) <= 10 * 60e3).map(x => ({ num: x.num, placa: x.placa })); return c.length ? c : undefined;
+    };
+    return { dia: d, hoy, resumen: r, items: items.slice(0, 200).map(e => Object.assign({}, e, { foto: '/api/camara/hist/' + e.id + '.jpg', candidatas: candidatas(e), candidatasPlaca: candidatasPlaca(e) })) };
   }
   function coincideParcial(parcial, real) { const nucleo = parcial.replace(/\?+$/, ''), abierta = nucleo.length < parcial.length; return (abierta ? real.length >= nucleo.length : real.length === nucleo.length) && [...nucleo].every((c, i) => c === '?' || c === real[i]); }
   // La placa real que anota quien mira el historial también sirve para enlazar: si la moto aún no tiene factura y UNA factura de ese día lleva esa placa, queda enlazada

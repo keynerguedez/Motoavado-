@@ -782,6 +782,19 @@ test('una moto sin placa legible sin factura muestra como pista las facturas CON
   assert.ok(f.num == null); // solo es una pista
 });
 
+test('una moto que bajó con lectura parcial AA2B80H? se enlaza con la factura AA2B80M (la cámara confunde H con M) y la factura no queda sin moto', () => {
+  const v = { id: 'aaaaaaaaaa11', num: 11, placa: 'AA2B80M', fecha: haceMin(5), estado: 'pagada' };
+  const t = montar({ historial: [{ id: 'mwhm000001', puente: 3, parcial: 'AA2B80H?', estado: 'espera', llegada: haceMin(25), salida: haceMin(12) }], ventas: [v] });
+  const f = t.filas().find(x => x.id === 'mwhm000001'); assert.equal(f.num, 11); assert.equal(f.estado, 'tarde');
+});
+
+test('elegir una moto al facturar no se acepta si la factura ya tiene su moto en otra fila (no queda con dos filas ni le quita la moto a otra factura)', () => {
+  const v = { id: 'bbbbbbbbbb09', num: 9, placa: 'AR4A98A', fecha: haceMin(5), estado: 'pagada' };
+  const t = montar({ historial: [{ id: 'mwdb000001', puente: 1, placa: 'AR4A98A', estado: 'tarde', num: 9, llegada: haceMin(60), salida: haceMin(45) }, { id: 'mwdb000002', puente: 1, parcial: 'AA2B?0?', estado: 'alerta', llegada: haceMin(30), salida: haceMin(10) }], ventas: [v] });
+  assert.match(t.c.enlazarAlFacturar('mwdb000002', v, 'Daniel').error, /ya tiene su moto/);
+  assert.ok(t.filas().find(x => x.id === 'mwdb000002').num == null);
+});
+
 // ---------- llamadas a la API: esfuerzo bajo con respaldo y consumo registrado ----------
 test('leerPlaca manda el esfuerzo de razonamiento configurado a Sonnet (no a Haiku), registra el consumo y, si la API rechaza el parámetro, reintenta sin él y deja de mandarlo', async () => {
   const https = require('https'), original = https.request, EventEmitter = require('events');

@@ -634,13 +634,24 @@ function enviarFoto(o,id){
   if(!window.__yo||!o.fotoGrande||!id||o.fotoEnviada)return; o.fotoEnviada=true;
   PEND_FOTO[id]=o.fotoGrande; fotoDbPut("v:"+id,o.fotoGrande); subirFoto(o,id,1);
 }
+/* Reintenta solo una factura nueva si falla la conexión o el servidor está reiniciando (el servidor ignora una repetida: mismo cid), antes de mandarla a la cola. */
+function postConReintento(url,obj,n){
+  n=n==null?2:n;
+  return fetch(url,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(obj)}).then(function(r){
+    if(r.status<500||n<=0)return r;
+    return new Promise(function(ok){setTimeout(ok,2500)}).then(function(){return postConReintento(url,obj,n-1)});
+  },function(e){
+    if(n<=0)throw e;
+    return new Promise(function(ok){setTimeout(ok,2500)}).then(function(){return postConReintento(url,obj,n-1)});
+  });
+}
 function saveSale(o,sigue){
   if(!window.__yo){sigue();return} var a=paidAmt(o), pg=o.pay.parts?o.pay.parts.map(function(p){return{metodo:p.method,ref:p.ref,moneda:p.cur,monto:p.val,usd:p.usd}}):undefined;
   if(o.srvId){jpost("/api/ventas/cobrar",{id:o.srvId,metodo:o.pay.method,ref:o.pay.ref,moneda:a.cur,monto:a.val,esperado:o.pay.esp,tasa:o.pay.tasa,pagos:pg}).then(function(r){if(!r.ok)$("f-err").textContent="Ojo: el cobro de la moto #"+o.num+" no se guardó en el servidor ("+(r.j.error||"error")+"). Avisa al dueño.";sigue(r.ok?o.num:null)}).catch(function(){$("f-err").textContent="Ojo: sin conexión, el cobro de la moto #"+o.num+" no se guardó.";sigue(null)});return}
   o.cid=o.cid||(Date.now().toString(36)+Math.random().toString(36).slice(2,10)); o.creadaEn=o.creadaEn||new Date().toISOString();
   var cuerpo={telefono:o.tel,cliente:cliName(o),placa:o.sin?"":o.placa,sinPlaca:!!o.sin,modelo:o.modelo,servicios:o.svc.map(function(id){return{id:id,nombre:svc(id).name,precio:svc(id).price}}),total:total(o),descuento:o.disc&&o.disc.status==="approved"?o.disc.pct+"%":"",lavador:o.lav,metodo:o.pay.method,ref:o.pay.ref,moneda:a.cur,monto:a.val,esperado:o.pay.esp,tasa:o.pay.tasa,pagos:pg,cid:o.cid,creadaEn:o.creadaEn,filaCam:o.filaCam};
-  var sinEnviar=function(){if(o.fotoGrande)fotoDbPut("c:"+o.cid,o.fotoGrande);encolarVenta(o,cuerpo);$("f-err").textContent="Sin conexión: la moto #"+o.num+" ("+(o.sin?"sin placa":o.placa)+") quedó guardada en este equipo y se enviará sola cuando vuelva la conexión. No la factures otra vez.";sigue(null)};
-  fetch("/api/ventas",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(cuerpo)})
+  var sinEnviar=function(){if(o.fotoGrande)fotoDbPut("c:"+o.cid,o.fotoGrande);encolarVenta(o,cuerpo);$("f-err").textContent="La moto #"+o.num+" ("+(o.sin?"sin placa":o.placa)+") quedó guardada en este equipo y se enviará sola cuando vuelva la conexión. No la factures otra vez.";sigue(null)};
+  postConReintento("/api/ventas",cuerpo)
   .then(function(r){if(r.status>=500)return sinEnviar();return r.json().then(function(j){if(!r.ok)$("f-err").textContent="Ojo: la moto #"+o.num+" no se guardó en el servidor. Avisa al dueño.";else enviarFoto(o,j.id);sigue(r.ok?j.num:null)})}).catch(sinEnviar);
 }
 /* Facturas que no se pudieron enviar por falta de conexión: quedan guardadas en este equipo y se reintentan solas (cada 15 s y al volver la red). El servidor ignora una repetida (mismo cid). */
@@ -998,9 +1009,9 @@ function pintarLive(){
   var p=$("live-pill"); if(!p||!window.__yo)return; p.hidden=false;
   var s=Math.round((Date.now()-LV.ok)/1000);
   if(LV.exp){p.className="pill bad";p.textContent="Sesión vencida · vuelve a entrar"}
-  else if(s<=15){p.className="pill ok";p.textContent="En vivo"}
-  else if(s<=45){p.className="pill warn";p.textContent="Actualizando… hace "+s+" s"}
-  else{p.className="pill bad";p.textContent="Sin conexión con el servidor · hace "+(s<90?s+" s":Math.round(s/60)+" min")}
+  else if(s<=20){p.className="pill ok";p.textContent="En vivo"}
+  else if(s<=90){p.className="pill warn";p.textContent="Actualizando… hace "+s+" s"}
+  else{p.className="pill bad";p.textContent="Sin conexión con el servidor · hace "+Math.round(s/60)+" min"}
 }
 function refrescarYa(){
   if(!window.__yo||document.hidden)return;

@@ -765,6 +765,15 @@ test('corregir el enlace: la lectura descartada como repetida de esa factura (mi
   assert.equal(fila('mworea00002').num, 8); assert.equal(fila('mworea00002').estado, 'tarde'); assert.ok(!fila('mworea00002').mismaDe);
 });
 
+test('una moto sin placa que bajó sin factura no se queda con la factura sin placa que se hizo cuando OTRA moto sin placa estaba en un puente', () => {
+  const v = { id: 'eeeeeeeeee30', num: 30, placa: '', sinPlaca: true, fecha: haceMin(5), estado: 'pagada' };
+  const t = montar({ historial: [{ id: 'mwsp000001', puente: 3, estado: 'alerta', llegada: haceMin(37), salida: haceMin(24) }, { id: 'mwsp000002', puente: 2, estado: 'alerta', llegada: haceMin(6) }], ventas: [v] });
+  assert.ok(t.filas().find(x => x.id === 'mwsp000001').num == null); // la que bajó antes NO se queda con la factura
+  // sin otra moto presente, la factura sin placa sí se asigna a la que bajó (facturada después)
+  const t2 = montar({ historial: [{ id: 'mwsp000003', puente: 3, estado: 'alerta', llegada: haceMin(37), salida: haceMin(24) }], ventas: [v] });
+  assert.equal(t2.filas().find(x => x.id === 'mwsp000003').num, 30);
+});
+
 // ---------- llamadas a la API: esfuerzo bajo con respaldo y consumo registrado ----------
 test('leerPlaca manda el esfuerzo de razonamiento configurado a Sonnet (no a Haiku), registra el consumo y, si la API rechaza el parámetro, reintenta sin él y deja de mandarlo', async () => {
   const https = require('https'), original = https.request, EventEmitter = require('events');

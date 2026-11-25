@@ -85,7 +85,9 @@ function crear(ctx) {
     const desde = vs.filter(x => String(x.fecha || '') >= e.llegada && !usadas.has(x.num));
     if (e.placa) return desde.find(x => limpiarPlaca(x.placa) === limpiarPlaca(e.placa)) || null;
     if (e.parcial) { const m = desde.filter(x => parcialSuave(e.parcial, limpiarPlaca(x.placa))); return m.length === 1 ? m[0] : null; }
-    const sp = desde.filter(x => x.sinPlaca); return sp.length === 1 ? sp[0] : null; // con dos o más facturas sin placa no se adivina: queda por confirmar
+    // Con dos o más facturas sin placa no se adivina: queda por confirmar. Tampoco si, al facturar, había en un puente otra moto sin placa ni factura: la factura es de esa y no de la que bajó antes.
+    const sp = desde.filter(x => x.sinPlaca && !H.some(o => o !== e && o.dia === e.dia && o.num == null && o.estado !== 'descartada' && !o.placa && !o.parcial && Date.parse(o.llegada) <= Date.parse(x.fecha) && (!o.salida || Date.parse(o.salida) >= Date.parse(x.fecha))));
+    return sp.length === 1 ? sp[0] : null;
   }
   // Una moto que bajó sin factura y se factura después queda "facturada después"; si pasan ESPERA_BAJADA_MIN minutos sin factura, salta la alerta.
   function hTarde() {

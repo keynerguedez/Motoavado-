@@ -98,7 +98,11 @@ systemctl enable -q --now motolavado-update.timer
 cat > /etc/caddy/Caddyfile <<CADDY
 $DOMAIN {
   encode gzip
-  reverse_proxy 127.0.0.1:3000
+  # Si el servicio se está reiniciando (actualización), Caddy espera hasta 10 s en vez de devolver un error.
+  reverse_proxy 127.0.0.1:3000 {
+    lb_try_duration 10s
+    lb_try_interval 250ms
+  }
 }
 CADDY
 systemctl enable -q caddy && systemctl restart caddy

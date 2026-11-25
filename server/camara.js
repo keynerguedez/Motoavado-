@@ -1055,6 +1055,18 @@ function crear(ctx) {
       try { await mirarPuente(n, f, { revision: true, origen: 'alarma' }); } catch (e) { console.error('camara revision:', e.message); } finally { enCurso[n] = false; }
     }
   }
+  // Si la cámara lleva SENAL_MIN minutos sin dar señal en horario de trabajo, se avisa al dueño por WhatsApp (una sola vez por corte; justo tras reiniciar el servicio no se juzga) y otra vez cuando vuelve.
+  const SENAL_MIN = Number(process.env.CAMARA_SENAL_MIN || 10), SENAL_DESDE = Number(process.env.CAMARA_SENAL_DESDE || 7), SENAL_HASTA = Number(process.env.CAMARA_SENAL_HASTA || 20), ARRANQUE = Date.now();
+  function vigilarSenal(ahora) {
+    ahora = ahora == null ? Date.now() : ahora;
+    if (!ctx.avisarDueno || !S.contacto) return;
+    const hora = new Date(ahora - 4 * 3600e3).getUTCHours(), sin = (ahora - Date.parse(S.contacto)) / 60000;
+    if (S.senalAvisada && sin < 1) { const desde = S.senalAvisada; S.senalAvisada = ''; guardar(); ctx.avisarDueno('*Motolavado R1 · cámara*\nLa cámara volvió a dar señal (estuvo sin señal desde ' + new Date(Date.parse(desde) - 4 * 3600e3).toISOString().slice(11, 16) + ').'); return; }
+    if (S.senalAvisada || ahora - ARRANQUE < 3 * 60e3 || sin < SENAL_MIN || hora < SENAL_DESDE || hora >= SENAL_HASTA) return;
+    S.senalAvisada = S.contacto; guardar();
+    ctx.avisarDueno('*Motolavado R1 · cámara*\nLa cámara lleva ' + Math.round(sin) + ' min sin dar señal (último contacto ' + new Date(Date.parse(S.contacto) - 4 * 3600e3).toISOString().slice(11, 16) + '). Revisa que tenga luz y que el internet del local funcione. Mientras tanto las motos no se registran con foto.');
+  }
+  setInterval(() => { try { vigilarSenal(); } catch (e) {} }, 60000).unref();
   const segundos = (v, def) => v === undefined ? def : Number(v);
   const revLibres = segundos(process.env.CAMARA_REVISION_SEG, 60), revOcupados = segundos(process.env.CAMARA_REVISION_OCUPADOS_SEG, 60);
   setInterval(limpiar, 60000).unref();
@@ -1087,7 +1099,7 @@ function crear(ctx) {
   }
   function foto(n) { try { return fs.readFileSync(path.join(FOTOS, 'camara-puente-' + Number(n) + '.jpg')); } catch (e) { return null; } }
 
-  return { cierre, pendientes, enlazarFila, enlazarAlFacturar, reasignarEnlace, autoEmparejarInversa, tieneFotoVenta, autoRevalidar, ventasValidadas, validarManual, revalidar, liberarPuente, cruces, validarCruce, fotoCruce, fotoVentaId, cruzar, leerFoto, evento, vista, fotoVista, publico, foto, historial, marcarReal, fotoHist, fotoHistPlaca, alarma, fotoRecibida, leerPlaca, FOTOS4K, PUENTES };
+  return { cierre, pendientes, enlazarFila, enlazarAlFacturar, reasignarEnlace, autoEmparejarInversa, tieneFotoVenta, autoRevalidar, ventasValidadas, validarManual, revalidar, liberarPuente, cruces, validarCruce, fotoCruce, fotoVentaId, cruzar, leerFoto, evento, vista, fotoVista, publico, foto, historial, marcarReal, fotoHist, fotoHistPlaca, alarma, fotoRecibida, leerPlaca, vigilarSenal, FOTOS4K, PUENTES };
 }
 
 module.exports = { crear };

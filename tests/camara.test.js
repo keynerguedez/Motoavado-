@@ -38,7 +38,7 @@ function montar(o = {}) {
   const c = crear({
     DATA: dir, json: () => {}, fechaCaracas: () => HOY,
     ventasDeHoy: () => (typeof o.ventas === 'function' ? o.ventas() : o.ventas) || [],
-    completarPlaca: o.completarPlaca, marcarValidada: o.marcarValidada,
+    completarPlaca: o.completarPlaca, marcarValidada: o.marcarValidada, avisarDueno: o.avisarDueno,
     leerPlaca: async (j, m, opc) => { llamadas.leer.push(opc && opc.placaSolo ? 'zoom' : /haiku/.test(m || '') ? 'haiku' : 'full'); return (o.leer || (() => ({ moto: true, placa: '', parcial: '', motivo: 'ilegible' })))(j, m, opc || {}); },
     compararFotos: async (a, b) => { llamadas.comparar.push(String(b)); return (o.comparar || (() => ({ misma: true, confianza: 'alta', motivo: 'igual' })))(String(a), String(b)); },
   });
@@ -286,6 +286,18 @@ test('una factura sin placa hecha antes de que llegara la moto no se le da a esa
   const ok = montar({ ventas: [{ id: 'v31', num: 31, placa: '', sinPlaca: true, fecha: despues }], leer: sinLeer });
   await ok.ev(1);
   assert.equal(ok.filas()[0].num, 31);
+});
+
+test('cámara sin señal: avisa al dueño una sola vez por corte (solo en horario de trabajo y sin juzgar justo tras reiniciar) y otra vez al volver', async () => {
+  const msgs = [], t = montar({ avisarDueno: x => msgs.push(x) });
+  await t.ev(1); // llega algo de la cámara: queda "contacto"
+  const c0 = Date.now(), mediodia = (n) => Date.UTC(new Date(c0).getUTCFullYear(), new Date(c0).getUTCMonth(), new Date(c0).getUTCDate() + n, 16, 0, 0); // 12:00 Caracas
+  t.c.vigilarSenal(c0 + 60e3); assert.equal(msgs.length, 0, 'recién reiniciado o con señal: no avisa');
+  t.c.vigilarSenal(Date.UTC(new Date(c0).getUTCFullYear(), new Date(c0).getUTCMonth(), new Date(c0).getUTCDate() + 1, 5, 0, 0)); assert.equal(msgs.length, 0, 'de madrugada no avisa');
+  t.c.vigilarSenal(mediodia(1)); assert.equal(msgs.length, 1); assert.match(msgs[0], /sin dar señal/);
+  t.c.vigilarSenal(mediodia(1) + 60e3); assert.equal(msgs.length, 1, 'un mismo corte avisa una sola vez');
+  await t.ev(1); t.c.vigilarSenal(Date.now() + 5e3); assert.equal(msgs.length, 2); assert.match(msgs[1], /volvió/);
+  t.c.vigilarSenal(Date.now() + 10e3); assert.equal(msgs.length, 2, 'el aviso de que volvió sale una sola vez');
 });
 
 test('la misma placa con dos facturas hoy: la segunda visita toma la factura libre, no la que ya tiene la primera', async () => {

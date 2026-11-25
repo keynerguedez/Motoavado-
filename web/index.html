@@ -599,7 +599,14 @@ function renderClientes(){
   $("c-rows").innerHTML=l.length?l.map(function(c){return '<tr><td>'+esc(c.nombre||"Sin nombre")+(c.frecuente?' <b style="color:var(--ok,#0a6b3d)">★ Frecuente</b>':'')+'</td><td class="num">'+esc(fmtTel(c.telefono))+'</td><td>'+c.motos.map(function(m){return '<b>'+esc(m.placa)+'</b>'+(m.modelo?' · '+esc(m.modelo):'')}).join("<br>")+'</td><td class="r num">'+c.visitas+'</td><td>'+(c.ultima?new Date(c.ultima).toLocaleDateString("es-VE"):"hoy")+'</td><td>'+esc(c.ultimoServicio||"")+'</td><td class="r num">'+usd(c.gastado)+'</td></tr>'}).join(""):'<tr><td colspan="7" class="note">'+(CLI.length?"Nadie coincide con la búsqueda.":"Todavía no hay clientes. Aparecen aquí al cobrar la primera moto.")+'</td></tr>';
 }
 /* La foto del encargado se cruza en el servidor con la moto del puente (Claude compara las dos imágenes). */
-var PEND_FOTO={}, SUBIENDO={};
+var PEND_FOTO={}, SUBIENDO={}, DBVISTO={};
+/* Las fotos que aún no se subieron se guardan también en este equipo (IndexedDB), para que no se pierdan si se recarga la página o si la factura se quedó en la cola sin conexión. Si el navegador no lo permite, todo sigue como antes (solo en memoria). */
+var FDB=null;
+function fdb(){return FDB||(FDB=new Promise(function(ok){try{var r=indexedDB.open("ml_fotos",1);r.onupgradeneeded=function(){r.result.createObjectStore("f")};r.onsuccess=function(){ok(r.result)};r.onerror=function(){ok(null)}}catch(e){ok(null)}}))}
+function fdbOp(modo,fn,leer){return fdb().then(function(db){if(!db)return null;return new Promise(function(ok){try{var tx=db.transaction("f",modo),q=fn(tx.objectStore("f"));tx.oncomplete=function(){ok(leer?(q.result||null):true)};tx.onerror=tx.onabort=function(){ok(null)}}catch(e){ok(null)}})})}
+function fotoDbPut(k,b){return fdbOp("readwrite",function(st){return st.put(b,k)})}
+function fotoDbGet(k){return fdbOp("readonly",function(st){return st.get(k)},true)}
+function fotoDbDel(k){return fdbOp("readwrite",function(st){return st.delete(k)})}
 function resultadoFoto(o,j){
   var pn=j.puente===5?"área fuera del puente":"puente "+j.puente;var t=j.sinPlaca?"Foto guardada. Sin placa no se cruza con la cámara.":j.puente&&j.misma===true?"✓ La foto coincide con la moto del "+pn+" (misma placa).":j.puente&&j.misma===false?"⚠ La foto NO coincide con la moto del "+pn+", que tiene esa misma placa. Revisa.":j.puente?"Foto guardada. Claude no pudo confirmar si es la misma moto del "+pn+"; el dueño la revisará.":j.pendiente?"Foto guardada. Se comparará cuando la cámara lea esa placa en un puente.":"";
   if(t){o.cruceTxt=t;$("f-err").textContent="Moto #"+o.num+": "+t;renderAll()}
@@ -610,7 +617,7 @@ function subirFoto(o,id,intento){
   fetch("/api/ventas/foto?id="+encodeURIComponent(id),{method:"POST",headers:{"content-type":"image/jpeg"},body:blob}).then(function(r){
     if(!r.ok)throw new Error("http "+r.status);
     return r.json().catch(function(){return{}});
-  }).then(function(j){delete PEND_FOTO[id];SUBIENDO[id]=false;resultadoFoto(o,j)}).catch(function(){
+  }).then(function(j){delete PEND_FOTO[id];SUBIENDO[id]=false;fotoDbDel("v:"+id);resultadoFoto(o,j)}).catch(function(){
     SUBIENDO[id]=false;
     if(intento<4)setTimeout(function(){subirFoto(o,id,intento+1)},[0,3000,8000,20000][intento]);
     else toastWa("No se pudo subir la foto de la moto #"+o.num+". Se reintentará sola; revisa el internet.");
@@ -618,20 +625,21 @@ function subirFoto(o,id,intento){
 }
 function reintentarFotos(d){
   (d.ventas||[]).forEach(function(v){
-    if(v.conFoto){delete PEND_FOTO[v.id];return}
+    if(v.conFoto){delete PEND_FOTO[v.id]; if(!DBVISTO[v.id]){DBVISTO[v.id]=1;fotoDbDel("v:"+v.id)} return}
     if(PEND_FOTO[v.id]&&!SUBIENDO[v.id])subirFoto({num:v.num},v.id,3);
+    else if(!PEND_FOTO[v.id]&&!DBVISTO[v.id]){DBVISTO[v.id]=1; fotoDbGet("v:"+v.id).then(function(b){if(b&&!PEND_FOTO[v.id]&&!SUBIENDO[v.id]){PEND_FOTO[v.id]=b;subirFoto({num:v.num},v.id,3)}})} // la foto quedó guardada en este equipo (se recargó la página antes de subirla)
   });
 }
 function enviarFoto(o,id){
   if(!window.__yo||!o.fotoGrande||!id||o.fotoEnviada)return; o.fotoEnviada=true;
-  PEND_FOTO[id]=o.fotoGrande; subirFoto(o,id,1);
+  PEND_FOTO[id]=o.fotoGrande; fotoDbPut("v:"+id,o.fotoGrande); subirFoto(o,id,1);
 }
 function saveSale(o,sigue){
   if(!window.__yo){sigue();return} var a=paidAmt(o), pg=o.pay.parts?o.pay.parts.map(function(p){return{metodo:p.method,ref:p.ref,moneda:p.cur,monto:p.val,usd:p.usd}}):undefined;
   if(o.srvId){jpost("/api/ventas/cobrar",{id:o.srvId,metodo:o.pay.method,ref:o.pay.ref,moneda:a.cur,monto:a.val,esperado:o.pay.esp,tasa:o.pay.tasa,pagos:pg}).then(function(r){if(!r.ok)$("f-err").textContent="Ojo: el cobro de la moto #"+o.num+" no se guardó en el servidor ("+(r.j.error||"error")+"). Avisa al dueño.";sigue(r.ok?o.num:null)}).catch(function(){$("f-err").textContent="Ojo: sin conexión, el cobro de la moto #"+o.num+" no se guardó.";sigue(null)});return}
   o.cid=o.cid||(Date.now().toString(36)+Math.random().toString(36).slice(2,10)); o.creadaEn=o.creadaEn||new Date().toISOString();
   var cuerpo={telefono:o.tel,cliente:cliName(o),placa:o.sin?"":o.placa,sinPlaca:!!o.sin,modelo:o.modelo,servicios:o.svc.map(function(id){return{id:id,nombre:svc(id).name,precio:svc(id).price}}),total:total(o),descuento:o.disc&&o.disc.status==="approved"?o.disc.pct+"%":"",lavador:o.lav,metodo:o.pay.method,ref:o.pay.ref,moneda:a.cur,monto:a.val,esperado:o.pay.esp,tasa:o.pay.tasa,pagos:pg,cid:o.cid,creadaEn:o.creadaEn,filaCam:o.filaCam};
-  var sinEnviar=function(){encolarVenta(o,cuerpo);$("f-err").textContent="Sin conexión: la moto #"+o.num+" ("+(o.sin?"sin placa":o.placa)+") quedó guardada en este equipo y se enviará sola cuando vuelva la conexión. No la factures otra vez.";sigue(null)};
+  var sinEnviar=function(){if(o.fotoGrande)fotoDbPut("c:"+o.cid,o.fotoGrande);encolarVenta(o,cuerpo);$("f-err").textContent="Sin conexión: la moto #"+o.num+" ("+(o.sin?"sin placa":o.placa)+") quedó guardada en este equipo y se enviará sola cuando vuelva la conexión. No la factures otra vez.";sigue(null)};
   fetch("/api/ventas",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(cuerpo)})
   .then(function(r){if(r.status>=500)return sinEnviar();return r.json().then(function(j){if(!r.ok)$("f-err").textContent="Ojo: la moto #"+o.num+" no se guardó en el servidor. Avisa al dueño.";else enviarFoto(o,j.id);sigue(r.ok?j.num:null)})}).catch(sinEnviar);
 }
@@ -653,6 +661,7 @@ function vaciarCola(){
       return r.json().then(function(j){
         colaGuardar(colaLeer().filter(function(x){return x.cuerpo.cid!==it.cuerpo.cid}));
         toastWa(r.ok?"Se guardó la factura que estaba sin enviar ("+it.placa+") como #"+j.num+".":"No se pudo guardar la factura sin enviar de "+it.placa+": "+(j.error||"error")+". Avisa al dueño.");
+        if(r.ok&&j.id){DBVISTO[j.id]=1;fotoDbGet("c:"+it.cuerpo.cid).then(function(b){if(b&&!PEND_FOTO[j.id]){PEND_FOTO[j.id]=b;DBVISTO[j.id]=1;fotoDbPut("v:"+j.id,b).then(function(){fotoDbDel("c:"+it.cuerpo.cid)});subirFoto({num:j.num},j.id,1)}})} // la foto de la factura que estaba en la cola se sube ahora
         loadDia(); paso();
       });
     }).catch(function(){COLA_BUSY=false;renderCola()});

@@ -774,6 +774,14 @@ test('una moto sin placa que bajó sin factura no se queda con la factura sin pl
   assert.equal(t2.filas().find(x => x.id === 'mwsp000003').num, 30);
 });
 
+test('una moto sin placa legible sin factura muestra como pista las facturas CON placa sin moto hechas a los pocos minutos de su llegada (sin enlazar nada)', () => {
+  const v28 = { id: 'ffffffffff28', num: 28, placa: 'AW9W64A', fecha: haceMin(31), estado: 'pagada' }, vLejos = { id: 'ffffffffff99', num: 99, placa: 'ZZZ999', fecha: haceMin(200), estado: 'pagada' };
+  const t = montar({ historial: [{ id: 'mwcp000001', puente: 3, estado: 'alerta', llegada: haceMin(30), salida: haceMin(17) }], ventas: [v28, vLejos] });
+  const f = t.filas().find(x => x.id === 'mwcp000001');
+  assert.deepEqual(t.c.historial().items.find(x => x.id === 'mwcp000001').candidatasPlaca, [{ num: 28, placa: 'AW9W64A' }]);
+  assert.ok(f.num == null); // solo es una pista
+});
+
 // ---------- llamadas a la API: esfuerzo bajo con respaldo y consumo registrado ----------
 test('leerPlaca manda el esfuerzo de razonamiento configurado a Sonnet (no a Haiku), registra el consumo y, si la API rechaza el parámetro, reintenta sin él y deja de mandarlo', async () => {
   const https = require('https'), original = https.request, EventEmitter = require('events');

@@ -113,6 +113,41 @@ test('relectura: la misma placa se mantiene; otra placa completa abre una moto n
   assert.equal(otra.filas().length, 2, 'la fila anterior se conserva y se abre otra');
 });
 
+test('si el puente se vio vacío y luego hay moto otra vez, una sola comparación de fotos que dice "otra moto" abre una fila nueva (no se asume la misma)', async () => {
+  const sinPlaca = { 1: Object.assign({}, OCUPADO[1], { placa: '', parcial: '', confirmada: false, sinMoto: 1, relT: Date.now() }) };
+  const t = montar({ puentes: sinPlaca, historial: [{ id: 'mwo11111aa', puente: 1, estado: 'alerta', placa: '' }], leer: haiku(() => ({ moto: true, placa: 'KB9D77X' })), comparar: () => ({ misma: false, confianza: 'alta', motivo: 'otra moto' }) });
+  await t.ev(1, { revision: true });
+  const filas = t.filas();
+  assert.equal(filas.length, 2, 'la moto anterior se conserva y se abre otra fila');
+  assert.equal(t.pub(1).placa, 'KB9D77X');
+  assert.ok(!filas.find(f => f.id === 'mwo11111aa').placa, 'la placa de la moto nueva no se le anota a la anterior');
+  // si las fotos dicen que es la misma, sigue la misma fila y recibe la placa
+  const misma = montar({ puentes: sinPlaca, historial: [{ id: 'mwo11111aa', puente: 1, estado: 'alerta', placa: '' }], leer: haiku(() => ({ moto: true, placa: 'KB9D77X' })), comparar: () => ({ misma: true, confianza: 'alta', motivo: 'igual' }) });
+  await misma.ev(1, { revision: true });
+  assert.equal(misma.filas().length, 1);
+  assert.equal(misma.pub(1).placa, 'KB9D77X');
+});
+
+test('con la placa ya leída, si el puente se vio vacío y vuelve a haber moto, una sola comparación "otra moto" basta', async () => {
+  const ocupado = { 1: Object.assign({}, OCUPADO[1], { sinMoto: 1, relT: Date.now() }) };
+  const t = montar({ puentes: ocupado, historial: [FILA], leer: haiku(() => ({ moto: true, placa: '', parcial: '', motivo: 'ilegible' })), comparar: () => ({ misma: false, confianza: 'alta', motivo: 'otra moto' }) });
+  await t.ev(1, { revision: true });
+  assert.equal(t.filas().length, 2);
+  // sin haberse visto vacío, una sola comparación no cambia de moto (hacen falta dos)
+  const normal = montar({ puentes: { 1: Object.assign({}, OCUPADO[1], { sinMoto: 0 }) }, historial: [FILA], leer: haiku(() => ({ moto: true, placa: '', parcial: '', motivo: 'ilegible' })), comparar: () => ({ misma: false, confianza: 'alta', motivo: 'otra moto' }) });
+  await normal.ev(1, { revision: true });
+  assert.equal(normal.filas().length, 1);
+});
+
+test('el recorte ampliado con el que se leyó la placa queda guardado como evidencia visible (y se ofrece en el historial)', async () => {
+  const t = montar({ leer: (j, m, opc) => (opc && opc.placaSolo ? { moto: true, placa: 'AS5X15F' } : { moto: true, placa: 'AS5X15F', caja: { x: 0.4, y: 0.4, w: 0.2, h: 0.1 } }) });
+  await t.ev(1);
+  const f = t.filas()[0];
+  assert.equal(f.placa, 'AS5X15F');
+  assert.match(f.fotoPlaca, /^\/api\/camara\/histp\/[a-z0-9]+\.jpg$/);
+  assert.ok(t.c.fotoHistPlaca(f.id));
+});
+
 test('una placa que no se confirma se descarta conservando su fila ("descartada") y la moto sigue en otra fila', async () => {
   const sinConfirmar = { 2: Object.assign({}, OCUPADO[1], { n: 2, confirmada: false, hid: 'mwo22222bb', placa: 'AN5B83G', estado: 'lavando' }) };
   const t = montar({ puentes: sinConfirmar, historial: [{ id: 'mwo22222bb', puente: 2, placa: 'AN5B83G', estado: 'lavando' }], leer: haiku(() => ({ moto: true, placa: '', parcial: '', motivo: 'ilegible' })) });

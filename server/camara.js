@@ -341,8 +341,8 @@ function crear(ctx) {
     let i = 0; while (i < a.length && i < b.length && a[i] === b[i]) i++;
     return a.slice(i + 1) === b.slice(i + 1) || a.slice(i + 1) === b.slice(i) || a.slice(i) === b.slice(i + 1);
   };
-  // Caracteres que la cámara confunde entre sí (0/O/D/Q, 1/I/L, 5/S, 8/B, 2/Z, 6/G): solo para decidir qué lecturas se comparan con una factura; las fotos validan después.
-  const PARECIDOS = { O: '0', Q: '0', D: '0', I: '1', L: '1', S: '5', B: '8', Z: '2', G: '6' };
+  // Caracteres que la cámara confunde entre sí (0/O/D/Q, 1/I/L, 5/S, 8/B, 2/Z, 6/G, H/M/N, V/Y): solo para decidir qué lecturas se comparan con una factura; las fotos validan después.
+  const PARECIDOS = { O: '0', Q: '0', D: '0', I: '1', L: '1', S: '5', B: '8', Z: '2', G: '6', M: 'H', N: 'H', Y: 'V' };
   const suave = x => [...String(x)].map(c => PARECIDOS[c] || c).join('');
   const cercaSuave = (a, b) => cerca(suave(a), suave(b));
   const parcialSuave = (parcial, placa) => coincideParcial(suave(parcial), suave(placa));
@@ -632,6 +632,8 @@ function crear(ctx) {
     const hoy = ctx.fechaCaracas(new Date()), e = H.find(x => x.id === String(idFila) && x.dia === hoy);
     if (!e) return { error: 'No se encontró esa moto en el historial de hoy.' };
     if (e.num != null || e.estado === 'descartada') return { error: 'Esa moto ya tiene factura o está descartada.' };
+    // Si la factura ya tiene su moto en otra fila (por ejemplo la que leyó esa misma placa), elegir otra moto la dejaría con dos filas y le quitaría la moto a otra factura: no se enlaza.
+    if (H.some(x => x !== e && x.dia === e.dia && x.num === v.num && x.estado !== 'descartada')) return { error: 'La factura #' + v.num + ' ya tiene su moto en otra fila.' };
     const real = limpiarPlaca(v.placa);
     e.num = v.num; e.estado = e.salida ? 'tarde' : 'ok'; e.razon = 'elegida al facturar'; e.corregida = { t: new Date().toISOString(), por: quien || '', antes: null };
     if (real) e.real = real.slice(0, 10);

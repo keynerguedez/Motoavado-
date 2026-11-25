@@ -277,6 +277,17 @@ test('varias facturas sin placa libres: no se adivina cuál es, queda por confir
   assert.equal(una.filas()[0].num, 22); assert.equal(una.filas()[0].razon, 'única factura sin placa');
 });
 
+test('una factura sin placa hecha antes de que llegara la moto no se le da a esa moto (ni se le copia su placa)', async () => {
+  const antes = new Date(Date.now() - 9 * 60e3).toISOString(), despues = new Date(Date.now() + 60e3).toISOString();
+  const sinLeer = haiku(() => ({ moto: true, placa: '', parcial: '', motivo: 'ilegible' }));
+  const vieja = montar({ ventas: [{ id: 'v30', num: 30, placa: '', sinPlaca: true, fecha: antes }], leer: sinLeer });
+  await vieja.ev(1);
+  assert.ok(vieja.filas()[0].num == null, 'la factura de hace 9 min es anterior a la moto');
+  const ok = montar({ ventas: [{ id: 'v31', num: 31, placa: '', sinPlaca: true, fecha: despues }], leer: sinLeer });
+  await ok.ev(1);
+  assert.equal(ok.filas()[0].num, 31);
+});
+
 test('la misma placa con dos facturas hoy: la segunda visita toma la factura libre, no la que ya tiene la primera', async () => {
   const hace = n => new Date(Date.now() - n * 60e3).toISOString();
   const leer = haiku(() => ({ moto: true, placa: 'AB123CD', parcial: '' }));

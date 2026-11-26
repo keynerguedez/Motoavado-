@@ -456,10 +456,14 @@ async function api(req, res, ruta) {
       res.writeHead(200, { 'content-type': 'image/jpeg', 'cache-control': 'private, max-age=600' }); return res.end(f);
     }
     if (ruta === '/api/cierre') {
-      if (!puede(yo, 'admin')) return json(res, 403, { error: 'No tienes permiso.' });
-      const pedido = new URL(req.url, 'http://localhost').searchParams.get('dia') || '', dia = diaDeHoy(pedido);
-      const co = consumo.resumen(dia.dia);
-      return json(res, 200, { camara: camara.cierre(dia.ventas, dia.dia), consumo: { dia: co.delDia.costo, llamadas: co.delDia.llamadas, mes: co.delMes.costo, proyeccion: co.proyeccion } });
+      // Quien factura hace el cierre de hoy. Otros días y el consumo de la API son solo de Administración.
+      const admin = puede(yo, 'admin');
+      if (!admin && !puede(yo, 'tablet')) return json(res, 403, { error: 'No tienes permiso.' });
+      const pedido = new URL(req.url, 'http://localhost').searchParams.get('dia') || '';
+      if (pedido && pedido !== fechaCaracas(new Date()) && !admin) return json(res, 403, { error: 'Solo Administración puede ver otros días.' });
+      const dia = diaDeHoy(pedido), r = { camara: camara.cierre(dia.ventas, dia.dia) };
+      if (admin) { const co = consumo.resumen(dia.dia); r.consumo = { dia: co.delDia.costo, llamadas: co.delDia.llamadas, mes: co.delMes.costo, proyeccion: co.proyeccion }; }
+      return json(res, 200, r);
     }
     if (ruta === '/api/consumo') {
       if (!puede(yo, 'admin')) return json(res, 403, { error: 'No tienes permiso.' });

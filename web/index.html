@@ -202,6 +202,7 @@ details.grp summary{cursor:pointer;font-weight:600;font-size:.9rem;color:var(--m
         </div>
       </div>
       <div class="card stack" id="t-caja"></div>
+      <div class="card stack"><button class="btn pri" data-act="cierre" data-hoy="1">Hacer cierre del día</button><span class="note">Resumen de hoy para revisar y enviar por WhatsApp.</span></div>
       <div class="card">
         <div class="row"><h2 style="margin-right:auto">Motos de hoy</h2><span class="pill mut num" id="t-count"></span></div>
         <div id="t-list"></div>
@@ -1479,8 +1480,9 @@ document.addEventListener("click",function(ev){
   else if(a==="approve"){o.disc.status="approved";renderAll()}
   else if(a==="deny"){o.disc.status="rejected";renderAll()}
   else if(a==="cierre"){
-    $("c-text").textContent=conDiaAdmin(cierreText);$("c-copy").textContent="Copiar para WhatsApp";$("ov-cierre").classList.add("on");
-    if(window.__yo)fetch("/api/cierre"+(ADIA?"?dia="+encodeURIComponent(ADIA):"")).then(function(r){return r.ok?r.json():null}).then(function(c){if(c)$("c-text").textContent=conDiaAdmin(cierreText)+"\n"+cierreExtra(c)}).catch(function(){});
+    var soloHoy=t.dataset.hoy==="1", dia=soloHoy?"":ADIA, texto=function(){return soloHoy?cierreText():conDiaAdmin(cierreText)}; // desde Facturación el cierre es siempre el de hoy, aunque Administración esté mirando otro día
+    $("c-text").textContent=texto();$("c-copy").textContent="Copiar para WhatsApp";$("ov-cierre").classList.add("on");
+    if(window.__yo)fetch("/api/cierre"+(dia?"?dia="+encodeURIComponent(dia):"")).then(function(r){return r.ok?r.json():null}).then(function(c){if(c)$("c-text").textContent=texto()+"\n"+cierreExtra(c)}).catch(function(){});
   }
   else if(a==="enviarcierre")enviarTextoWa($("c-text").textContent);
   else if(a==="closecierre")$("ov-cierre").classList.remove("on");

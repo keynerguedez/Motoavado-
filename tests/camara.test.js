@@ -300,6 +300,16 @@ test('cámara sin señal: avisa al dueño una sola vez por corte (solo en horari
   t.c.vigilarSenal(Date.now() + 10e3); assert.equal(msgs.length, 2, 'el aviso de que volvió sale una sola vez');
 });
 
+test('puente ocupado con lectura parcial: enlaza aunque difiera en caracteres que se confunden (AL715?E es AL7I57E), solo si una factura encaja', async () => {
+  const leer = haiku(() => ({ moto: true, placa: '', parcial: 'AL715?E', motivo: 'parte tapada' }));
+  const una = montar({ ventas: [{ id: 'v7', num: 7, placa: 'AL7I57E' }], leer });
+  await una.ev(1);
+  assert.equal(una.filas()[0].num, 7); assert.equal(una.filas()[0].razon, 'placa parcial');
+  const dos = montar({ ventas: [{ id: 'v7', num: 7, placa: 'AL7I57E' }, { id: 'v8', num: 8, placa: 'AL7I58E' }], leer });
+  await dos.ev(1);
+  assert.ok(dos.filas()[0].num == null, 'con dos placas posibles no se adivina');
+});
+
 test('la misma placa con dos facturas hoy: la segunda visita toma la factura libre, no la que ya tiene la primera', async () => {
   const hace = n => new Date(Date.now() - n * 60e3).toISOString();
   const leer = haiku(() => ({ moto: true, placa: 'AB123CD', parcial: '' }));

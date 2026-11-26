@@ -352,6 +352,35 @@ test('quitar a mano la factura de una moto en el puente: no se vuelve a enlazar 
   assert.ok(t.filas()[0].num == null);
 });
 
+test('descartar una captura: deja de contar, se mantiene mientras sigue en el puente y al reabrirse, y se puede restaurar', async () => {
+  const t = montar({ leer: haiku(() => ({ moto: true, placa: '', parcial: '' })) });
+  await t.ev(2, { revision: true });
+  const id = t.filas()[0].id;
+  assert.equal(t.c.pendientes().todas.length, 1);
+  assert.ok(t.c.descartarFila(id, false, 'Raul').ok);
+  const sigue = () => { const f = t.filas()[0]; assert.equal(f.id, id); assert.equal(f.estado, 'descartada'); assert.equal(f.descarte.por, 'Raul'); assert.equal(t.c.pendientes().todas.length, 0); };
+  sigue(); await t.ev(2); await t.ev(2, { revision: true }); sigue();
+  await t.ev(2, { presente: false }); sigue();
+  await t.ev(2); sigue(); // la misma captura vuelve a detectarse a los pocos minutos
+  await t.ev(2, { presente: false });
+  assert.equal(t.c.cierre([], HOY).motosSinFactura, 0);
+  assert.ok(t.c.descartarFila(id, true, 'Raul').ok);
+  assert.ok(!t.filas()[0].descarte); assert.notEqual(t.filas()[0].estado, 'descartada');
+  assert.equal(t.c.cierre([], HOY).motosSinFactura, 1);
+});
+
+test('descartar una captura: no se puede con factura, y si luego se lee una placa vuelve a contar', async () => {
+  let placa = '';
+  const t = montar({ ventas: [{ id: 'v1', num: 1, placa: 'AB123CD' }], leer: haiku(() => ({ moto: true, placa, parcial: '' })) });
+  await t.ev(2, { revision: true });
+  assert.ok(t.c.descartarFila(t.filas()[0].id, false, 'Raul').ok);
+  placa = 'AB123CD';
+  await t.ev(2, { revision: true });
+  const f = t.filas()[0];
+  assert.equal(f.num, 1); assert.ok(!f.descarte); assert.notEqual(f.estado, 'descartada');
+  assert.match(t.c.descartarFila(f.id, false, 'Raul').error, /factura #1/);
+});
+
 test('la misma placa con dos facturas hoy: la segunda visita toma la factura libre, no la que ya tiene la primera', async () => {
   const hace = n => new Date(Date.now() - n * 60e3).toISOString();
   const leer = haiku(() => ({ moto: true, placa: 'AB123CD', parcial: '' }));

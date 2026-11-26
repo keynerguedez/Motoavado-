@@ -55,6 +55,7 @@ function crear(ctx) {
       ult.salida = null; hSucio = true; p.hid = ult.id;
       p.desde = ult.llegada; p.placa = ult.placa || ''; p.parcial = ult.parcial || ''; if (ult.sinPlaca) { /* se vuelve a emparejar solo */ }
       if (p.placa) p.confirmada = true; // una fila solo guarda placas completas ya confirmadas con dos lecturas: al reabrirla no se vuelven a poner en duda
+      if (ult.descarte) p.manual = { num: null, mismaDe: '', descartada: true, placa: p.placa }; // la captura que el dueño descartó sigue descartada
       if (ult.corregida && ult.estado !== 'descartada') { p.manual = { num: ult.num, mismaDe: '' }; p.razon = ult.razon || ''; } // enlazada a mano: se conserva
       hFoto(p, jpeg); return true;
     }
@@ -74,7 +75,8 @@ function crear(ctx) {
       // Una factura solo tiene una moto activa: si esta fila se enlaza a una factura que una fila anterior de hoy ya tiene, es la misma moto vista otra vez (por ejemplo en el área fuera del puente) y se descarta del conteo.
       const repetida = p.num != null && H.some(x => x !== e && x.dia === e.dia && x.num === p.num && x.estado !== 'descartada' && String(x.llegada) < String(e.llegada));
       const fusion = (p.manual && p.manual.mismaDe) || ''; // enlazada a mano como la misma moto de una factura que ya tiene otra fila
-      const nuevo = { placa: p.placa || e.placa || '', parcial: p.placa ? '' : (p.parcial || e.parcial || ''), motivo: p.motivo || '', estado: repetida || fusion ? 'descartada' : (p.estado === 'libre' ? e.estado : p.estado), num: fusion || p.num == null ? null : p.num, aprox: p.aprox || '', sinPlaca: !!p.sinPlacaId, razon: p.razon || '', mismaDe: fusion || (repetida ? p.num : '') };
+      const descartada = !!(p.manual && p.manual.descartada);
+      const nuevo = { placa: p.placa || e.placa || '', parcial: p.placa ? '' : (p.parcial || e.parcial || ''), motivo: p.motivo || '', estado: repetida || fusion || descartada ? 'descartada' : (p.estado === 'libre' ? e.estado : p.estado), num: fusion || descartada || p.num == null ? null : p.num, aprox: p.aprox || '', sinPlaca: !!p.sinPlacaId, razon: p.razon || '', mismaDe: fusion || (repetida ? p.num : '') };
       if (Object.keys(nuevo).some(k => (e[k] == null ? '' : e[k]) !== (nuevo[k] == null ? '' : nuevo[k]))) { Object.assign(e, nuevo); hSucio = true; }
     });
     try { hTarde(); } catch (e) {}
@@ -421,6 +423,7 @@ function crear(ctx) {
   // Revalida una factura de hoy. 1) Compara la foto del encargado con las lecturas del historial de hoy cuya placa sea igual, casi igual (también con caracteres parecidos), parcial compatible
   // o ya enlazada a esa factura. 2) Si no hay ninguna o ninguna coincide, busca entre TODAS las fotos de la cámara guardadas hoy (historial y cruces), por si la fila de esa moto se reescribió.
   function vincularFila(e, v) {
+    if (e && e.descarte) return;
     if (e && (e.num == null || e.num === v.num)) { e.num = v.num; if (e.estado === 'alerta' || e.estado === 'espera') e.estado = e.salida ? 'tarde' : 'ok'; hSucio = true; hGuardar(); }
     // Si la moto sigue en un puente, el puente también queda enlazado: si no, el puente sigue en "esperando" y su siguiente lectura (que no encaja con la factura) deshace el enlace de la fila.
     const p = e && S.puentes.find(x => x.hid === e.id && x.estado !== 'libre');
@@ -581,7 +584,7 @@ function crear(ctx) {
     const vinculadas = reales.filter(e => e.num != null), numsFilas = new Set(vinculadas.map(e => e.num));
     // Una lectura descartada cuya placa es la de una factura sin otra moto sigue siendo una moto real y facturada.
     const numsDescartadas = [];
-    descartadas.forEach(e => { const p = limpiarPlaca(e.placa); const v = p && ventas.find(x => !numsFilas.has(x.num) && !numsDescartadas.includes(x.num) && limpiarPlaca(x.placa) === p); if (v) numsDescartadas.push(v.num); });
+    descartadas.filter(e => !e.descarte).forEach(e => { const p = limpiarPlaca(e.placa); const v = p && ventas.find(x => !numsFilas.has(x.num) && !numsDescartadas.includes(x.num) && limpiarPlaca(x.placa) === p); if (v) numsDescartadas.push(v.num); });
     // Motos vistas sin factura; la misma moto leída en dos filas seguidas (misma zona, menos de 10 min entre una y otra, placa parecida) cuenta una vez.
     const sinFilas = reales.filter(e => e.num == null).sort((a, b) => (a.llegada < b.llegada ? -1 : 1)), sinFactura = [];
     sinFilas.forEach(e => {
@@ -664,6 +667,27 @@ function crear(ctx) {
     return reabierta ? { ok: true, antes, num, liberadas: libres.length, reabierta } : { ok: true, antes, num, liberadas: libres.length };
   }
 
+  // El dueño descarta una captura que no es una moto facturable (por ejemplo solo se ve la parte de arriba): deja de contar como moto sin factura.
+  // El registro y su foto se conservan, con quién y cuándo, y se puede restaurar.
+  function descartarFila(idFila, restaurar, quien) {
+    const e = H.find(x => x.id === String(idFila));
+    if (!e) return { error: 'No se encontró esa moto en el historial.' };
+    const p = S.puentes.find(x => x.hid === e.id && x.estado !== 'libre');
+    if (restaurar) {
+      if (!e.descarte) return { error: 'Esa captura no fue descartada a mano.' };
+      e.estado = e.salida ? (e.descarte.antes === 'alerta' ? 'alerta' : 'espera') : 'esperando'; delete e.descarte;
+      if (p) { delete p.manual; delete p.num; p.estado = 'esperando'; }
+    } else {
+      if (e.num != null) return { error: 'Esa moto tiene la factura #' + e.num + '. Quítale primero el enlace.' };
+      if (e.estado === 'descartada') return { error: 'Esa captura ya está descartada.' };
+      e.descarte = { t: new Date().toISOString(), por: quien || '', antes: e.estado }; e.estado = 'descartada'; e.mismaDe = '';
+      if (p) { p.manual = { num: null, mismaDe: '', descartada: true, placa: p.placa || '' }; p.estado = 'ok'; delete p.num; delete p.aprox; delete p.sinPlacaId; delete p.cruceId; delete p.candidatas; }
+    }
+    avisar('info', (e.puente === EXTRA ? 'Fuera del puente' : 'Puente ' + e.puente) + ': ' + (quien || 'el dueño') + (restaurar ? ' restauró' : ' descartó') + ' una captura.');
+    hSucio = true; guardar(); hGuardar();
+    return { ok: true };
+  }
+
   // El encargado indica, al facturar, cuál de las motos que la cámara ve sin factura es esta (por si leyó mal la placa): se enlaza al momento y queda anotado.
   function enlazarAlFacturar(idFila, v, quien) {
     const hoy = ctx.fechaCaracas(new Date()), e = H.find(x => x.id === String(idFila) && x.dia === hoy);
@@ -734,6 +758,11 @@ function crear(ctx) {
     if (vid && p.placa && p.confirmada && ctx.completarPlaca) {
       const vs = ctx.ventasDeHoy().find(x => x.id === vid);
       if (vs && vs.sinPlaca && !vs.placa && ctx.completarPlaca(vs.id, p.placa)) avisar('info', nombre(p.n) + ': la factura #' + vs.num + ' no tenía placa; la cámara leyó ' + p.placa + ' y se la completó.');
+    }
+    if (p.manual && p.manual.descartada) {
+      // Si en esa captura aparece después una placa completa, sí era una moto: vuelve a contar.
+      if (p.placa && p.placa !== p.manual.placa) { const e = H.find(x => x.id === p.hid); if (e) { delete e.descarte; hSucio = true; } delete p.manual; p.estado = 'esperando'; avisar('info', nombre(p.n) + ': en la captura descartada se leyó la placa ' + p.placa + '; vuelve a contar.'); }
+      else { p.estado = 'ok'; delete p.num; return; }
     }
     if (p.manual) { // enlace puesto a mano: no se vuelve a emparejar solo
       if (p.manual.num != null) { p.estado = 'ok'; p.num = p.manual.num; delete p.aprox; } else { delete p.num; if (p.estado === 'ok') p.estado = 'esperando'; marcarLavando(p); }
@@ -853,7 +882,7 @@ function crear(ctx) {
       else if (hayMoto) { volvio = (p.sinMoto || 0) > 0; p.sinMoto = 0; p.rev.n = 0; guardarFoto(); }
       // Cada 5 minutos con la moto en el puente se vuelve a leer la placa: si sale una placa completa que no encaja con la guardada, es otra moto (la anterior se fue sin que el puente quedara vacío).
       // Si el puente se vio vacío en una revisión y ahora hay moto otra vez, no se da por hecho que es la misma (pudo bajar una y subir otra entre dos revisiones): se verifica ya, con una sola comparación de fotos.
-      if (hayMoto && (p.placa || p.parcial || volvio) && (volvio || Date.now() - (p.relT || 0) >= RELEER_MS)) {
+      if (hayMoto && (p.placa || p.parcial || volvio || (p.manual && p.manual.descartada)) && (volvio || Date.now() - (p.relT || 0) >= RELEER_MS)) {
         p.relT = Date.now();
         const sinLectura = !(p.placa || p.parcial);
         const r = await leer(jpeg);
@@ -1138,7 +1167,7 @@ function crear(ctx) {
   }
   function foto(n) { try { return fs.readFileSync(path.join(FOTOS, 'camara-puente-' + Number(n) + '.jpg')); } catch (e) { return null; } }
 
-  return { cierre, pendientes, enlazarFila, enlazarAlFacturar, reasignarEnlace, autoEmparejarInversa, tieneFotoVenta, autoRevalidar, ventasValidadas, validarManual, revalidar, liberarPuente, cruces, validarCruce, fotoCruce, fotoVentaId, cruzar, leerFoto, evento, vista, fotoVista, publico, foto, historial, marcarReal, fotoHist, fotoHistPlaca, alarma, fotoRecibida, leerPlaca, vigilarSenal, FOTOS4K, PUENTES };
+  return { cierre, pendientes, descartarFila, enlazarFila, enlazarAlFacturar, reasignarEnlace, autoEmparejarInversa, tieneFotoVenta, autoRevalidar, ventasValidadas, validarManual, revalidar, liberarPuente, cruces, validarCruce, fotoCruce, fotoVentaId, cruzar, leerFoto, evento, vista, fotoVista, publico, foto, historial, marcarReal, fotoHist, fotoHistPlaca, alarma, fotoRecibida, leerPlaca, vigilarSenal, FOTOS4K, PUENTES };
 }
 
 module.exports = { crear };

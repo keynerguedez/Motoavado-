@@ -310,6 +310,48 @@ test('puente ocupado con lectura parcial: enlaza aunque difiera en caracteres qu
   assert.ok(dos.filas()[0].num == null, 'con dos placas posibles no se adivina');
 });
 
+test('una marca de la moto (HAOJIN) no es una placa: la moto queda sin placa y toma su factura sin placa', async () => {
+  const caja = { x: .4, y: .5, w: .1, h: .05 };
+  for (const marca of [{ placa: '', parcial: 'HAOJIN?' }, { placa: 'HAOJIN', parcial: '' }]) {
+    const t = montar({ ventas: [{ id: 'v21', num: 21, placa: '', sinPlaca: true, fecha: new Date().toISOString() }], leer: haiku(() => Object.assign({ moto: true, caja }, marca)) });
+    await t.ev(2);
+    assert.equal(t.filas()[0].parcial, ''); assert.equal(t.filas()[0].placa, ''); assert.equal(t.filas()[0].num, 21);
+  }
+  const real = montar({ leer: haiku(() => ({ moto: true, placa: '', parcial: 'AOIM49?' })) }); // una placa con O/I leídas como letras conserva sus números
+  await real.ev(2);
+  assert.equal(real.filas()[0].parcial, 'AOIM49?');
+});
+
+test('enlace manual con la moto en el puente: las fotos siguientes no lo deshacen y la moto nueva no lo hereda', async () => {
+  const ventas = [{ id: 'v21', num: 21, placa: '', sinPlaca: true, fecha: new Date(Date.now() - 20 * 60e3).toISOString() }];
+  const nueva = () => montar({ ventas, leer: haiku(() => ({ moto: true, placa: '', parcial: '' })) });
+  for (const enlazar of [t => t.c.reasignarEnlace(t.filas()[0].id, 21, () => ventas, 'dueno'), t => t.c.enlazarFila(t.filas()[0].id, ventas[0], 'dueno')]) {
+    const t = nueva();
+    await t.ev(2);
+    assert.ok(t.filas()[0].num == null);
+    assert.ok(enlazar(t).ok);
+    await t.ev(2); await t.ev(2, { revision: true });
+    assert.equal(t.filas()[0].num, 21); assert.equal(t.pub(2).num, 21);
+    await t.ev(2, { presente: false });
+    assert.equal(t.filas()[0].num, 21, 'al bajar conserva su factura');
+    await conHora(11 * 60e3, () => t.ev(2));
+    assert.ok(t.filas()[0].num == null, 'la moto siguiente no hereda el enlace');
+  }
+});
+
+test('quitar a mano la factura de una moto en el puente: no se vuelve a enlazar sola y al bajar alerta', async () => {
+  const ventas = [{ id: 'v21', num: 21, placa: '', sinPlaca: true, fecha: new Date().toISOString() }];
+  const t = montar({ ventas, leer: haiku(() => ({ moto: true, placa: '', parcial: '' })) });
+  await t.ev(2);
+  assert.equal(t.filas()[0].num, 21);
+  assert.ok(t.c.reasignarEnlace(t.filas()[0].id, null, () => ventas, 'dueno').ok);
+  await t.ev(2);
+  assert.ok(t.filas()[0].num == null);
+  await conHora(6 * 60e3, () => t.ev(2, { presente: false }));
+  await conHora(40 * 60e3, async () => assert.equal(t.filas()[0].estado, 'alerta'));
+  assert.ok(t.filas()[0].num == null);
+});
+
 test('la misma placa con dos facturas hoy: la segunda visita toma la factura libre, no la que ya tiene la primera', async () => {
   const hace = n => new Date(Date.now() - n * 60e3).toISOString();
   const leer = haiku(() => ({ moto: true, placa: 'AB123CD', parcial: '' }));

@@ -382,6 +382,14 @@ function json(res, codigo, obj, extra) {
   res.writeHead(codigo, Object.assign({ 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }, extra || {}));
   res.end(JSON.stringify(obj));
 }
+const nomina = require('./nomina');
+function cuerpoBinario(req, max) {
+  return new Promise((ok, mal) => {
+    const partes = []; let n = 0;
+    req.on('data', c => { n += c.length; if (n > max) { mal(new Error('grande')); req.resume(); } else partes.push(c); });
+    req.on('end', () => ok(Buffer.concat(partes))); req.on('error', mal);
+  });
+}
 function cuerpoJson(req) {
   return new Promise((ok, mal) => {
     if (!/^application\/json/.test(req.headers['content-type'] || '')) return mal(new Error('tipo'));
@@ -429,6 +437,11 @@ async function api(req, res, ruta) {
       const pedido = new URL(req.url, 'http://localhost').searchParams.get('mes') || '';
       const mes = /^\d{4}-(0[1-9]|1[0-2])$/.test(pedido) ? pedido : fechaCaracas(new Date()).slice(0, 7);
       return json(res, 200, { mes, ventas: leerLineas(path.join(DATA, 'ventas-' + mes + '.jsonl')).filter(v => !v.ejemplo && String(v.dia).startsWith(mes)) });
+    }
+    if (ruta === '/api/nomina') { // sueldos: solo los dueños
+      if (!yo || yo.rol !== 'dueno') return json(res, 403, { error: 'Solo el dueño puede ver la nómina.' });
+      let n = null; try { n = JSON.parse(fs.readFileSync(path.join(DATA, 'nomina.json'), 'utf8')); } catch (e) {}
+      return json(res, 200, n || { vacia: true });
     }
     if (ruta === '/api/cliente') {
       if (!puede(yo, 'tablet')) return json(res, 403, { error: 'No tienes permiso.' });
@@ -518,6 +531,16 @@ async function api(req, res, ruta) {
     const id = new URL(req.url, 'http://localhost').searchParams.get('id') || '', v = diaDeHoy().ventas.find(x => x.id === id);
     if (!v || jpeg.length < 1000) return json(res, 404, { error: 'No se encontró la factura de hoy.' });
     return json(res, 200, Object.assign({ ok: true }, await camara.cruzar(v, jpeg)));
+  }
+  // El Excel de la nómina llega como archivo crudo.
+  if (ruta === '/api/nomina') {
+    if (!yo || yo.rol !== 'dueno') return json(res, 403, { error: 'Solo el dueño puede cargar la nómina.' });
+    let archivo; try { archivo = await cuerpoBinario(req, 3e6); } catch (e) { return json(res, 400, { error: 'El archivo es demasiado grande (máximo 3 MB).' }); }
+    try {
+      const n = Object.assign(nomina.leer(archivo), { archivo: limpio(new URL(req.url, 'http://localhost').searchParams.get('nombre'), 120), subida: new Date().toISOString(), por: yo.nombre });
+      const destino = path.join(DATA, 'nomina.json'); fs.writeFileSync(destino + '.tmp', JSON.stringify(n), { mode: 0o600 }); fs.renameSync(destino + '.tmp', destino);
+      return json(res, 200, n);
+    } catch (e) { if (!(e instanceof nomina.ErrorNomina)) console.error('nómina:', e.message); return json(res, 400, { error: e instanceof nomina.ErrorNomina ? e.message : 'No se pudo guardar la nómina.' }); }
   }
   let d; try { d = await cuerpoJson(req); } catch (e) { return json(res, 400, { error: 'Datos no válidos.' }); }
   const lista = leerUsuarios(), ip = ipDe(req);

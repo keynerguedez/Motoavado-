@@ -658,6 +658,11 @@ async function api(req, res, ruta) {
     const r = camara.reasignarEnlace(d.fila, d.num == null || d.num === '' ? null : d.num, dia => diaDeHoy(dia).ventas, yo.nombre);
     return json(res, r.error ? 400 : 200, r);
   }
+  if (ruta === '/api/camara/historial/descartar') {
+    if (yo.rol !== 'dueno') return json(res, 403, { error: 'Solo el dueño puede descartar una captura.' });
+    const r = camara.descartarFila(d.fila, d.restaurar === true, yo.nombre);
+    return json(res, r.error ? 400 : 200, r);
+  }
   if (ruta === '/api/camara/historial/real') {
     if (!puede(yo, 'vigilante')) return json(res, 403, { error: 'No tienes permiso.' });
     const r = camara.marcarReal(d.id, d.real, dia => diaDeHoy(dia).ventas, yo.nombre);

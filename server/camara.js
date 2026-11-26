@@ -687,13 +687,18 @@ function crear(ctx) {
     return (p && l.find(v => v.num === p.num)) || l.find(v => !ligadas.has(v.num)) || l[0];
   }
   // Con una lectura parcial solo se da por registrada si UNA sola placa de hoy encaja (cada "?" vale cualquier carácter).
-  function registradaParcial(parcial) {
+  function registradaParcial(parcial, p) {
     if (!parcial) return null;
     // Los "?" del final no fijan el largo (el modelo no sabe cuántos caracteres tiene la placa); los del medio sí valen un carácter.
     const nucleo = parcial.replace(/\?+$/, ''), abierta = nucleo.length < parcial.length;
     const encaja = v => { const pl = limpiarPlaca(v.placa); return (abierta ? pl.length >= nucleo.length : pl.length === nucleo.length) && [...nucleo].every((c, i) => c === '?' || c === pl[i]); };
+    const unica = l => l.length && new Set(l.map(v => limpiarPlaca(v.placa))).size === 1 ? l[0] : null;
     const hoy = ctx.ventasDeHoy().filter(encaja);
-    return hoy.length && new Set(hoy.map(v => limpiarPlaca(v.placa))).size === 1 ? hoy[0] : null;
+    if (hoy.length) return unica(hoy);
+    // Ninguna encaja letra por letra: se admiten caracteres que la cámara confunde (1/I/L, 0/O/D…), solo con 5 o más leídos y entre facturas que no tienen ya su moto en otra fila de hoy.
+    if (conocidos(parcial) < 5) return null;
+    const dia = ctx.fechaCaracas(new Date()), ligadas = new Set(H.filter(x => x.dia === dia && x.num != null && x.id !== (p && p.hid) && x.estado !== 'descartada').map(x => x.num));
+    return unica(ctx.ventasDeHoy().filter(v => v.placa && !ligadas.has(v.num) && parcialSuave(parcial, limpiarPlaca(v.placa))));
   }
   function evaluar(p) {
     if (p.estado === 'libre') return;
@@ -705,7 +710,7 @@ function crear(ctx) {
     }
     let v = registrada(p.placa, p), razon = v ? 'placa igual' : '', aprox = false;
     if (!v && vid) { v = ctx.ventasDeHoy().find(x => x.id === vid) || null; if (v) razon = 'foto u orden'; }
-    if (!v && !p.placa && p.parcial) { v = registradaParcial(p.parcial); aprox = !!v; if (v) razon = 'placa parcial'; }
+    if (!v && !p.placa && p.parcial) { v = registradaParcial(p.parcial, p); aprox = !!v; if (v) razon = 'placa parcial'; }
     // Placa completa que difiere en un solo carácter de UNA sola factura de hoy (la cámara confunde M/H, 0/O…) y que ningún otro puente tiene asignada: se da por registrada como aproximada.
     if (!v && p.placa) {
       const tomadas = new Set(S.puentes.filter(x => x !== p && x.estado === 'ok' && x.num != null).map(x => x.num));

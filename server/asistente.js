@@ -2,8 +2,11 @@
 // Asistente de Administración: un chat que responde preguntas sobre el negocio consultando los datos del servidor y entrega archivos de Excel.
 // El modelo no recibe el archivo de ventas: pide lo que necesita con herramientas de solo lectura. Los teléfonos de los clientes nunca se le envían
 // (sí van en los archivos exportados, que arma el servidor). Usa la API de Anthropic igual que la cámara (HTTPS directo, ANTHROPIC_API_KEY).
-const https = require('https');
+const https = require('https'), fs = require('fs'), path = require('path');
 const xlsx = require('./xlsx');
+// Logo que encabeza los archivos de Excel (si falta, el archivo sale igual, sin logo).
+let LOGO = null; try { LOGO = fs.readFileSync(path.join(__dirname, 'logo-excel.png')); } catch (e) {}
+const fechaCorta = d => String(d || '').slice(0, 10).split('-').reverse().join('/');
 
 const MAX_VUELTAS = 8, MAX_DIAS = 400, MAX_FILAS_MODELO = 150, MAX_FILAS_ARCHIVO = 20000, MAX_ARCHIVOS = 4;
 const FECHA = /^\d{4}-\d{2}-\d{2}$/;
@@ -31,7 +34,9 @@ const HERRAMIENTAS = [
   { name: 'exportar_detalle', description: 'Crea un archivo de Excel con el detalle completo, armado por el servidor: una fila por factura ("ventas", con los mismos filtros de consultar_ventas) o por cliente ("clientes"). Incluye los teléfonos. Úsala cuando pidan descargar o exportar listados.',
     input_schema: { type: 'object', properties: Object.assign({ que: { type: 'string', enum: ['ventas', 'clientes'] }, nombre: { type: 'string', description: 'Nombre corto del archivo, sin extensión' } }, RANGO, FILTROS), required: ['que', 'nombre'] } },
   { name: 'crear_archivo', description: 'Crea un archivo de Excel con una tabla que tú armas (resúmenes, comparaciones, rankings) con cifras obtenidas de las otras herramientas. Para listados completos de facturas o clientes usa exportar_detalle.',
-    input_schema: { type: 'object', properties: { nombre: { type: 'string', description: 'Nombre corto del archivo, sin extensión' }, columnas: { type: 'array', items: { type: 'string' } }, filas: { type: 'array', items: { type: 'array', items: { type: ['string', 'number', 'null'] } }, description: 'Cada fila con un valor por columna; los números como número' } }, required: ['nombre', 'columnas', 'filas'] } },
+    input_schema: { type: 'object', properties: { nombre: { type: 'string', description: 'Nombre corto del archivo, sin extensión' }, titulo: { type: 'string', description: 'Título que va arriba en el archivo, p. ej. "Ventas por lavador"' }, detalle: { type: 'string', description: 'Una línea bajo el título: periodo y aclaraciones' },
+      columnas: { type: 'array', items: { type: 'string' }, description: 'Las columnas de dinero llevan "$" en el nombre, p. ej. "Cobrado $"' }, filas: { type: 'array', items: { type: 'array', items: { type: ['string', 'number', 'null'] } }, description: 'Cada fila con un valor por columna; los números como número y las fechas como AAAA-MM-DD. No agregues una fila de total: usa "sumar"' },
+      sumar: { type: 'array', items: { type: 'string' }, description: 'Nombres de las columnas que deben llevar total al final (solo cantidades y montos que tenga sentido sumar)' } }, required: ['nombre', 'titulo', 'columnas', 'filas'] } },
 ];
 
 function crear(ctx) {
@@ -77,11 +82,14 @@ function crear(ctx) {
     const k = e.orden || 'visitas';
     return l.sort((a, b) => k === 'ultima' ? String(b.ultima).localeCompare(String(a.ultima)) : (b[k] || 0) - (a[k] || 0));
   }
-  function archivo(salida, nombre, columnas, filas) {
+  function archivo(salida, nombre, columnas, filas, opc) {
     if (salida.length >= MAX_ARCHIVOS) throw new Error('Ya se crearon ' + MAX_ARCHIVOS + ' archivos en esta respuesta.');
     const base = sinTildes(nombre).replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60) || 'reporte';
     const n = base + (salida.some(a => a.nombre === base + '.xlsx') ? '-' + (salida.length + 1) : '') + '.xlsx';
-    salida.push({ nombre: n, base64: xlsx.crear(columnas, filas, base).toString('base64') });
+    const titulo = String(opc.titulo || '').trim().slice(0, 90) || base.charAt(0).toUpperCase() + base.slice(1).replace(/-/g, ' ');
+    const generado = 'Generado el ' + new Date().toLocaleString('es-VE', { timeZone: 'America/Caracas', dateStyle: 'short', timeStyle: 'short' });
+    const libro = xlsx.crear(columnas, filas, { hoja: titulo, subtitulo: titulo, detalle: String(opc.detalle || '').slice(0, 160), pie: generado, totales: opc.totales, logo: LOGO });
+    salida.push({ nombre: n, base64: libro.toString('base64') });
     return { archivo_creado: n, filas: filas.length, aviso: 'El archivo ya aparece en el chat para descargarlo.' };
   }
   function ejecutar(nombre, e, salida) {
@@ -105,16 +113,21 @@ function crear(ctx) {
       if (e.que === 'clientes') {
         const l = clientes({}).slice(0, MAX_FILAS_ARCHIVO);
         return archivo(salida, e.nombre, ['Nombre', 'Teléfono', 'Motos', 'Visitas', 'Gastado $', 'Primera visita', 'Última visita', 'Último servicio'],
-          l.map(c => [c.nombre, c.telefono, (c.motos || []).map(m => m.placa).filter(Boolean).join(' / '), c.visitas, num(c.gastado), String(c.primera || '').slice(0, 10), String(c.ultima || '').slice(0, 10), c.ultimoServicio || '']));
+          l.map(c => [c.nombre, c.telefono, (c.motos || []).map(m => m.placa).filter(Boolean).join(' / '), c.visitas, num(c.gastado), String(c.primera || '').slice(0, 10), String(c.ultima || '').slice(0, 10), c.ultimoServicio || '']),
+          { titulo: 'Clientes', detalle: l.length + (l.length === 1 ? ' cliente' : ' clientes'), totales: [3, 4] });
       }
-      const l = filtrar(e).slice(0, MAX_FILAS_ARCHIVO);
+      const l = filtrar(e).slice(0, MAX_FILAS_ARCHIVO), t = totales(l);
+      const filtros = Object.keys(FILTROS).filter(k => e[k]).map(k => k + ' ' + e[k]).join(', ');
       return archivo(salida, e.nombre, ['Día', 'Hora', 'N.º', 'Placa', 'Cliente', 'Teléfono', 'Servicios', 'Lavador', 'Encargado', 'Total $', 'Estado', 'Método', 'Recibido', 'Referencia', 'Tipo', 'Nota'],
-        l.map(v => { const f = filaVenta(v); return [f.dia, f.hora, f.num, f.placa, f.cliente, v.telefono || '', f.servicios, f.lavador, f.encargado, f.total_usd, f.estado, f.metodo, f.recibido, f.referencia, f.tipo, f.nota]; }));
+        l.map(v => { const f = filaVenta(v); return [f.dia, f.hora, f.num, f.placa, f.cliente, v.telefono || '', f.servicios, f.lavador, f.encargado, f.total_usd, f.estado, f.metodo, f.recibido, f.referencia, f.tipo, f.nota]; }),
+        { titulo: 'Ventas del ' + fechaCorta(e.desde) + (e.hasta !== e.desde ? ' al ' + fechaCorta(e.hasta) : ''), totales: [9],
+          detalle: t.motos + (t.motos === 1 ? ' factura' : ' facturas') + ' · cobrado $' + t.cobrado_usd.toFixed(2) + ' · por cobrar $' + t.por_cobrar_usd.toFixed(2) + (filtros ? ' · filtro: ' + filtros : '') });
     }
     if (nombre === 'crear_archivo') {
       const cols = Array.isArray(e.columnas) ? e.columnas.slice(0, 40).map(String) : [], filas = Array.isArray(e.filas) ? e.filas.filter(Array.isArray).slice(0, 2000) : [];
       if (!cols.length || !filas.length) throw new Error('El archivo necesita columnas y filas.');
-      return archivo(salida, e.nombre, cols, filas);
+      const suma = (Array.isArray(e.sumar) ? e.sumar : []).map(n => cols.indexOf(String(n))).filter(i => i >= 0);
+      return archivo(salida, e.nombre, cols, filas, { titulo: e.titulo, detalle: e.detalle, totales: suma });
     }
     throw new Error('Herramienta desconocida.');
   }

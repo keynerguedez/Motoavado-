@@ -53,6 +53,11 @@ test('asistente: exportar crea un Excel con los teléfonos, que al modelo solo l
   assert.deepEqual(r.archivos.map(a => a.nombre), ['ventas-de-noviembre.xlsx', 'resumen.xlsx']);
   const hoja = leerZip(Buffer.from(r.archivos[0].base64, 'base64'))['xl/worksheets/sheet1.xml'];
   assert.ok(hoja.includes('04140000001') && hoja.includes('<v>5</v>'), 'teléfono como texto y total como número');
+  const libro = leerZip(Buffer.from(r.archivos[0].base64, 'base64'));
+  assert.ok(libro['xl/media/logo.png'] && hoja.includes('<drawing r:id="rId1"/>'), 'el archivo lleva el logo');
+  assert.ok(hoja.includes('Ventas del 01/11/2026 al 30/11/2026') && hoja.includes('cobrado $10.00 · por cobrar $5.00'));
+  assert.ok(hoja.includes('<f>SUBTOTAL(109,J7:J9)</f><v>15</v>'), 'fila de total del monto');
+  assert.ok(hoja.includes('<v>' + Math.round((Date.UTC(2026, 10, 2) - Date.UTC(1899, 11, 30)) / 864e5) + '</v>'), 'el día va como fecha');
   const otra = leerZip(Buffer.from(r.archivos[1].base64, 'base64'))['xl/worksheets/sheet1.xml'];
   assert.ok(otra.includes('=1+1 &lt;Keive&gt;') && !otra.includes('<f>'), 'un texto nunca se vuelve fórmula');
   assert.ok(!JSON.stringify(t.llamadas).includes('04140000001'));
@@ -73,8 +78,11 @@ test('asistente: errores de herramienta, de la API y sin clave no rompen nada', 
   try { assert.match((await montar([]).a.responder([{ rol: 'usuario', texto: 'x' }])).error, /no está configurado/); } finally { process.env.ANTHROPIC_API_KEY = clave; }
 });
 
-test('excel: archivo con encabezado y columnas más allá de la Z', () => {
-  const cols = Array.from({ length: 28 }, (_, i) => 'c' + i);
-  const hoja = leerZip(xlsx.crear(cols, [cols.map((_, i) => i)], 'Mi hoja'))['xl/worksheets/sheet1.xml'];
-  assert.ok(hoja.includes('r="AB2"'));
+test('excel: columnas más allá de la Z, montos con formato y sin logo ni total si no se piden', () => {
+  const cols = Array.from({ length: 28 }, (_, i) => 'c' + i).concat('Cobrado $');
+  const z = leerZip(xlsx.crear(cols, [cols.map((_, i) => i)], { hoja: "Mi 'hoja' / [1]" }));
+  const hoja = z['xl/worksheets/sheet1.xml'];
+  assert.ok(hoja.includes('r="AC7" s="7"'), 'la columna con $ usa el formato de dinero');
+  assert.ok(!hoja.includes('<f>') && !hoja.includes('<drawing') && !z['xl/media/logo.png']);
+  assert.match(z['xl/workbook.xml'], /name="Mi +hoja +1"/, 'el nombre de la hoja queda sin caracteres que Excel rechaza');
 });

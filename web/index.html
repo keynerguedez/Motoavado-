@@ -262,6 +262,11 @@ details.grp summary{cursor:pointer;font-weight:600;font-size:.9rem;color:var(--m
         <label class="row note" style="gap:6px">Meta diaria de motos<input id="a-meta" type="number" min="1" step="1" style="width:80px"></label>
         <button class="btn pri" data-act="cierre">Hacer cierre del día</button></div>
       <div class="kpis" id="a-kpis"></div>
+      <div class="card stack" id="a-mes-card" hidden>
+        <div class="row" style="flex-wrap:wrap;gap:10px"><h3 style="margin-right:auto">Acumulado del mes</h3>
+          <label class="row note" style="gap:6px">Mes<select id="a-mes" style="width:190px"></select></label><button class="btn sm pri" data-act="vermes">Consultar</button></div>
+        <div id="a-mes-out" class="stack"><span class="note">Elige el mes y toca Consultar.</span></div>
+      </div>
       <div class="card stack"><h3>Autorizaciones pendientes</h3><div class="stack" id="a-auth"></div>
         <p class="note">En el sistema real esta solicitud te llega al teléfono (WhatsApp o notificación) y apruebas desde ahí.</p></div>
       <div class="card stack" id="a-sf-card" hidden>
@@ -829,6 +834,41 @@ function renderAdmin(){
   conDiaAdmin(renderAdminBase);
   $("a-tit").textContent=ADIA?"Día":"Hoy"; $("a-hist").hidden=!ADIA; $("a-dia").value=ADIA||hoyCaracas();
   if(ADIA)$("a-date").textContent=new Date(ADIA+"T12:00:00").toLocaleDateString("es-VE",{weekday:"long",day:"numeric",month:"long",year:"numeric"});
+}
+/* Acumulado del mes: suma todas las facturas del mes con las mismas reglas de la vista por día. */
+function mesesAdmin(){
+  var h=hoyCaracas(), a=+h.slice(0,4), m=+h.slice(5,7), op="";
+  for(var i=0;i<12;i++){var f=new Date(a,m-1-i,1), v=f.getFullYear()+"-"+String(f.getMonth()+1).padStart(2,"0"), n=f.toLocaleDateString("es-VE",{month:"long",year:"numeric"}); op+='<option value="'+v+'">'+esc(n.charAt(0).toUpperCase()+n.slice(1))+'</option>'}
+  $("a-mes").innerHTML=op; $("a-mes-card").hidden=false;
+}
+function cargarMes(){
+  var mes=$("a-mes").value, out=$("a-mes-out"); out.innerHTML='<span class="note">Cargando…</span>';
+  fetch("/api/mes?mes="+encodeURIComponent(mes)).then(function(r){return r.ok?r.json():null}).then(function(j){
+    if($("a-mes").value!==mes)return;
+    if(!j){out.innerHTML='<span class="note">No se pudo consultar el mes.</span>';return}
+    renderMes(j);
+  }).catch(function(){out.innerHTML='<span class="note">Sin conexión: no se pudo consultar el mes.</span>'});
+}
+function renderMes(j){
+  var out=$("a-mes-out"), orders=construirDia({ventas:j.ventas,gastos:[]}).orders;
+  if(!orders.length){out.innerHTML='<span class="note">Ese mes no tiene motos facturadas.</span>';return}
+  var dias={}; j.ventas.forEach(function(v){(dias[v.dia]=dias[v.dia]||[]).push(v)});
+  var suma=function(l){return l.reduce(function(a,o){return a+total(o)},0)};
+  var paid=orders.filter(function(o){return o.pay}), unpaid=orders.filter(function(o){return !o.pay}), ing=suma(paid), nd=Object.keys(dias).length;
+  var oo=S.orders, op=S.prestamos, M, lav;
+  S.orders=orders; S.prestamos={}; // las mismas cuentas del día, hechas sobre las facturas del mes (sin préstamos: no se guardan en el servidor)
+  try{M=cajaMetodos(); lav=S.lavadores.concat(S.lavAntiguos).map(function(l){return {l:l,c:lavCalc(l)}}).filter(function(x){return x.c.n})}finally{S.orders=oo;S.prestamos=op}
+  var kpi=[[orders.length,"Motos atendidas"],[usd(ing),"Cobrado"],[usd(paid.length?ing/paid.length:0),"Promedio por moto"],[usd(suma(unpaid)),unpaid.length+" por cobrar"],[nd,"Días con ventas · "+fmtN(orders.length/nd)+" motos por día"]];
+  var tabla=function(cab,filas){return '<div class="tablewrap"><table style="min-width:320px"><thead><tr>'+cab.map(function(c,i){return '<th'+(i?' class="r"':'')+'>'+c+'</th>'}).join("")+'</tr></thead><tbody>'+filas.map(function(f){return '<tr>'+f.map(function(c,i){return '<td'+(i?' class="r num"':'')+'>'+c+'</td>'}).join("")+'</tr>'}).join("")+'</tbody></table></div>'};
+  var byS={}; orders.forEach(function(o){o.svc.forEach(function(id){byS[id]=(byS[id]||0)+1})});
+  var ops={}; orders.forEach(function(o){(ops[o.op]=ops[o.op]||[]).push(o)});
+  out.innerHTML='<div class="kpis">'+kpi.map(function(k){return '<div class="card kpi"><b class="num">'+k[0]+'</b><span>'+k[1]+'</span></div>'}).join("")+'</div>'
+    +'<h3>Cobrado por canal de pago</h3>'+tabla(["Método","Pagos","Recibido","Equivale a"],METHODS.filter(function(m){return M[m]}).map(function(m){var r=M[m];return [esc(m),r.n,'<b>'+cajaTxt(r)+'</b>',usd(r.usd)]}))
+    +'<h3>Por día</h3>'+tabla(["Día","Motos","Cobrado","Por cobrar"],Object.keys(dias).sort().map(function(d){var l=construirDia({ventas:dias[d],gastos:[]}).orders;return [esc(new Date(d+"T12:00:00").toLocaleDateString("es-VE",{weekday:"short",day:"numeric",month:"short"})),l.length,usd(suma(l.filter(function(o){return o.pay}))),usd(suma(l.filter(function(o){return !o.pay})))]}))
+    +'<h3>Encargados ('+S.encPct+'% de lo que facturan)</h3>'+tabla(["Encargado","Motos","Vendió","Gana"],Object.keys(ops).map(function(k){var t=suma(ops[k]);return [esc(k),ops[k].length,usd(t),usd(t*S.encPct/100)]}))
+    +'<h3>Lavadores</h3>'+tabla(["Lavador","Motos","Bruto","Productos","Neto"],lav.map(function(x){return [esc(x.l),x.c.n,usd(x.c.bruto),usd(x.c.prod),usd(x.c.neto)]}))
+    +'<h3>Servicios vendidos</h3>'+tabla(["Servicio","Cantidad"],S.services.filter(function(s){return byS[s.id]}).sort(function(a,b){return byS[b.id]-byS[a.id]}).map(function(s){return [esc(s.name),byS[s.id]]}))
+    +'<p class="note">Cada factura cuenta en el día en que se hizo. Las comisiones usan las reglas de pago actuales. No incluye gastos ni préstamos, porque no se guardan en el servidor.</p>';
 }
 function renderAdminBase(){
   var paid=S.orders.filter(function(o){return o.pay}), unpaid=S.orders.filter(function(o){return !o.pay});
@@ -1467,6 +1507,7 @@ document.addEventListener("click",function(ev){
   else if(a==="colareint"){vaciarCola()}
   else if(a==="xdiahoy"){$("x-dia").value="";loadCruces()}
   else if(a==="elegircam"){FILACAM=FILACAM===t.dataset.id?"":t.dataset.id;renderCam()}
+  else if(a==="vermes")cargarMes();
   else if(a==="adiahoy"){$("a-dia").value=hoyCaracas();elegirDiaAdmin("")}
   else if(a==="xval"){jpost("/api/camara/cruces/validar",{id:t.dataset.id,ok:t.dataset.v==="1"}).then(function(){loadCruces()})}
   else if(a==="hreal"){var hi=$("hr-"+t.dataset.id);if(hi)jpost("/api/camara/historial/real",{id:t.dataset.id,real:hi.value}).then(function(r){hi.blur();if(r.ok&&r.j.enlazada)toastWa("Listo: esa moto quedó enlazada con la factura #"+r.j.enlazada+".");else if(r.ok&&r.j.fusionada)toastWa("Listo: es la misma moto de la factura #"+r.j.fusionada+" y ya no cuenta como moto sin factura.");loadHist();loadSinFact();loadHoyH()})}
@@ -1595,6 +1636,7 @@ document.addEventListener("input",function(ev){
   else if(t.id==="a-tasa"){var x=parseFloat(t.value);if(x>0){S.tasa=x;draftTotal();renderAll()}}
 });
 $("c-buscar").addEventListener("input",renderClientes);
+$("a-mes").addEventListener("change",cargarMes);
 $("f-sinplaca").addEventListener("change",function(){$("f-placa").disabled=this.checked;if(this.checked)$("f-placa").value=""});
 $("f-tipo").addEventListener("change",function(){$("f-desc").disabled=this.value!=="normal";if(this.value!=="normal")$("f-desc").value="0"});
 window.addEventListener("hashchange",function(){go(location.hash.slice(1))});
@@ -1625,7 +1667,7 @@ if(location.protocol!=="file:"&&window.fetch){fetch("/api/yo").then(function(r){
   loadDia().then(ejemploDesdeEnlace); loadAuts(); setInterval(loadAuts,5000); setInterval(refrescarDia,5000); setInterval(function(){if($("v-clientes").classList.contains("on"))loadClientes()},15000); iniciarEnVivo();
   if(u.permisos.indexOf("tablet")>=0||u.permisos.indexOf("vigilante")>=0){loadPend();setInterval(loadPend,10000)}
   renderCola();vaciarCola();setInterval(vaciarCola,15000);window.addEventListener("online",vaciarCola);
-  if(u.permisos.indexOf("admin")>=0)loadSemana();
+  if(u.permisos.indexOf("admin")>=0){loadSemana();mesesAdmin()}
   if(u.permisos.indexOf("vigilante")>=0){loadCam();setInterval(loadCam,2000);loadHist();setInterval(loadHist,5000);loadCruces();setInterval(loadCruces,5000);loadHoyH();setInterval(loadHoyH,5000);loadSinFact();setInterval(loadSinFact,5000);loadConsumo();setInterval(loadConsumo,30000);$("h-dia").addEventListener("change",function(){HIST=null;loadHist()});$("h-ahora").addEventListener("change",renderHist)}
 }).catch(function(){})}
  $("a-meta").value=S.meta; renderRules(); setInterval(function(){renderVigilante();renderMeta()},30000);

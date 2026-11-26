@@ -139,6 +139,13 @@ details.grp summary{cursor:pointer;font-weight:600;font-size:.9rem;color:var(--m
 .msg .btn{display:inline-block;margin-top:8px;margin-right:6px;text-decoration:none;color:var(--ink);white-space:normal}
 #chat-log .sug{align-self:flex-start;text-align:left}
 #chat-in{font:inherit;font-size:16px;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px 12px;width:100%;resize:none}
+.sheet.nomina{max-width:1100px;height:100%;display:flex;flex-direction:column;gap:10px;overflow:hidden}
+#nom-cuerpo{flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column;gap:12px}
+#nom-cuerpo>*{flex:none}
+#nom-cuerpo table{min-width:max-content}
+#nom-cuerpo td{border:1px solid var(--line);max-width:260px}
+#nom-cuerpo td.b{font-weight:700;background:var(--bg)}
+#nom-cuerpo td.r{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
 /* ---------- menú: en computador se ve como siempre; en teléfono, barra de secciones abajo y lo demás dentro de "Menú" ---------- */
 .tabs .ico,.tabs .cor,#btn-menu{display:none}
 .acciones{display:contents}
@@ -173,6 +180,7 @@ header.top [hidden],#a-hist[hidden]{display:none!important}
   .kpis{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.kpi b{font-size:1.6rem;overflow-wrap:anywhere}
   .cols{grid-template-columns:minmax(0,1fr);gap:10px}
   .bar{grid-template-columns:110px 1fr 70px}
+  #nom-cuerpo td{max-width:150px;font-size:.78rem;padding:5px 6px}
   .order{flex-wrap:wrap}.order .info{flex:1 1 0}
   .order .side{flex-basis:100%;flex-direction:row;flex-wrap:wrap;justify-content:flex-end;align-items:center;text-align:left}
   .grid-tablet>*{min-width:0}
@@ -198,6 +206,7 @@ header.top [hidden],#a-hist[hidden]{display:none!important}
   <button class="btn sm" id="btn-menu" type="button" aria-expanded="false" aria-controls="acciones">&#9776; Menú</button>
   <div class="acciones" id="acciones">
     <button class="btn sm pri" data-act="chat" id="btn-chat" hidden>&#10022; Asistente IA</button>
+    <button class="btn sm" data-act="nomina" id="btn-nomina" hidden>Nómina</button>
     <a class="btn sm" id="lnk-usuarios" href="/usuarios" hidden>Usuarios</a>
     <a class="btn sm" id="lnk-wa" href="/whatsapp" hidden>WhatsApp</a>
     <button class="btn sm" id="btn-salir" data-act="salir" hidden>Salir</button>
@@ -437,6 +446,13 @@ header.top [hidden],#a-hist[hidden]{display:none!important}
   <div id="chat-log" aria-live="polite"></div>
   <div class="row" style="flex-wrap:nowrap;align-items:flex-end"><textarea id="chat-in" rows="2" maxlength="4000" placeholder="Pregunta sobre las ventas, clientes o la cámara"></textarea><button class="btn pri" data-act="chatenviar" id="chat-enviar">Enviar</button></div>
   <span class="note">La IA puede equivocarse: revisa las cifras importantes. Cada pregunta tiene un costo.</span>
+</div></div>
+
+<div class="overlay" id="ov-nomina"><div class="sheet nomina">
+  <div class="row" style="flex-wrap:nowrap"><h2 style="margin-right:auto">Nómina</h2><label class="btn sm pri" style="cursor:pointer">Cargar Excel<input id="nom-file" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" style="position:absolute;opacity:0;width:1px;height:1px"></label><button class="btn sm" data-act="nomcerrar">Cerrar</button></div>
+  <span class="note" id="nom-info"></span>
+  <div class="err" id="nom-err" role="alert"></div>
+  <div id="nom-cuerpo"></div>
 </div></div>
 
 <div class="overlay" id="ov-cierre"><div class="sheet stack">
@@ -930,6 +946,47 @@ function renderMes(j){
     +'<h3>Lavadores</h3>'+tabla(["Lavador","Motos","Bruto","Productos","Neto"],lav.map(function(x){return [esc(x.l),x.c.n,usd(x.c.bruto),usd(x.c.prod),usd(x.c.neto)]}))
     +'<h3>Servicios vendidos</h3>'+tabla(["Servicio","Cantidad"],S.services.filter(function(s){return byS[s.id]}).sort(function(a,b){return byS[b.id]-byS[a.id]}).map(function(s){return [esc(s.name),byS[s.id]]}))
     +'<p class="note">Cada factura cuenta en el día en que se hizo. Las comisiones usan las reglas de pago actuales. No incluye gastos ni préstamos, porque no se guardan en el servidor.</p>';
+}
+function cerrarMenu(){document.querySelector("header.top").classList.remove("abierto");$("btn-menu").setAttribute("aria-expanded",false)}
+/* Nómina (solo dueños): se muestra la pestaña de sueldos del Excel que cargan. */
+function renderNomina(n){
+  var c=$("nom-cuerpo");
+  if(n.vacia){$("nom-info").textContent="";c.innerHTML='<span class="note">Todavía no se ha cargado la nómina. Toca "Cargar Excel" y elige tu archivo: se mostrará la pestaña de sueldos o nómina.</span>';return}
+  $("nom-info").textContent=n.hoja+" · "+(n.archivo||"archivo")+" · cargado el "+new Date(n.subida).toLocaleString("es-VE",{timeZone:"America/Caracas",dateStyle:"short",timeStyle:"short"})+" por "+n.por;
+  var html="", grupo=[], antes=null;
+  var tabla=function(){ // las filas seguidas forman una tabla, con las celdas unidas como en el Excel
+    if(!grupo.length)return;
+    var min=99,max=0,ocupada={};
+    grupo.forEach(function(f){f.celdas.forEach(function(x){min=Math.min(min,x.c);max=Math.max(max,x.c+x.cs-1)})});
+    html+='<div class="tablewrap"><table>'+grupo.map(function(f,i){
+      var tds="",col=min;
+      while(col<=max){
+        if(ocupada[f.n+":"+col]){col++;continue}
+        var x=f.celdas.filter(function(y){return y.c===col})[0];
+        if(!x){tds+="<td></td>";col++;continue}
+        var rs=Math.min(x.rs,grupo.length-i);
+        for(var a=1;a<rs;a++)for(var b=0;b<x.cs;b++)ocupada[(f.n+a)+":"+(col+b)]=1;
+        tds+='<td class="'+(x.b?"b ":"")+(x.num?"r":"")+'"'+(x.cs>1?' colspan="'+x.cs+'"':"")+(rs>1?' rowspan="'+rs+'"':"")+'>'+esc(x.v)+'</td>';
+        col+=x.cs;
+      }
+      return "<tr>"+tds+"</tr>"}).join("")+'</table></div>';
+    grupo=[];
+  };
+  n.filas.forEach(function(f){
+    var solo=f.celdas.length===1&&f.celdas[0].cs>1&&!f.celdas[0].num;
+    if(antes!==null&&f.n>antes+1)tabla();
+    antes=f.n;
+    if(solo){tabla();var x=f.celdas[0];html+=x.b?'<h3>'+esc(x.v)+'</h3>':'<span class="note">'+esc(x.v)+'</span>'}else grupo.push(f);
+  });
+  tabla(); c.innerHTML=html;
+}
+function abrirNomina(){
+  cerrarMenu(); $("ov-nomina").classList.add("on"); $("nom-err").textContent=""; $("nom-info").textContent=""; $("nom-cuerpo").innerHTML='<span class="note">Cargando…</span>';
+  fetch("/api/nomina").then(function(r){return r.ok?r.json():null}).then(function(n){if(n)renderNomina(n);else $("nom-cuerpo").innerHTML='<span class="note">No se pudo consultar la nómina.</span>'}).catch(function(){$("nom-cuerpo").innerHTML='<span class="note">Sin conexión: no se pudo consultar la nómina.</span>'});
+}
+function subirNomina(input){
+  var f=input.files&&input.files[0]; if(!f)return; $("nom-err").textContent=""; $("nom-info").textContent="Cargando "+f.name+"…";
+  fetch("/api/nomina?nombre="+encodeURIComponent(f.name),{method:"POST",headers:{"content-type":"application/octet-stream"},body:f}).then(function(r){return r.json().then(function(j){if(!r.ok){$("nom-info").textContent="";$("nom-err").textContent=j.error||"No se pudo cargar."}else renderNomina(j)})}).catch(function(){$("nom-info").textContent="";$("nom-err").textContent="Sin conexión: no se pudo cargar."}).then(function(){input.value=""});
 }
 /* Asistente IA: la conversación vive en la pantalla; los datos los consulta el servidor. */
 var CHAT=[], CHATOCUPADO=false, CHATVEZ=0;
@@ -1597,7 +1654,9 @@ document.addEventListener("click",function(ev){
   else if(a==="xdiahoy"){$("x-dia").value="";loadCruces()}
   else if(a==="elegircam"){FILACAM=FILACAM===t.dataset.id?"":t.dataset.id;renderCam()}
   else if(a==="vermes")cargarMes();
-  else if(a==="chat"){document.querySelector("header.top").classList.remove("abierto");$("btn-menu").setAttribute("aria-expanded",false);$("ov-chat").classList.add("on");renderChat()}
+  else if(a==="chat"){cerrarMenu();$("ov-chat").classList.add("on");renderChat()}
+  else if(a==="nomina")abrirNomina();
+  else if(a==="nomcerrar"){$("ov-nomina").classList.remove("on");$("nom-cuerpo").innerHTML=""}
   else if(a==="chatcerrar")$("ov-chat").classList.remove("on");
   else if(a==="chatnuevo"){CHAT.forEach(function(m){(m.archivos||[]).forEach(function(f){URL.revokeObjectURL(f.url)})});CHAT=[];CHATOCUPADO=false;CHATVEZ++;renderChat()}
   else if(a==="chatenviar")chatEnviar($("chat-in").value);
@@ -1731,6 +1790,7 @@ document.addEventListener("input",function(ev){
 });
 $("c-buscar").addEventListener("input",renderClientes);
 $("a-mes").addEventListener("change",cargarMes);
+$("nom-file").addEventListener("change",function(){subirNomina(this)});
 $("chat-in").addEventListener("keydown",function(ev){if(ev.key==="Enter"&&!ev.shiftKey&&!ev.isComposing&&!ESMOVIL){ev.preventDefault();chatEnviar(this.value)}}); // en el teléfono Enter baja de línea
 /* Menú del teléfono: se abre con su botón y se cierra al tocar fuera. Tocar dentro no lo cierra ("Borrar datos" pide un segundo toque). */
 document.addEventListener("click",function(ev){
@@ -1762,7 +1822,7 @@ renderChips(); renderPrices(); renderAll(); go(location.hash.slice(1)||"tablet")
 if(location.protocol!=="file:"&&window.fetch){fetch("/api/yo").then(function(r){if(r.status===401){location.replace("/entrar");return null}return r.ok?r.json():null}).then(function(u){
   if(!u)return; window.__yo=u; S.user=u.nombre; S.orders=[];S.clients={};S.gastos=[];S.log=[];S.camCount=0;S.bridges.forEach(function(b){b.state="libre"});
   $("btn-salir").hidden=false;
-  if(u.permisos.indexOf("usuarios")>=0)$("lnk-usuarios").hidden=false; if(u.rol==="dueno")$("lnk-wa").hidden=false; if(u.rol!=="dueno"){$("role").value="enc";$("role-lbl").style.display="none"}
+  if(u.permisos.indexOf("usuarios")>=0)$("lnk-usuarios").hidden=false; if(u.rol==="dueno"){$("lnk-wa").hidden=false;$("btn-nomina").hidden=false} if(u.rol!=="dueno"){$("role").value="enc";$("role-lbl").style.display="none"}
   $("btn-reset").hidden=true; applyRole(); renderAll();
   loadTasa(); setInterval(loadTasa,30*60*1000);
   loadDia().then(ejemploDesdeEnlace); loadAuts(); setInterval(loadAuts,5000); setInterval(refrescarDia,5000); setInterval(function(){if($("v-clientes").classList.contains("on"))loadClientes()},15000); iniciarEnVivo();

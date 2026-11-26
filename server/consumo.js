@@ -10,7 +10,7 @@ const PRECIOS_BASE = {
   'claude-opus-5-5': { in: 4.00, out: 20.00 },
   'claude-haiku-4-5': { in: 1.00, out: 5.00 },
 };
-const ETIQUETAS = { 'moto-haiku': '¿Hay moto? (revisión barata)', 'lectura-placa': 'Leer la placa', 'lectura-ampliada': 'Leer la placa ampliada', 'comparar-fotos': 'Comparar fotos' };
+const ETIQUETAS = { 'moto-haiku': '¿Hay moto? (revisión barata)', 'lectura-placa': 'Leer la placa', 'lectura-ampliada': 'Leer la placa ampliada', 'comparar-fotos': 'Comparar fotos', 'asistente': 'Asistente (chat)' };
 
 function crear(ctx) {
   const archivo = mes => path.join(ctx.DATA, 'api-consumo-' + mes + '.jsonl');

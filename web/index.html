@@ -130,10 +130,19 @@ details.grp summary{cursor:pointer;font-weight:600;font-size:.9rem;color:var(--m
 #pend-bar .pi{display:flex;gap:8px;flex-wrap:wrap;margin-top:4px;font-size:.92rem}
 #pend-bar .pi span{background:var(--surface);border:1px solid var(--line);border-radius:99px;padding:1px 10px}
 #pend-bar .pi span.bad{border-color:var(--bad);color:var(--bad)}
+.sheet.chat{max-width:680px;height:min(720px,100%);display:flex;flex-direction:column;gap:10px;overflow:hidden}
+#chat-log{flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:8px;padding:2px}
+.msg{max-width:88%;padding:10px 12px;border-radius:12px;white-space:pre-wrap;overflow-wrap:anywhere;font-size:.95rem}
+.msg.yo{align-self:flex-end;background:var(--accent);color:var(--accent-ink)}
+.msg.ia{align-self:flex-start;background:var(--bg);border:1px solid var(--line)}
+.msg.mal{border-color:var(--bad);color:var(--bad)}
+.msg .btn{display:inline-block;margin-top:8px;margin-right:6px;text-decoration:none;color:var(--ink);white-space:normal}
+#chat-log .sug{align-self:flex-start;text-align:left}
+#chat-in{font:inherit;font-size:16px;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px 12px;width:100%;resize:none}
 /* ---------- menú: en computador se ve como siempre; en teléfono, barra de secciones abajo y lo demás dentro de "Menú" ---------- */
 .tabs .ico,.tabs .cor,#btn-menu{display:none}
 .acciones{display:contents}
-header.top [hidden],#a-hist[hidden]{display:none!important}
+header.top [hidden],#a-hist[hidden],#btn-chat[hidden]{display:none!important}
 @media (min-width:701px){.tabs{flex-wrap:wrap}}
 @media (max-width:700px){
   body{height:100dvh}
@@ -303,6 +312,7 @@ header.top [hidden],#a-hist[hidden]{display:none!important}
         <label class="row note" style="gap:6px">Fecha<input id="a-dia" type="date" style="width:150px"></label><button class="btn sm" data-act="adiahoy">Hoy</button>
         <span class="pill ok num" id="a-tasa-pill" style="white-space:normal"></span>
         <label class="row note" style="gap:6px">Meta diaria de motos<input id="a-meta" type="number" min="1" step="1" style="width:80px"></label>
+        <button class="btn" data-act="chat" id="btn-chat" hidden>Asistente IA</button>
         <button class="btn pri" data-act="cierre">Hacer cierre del día</button></div>
       <div class="kpis" id="a-kpis"></div>
       <div class="card stack" id="a-mes-card" hidden>
@@ -420,6 +430,13 @@ header.top [hidden],#a-hist[hidden]{display:none!important}
 </div></div>
 
 <div class="overlay" id="ov-foto" data-act="closefoto" style="cursor:zoom-out"><div style="max-width:min(96vw,900px);max-height:92vh;display:flex;flex-direction:column;gap:8px;align-items:center"><img id="ov-foto-img" alt="" style="max-width:100%;max-height:84vh;border-radius:10px;background:#000"><span id="ov-foto-t" class="pill mut" style="white-space:normal"></span></div></div>
+
+<div class="overlay" id="ov-chat"><div class="sheet chat">
+  <div class="row" style="flex-wrap:nowrap"><h2 style="margin-right:auto">Asistente IA</h2><button class="btn sm" data-act="chatnuevo">Nueva</button><button class="btn sm" data-act="chatcerrar">Cerrar</button></div>
+  <div id="chat-log" aria-live="polite"></div>
+  <div class="row" style="flex-wrap:nowrap;align-items:flex-end"><textarea id="chat-in" rows="2" maxlength="4000" placeholder="Pregunta sobre las ventas, clientes o la cámara"></textarea><button class="btn pri" data-act="chatenviar" id="chat-enviar">Enviar</button></div>
+  <span class="note">La IA puede equivocarse: revisa las cifras importantes. Cada pregunta tiene un costo.</span>
+</div></div>
 
 <div class="overlay" id="ov-cierre"><div class="sheet stack">
   <h2>Cierre del día</h2>
@@ -912,6 +929,32 @@ function renderMes(j){
     +'<h3>Lavadores</h3>'+tabla(["Lavador","Motos","Bruto","Productos","Neto"],lav.map(function(x){return [esc(x.l),x.c.n,usd(x.c.bruto),usd(x.c.prod),usd(x.c.neto)]}))
     +'<h3>Servicios vendidos</h3>'+tabla(["Servicio","Cantidad"],S.services.filter(function(s){return byS[s.id]}).sort(function(a,b){return byS[b.id]-byS[a.id]}).map(function(s){return [esc(s.name),byS[s.id]]}))
     +'<p class="note">Cada factura cuenta en el día en que se hizo. Las comisiones usan las reglas de pago actuales. No incluye gastos ni préstamos, porque no se guardan en el servidor.</p>';
+}
+/* Asistente IA: la conversación vive en la pantalla; los datos los consulta el servidor. */
+var CHAT=[], CHATOCUPADO=false, CHATVEZ=0;
+var CHATSUG=["¿Cuánto se vendió hoy y cuánto falta por cobrar?","Compara las ventas de este mes con el mes pasado","Exporta a Excel las ventas de este mes","¿Qué clientes frecuentes llevan más de 15 días sin venir?"];
+function chatHtml(t){return esc(t).replace(/\*\*([^*\n]+)\*\*/g,"<b>$1</b>")}
+function renderChat(){
+  var el=$("chat-log"), h=CHAT.map(function(m){
+    var f=(m.archivos||[]).map(function(a){return '<a class="btn sm" download="'+esc(a.nombre)+'" href="'+a.url+'">&#11015; Descargar '+esc(a.nombre)+'</a>'}).join("");
+    return '<div class="msg '+(m.rol==="usuario"?"yo":"ia")+(m.mal?" mal":"")+'">'+chatHtml(m.texto)+(f?'<div>'+f+'</div>':'')+'</div>'}).join("");
+  if(!CHAT.length)h='<span class="note">Pregúntame por ventas, cobros, lavadores, clientes o motos sin factura, o pídeme un archivo de Excel. Por ejemplo:</span>'+CHATSUG.map(function(q,i){return '<button class="btn sm sug" data-act="chatsug" data-i="'+i+'">'+esc(q)+'</button>'}).join("");
+  if(CHATOCUPADO)h+='<div class="msg ia note">Consultando… puede tardar hasta un minuto.</div>';
+  el.innerHTML=h; el.scrollTop=el.scrollHeight; $("chat-enviar").disabled=CHATOCUPADO;
+}
+function chatArchivo(a){
+  var b=atob(a.base64), u=new Uint8Array(b.length); for(var i=0;i<b.length;i++)u[i]=b.charCodeAt(i);
+  return {nombre:a.nombre,url:URL.createObjectURL(new Blob([u],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}))};
+}
+function chatEnviar(texto){
+  texto=String(texto||"").trim(); if(!texto||CHATOCUPADO||!window.__yo)return;
+  var vez=CHATVEZ, previos=CHAT.filter(function(m){return !m.mal&&!m.sinRespuesta});
+  var mia={rol:"usuario",texto:texto}; CHAT.push(mia); $("chat-in").value=""; CHATOCUPADO=true; renderChat();
+  var listo=function(m){if(vez!==CHATVEZ)return; CHATOCUPADO=false; if(m.mal){mia.sinRespuesta=true; if(!$("chat-in").value)$("chat-in").value=texto} CHAT.push(m); renderChat()};
+  jpost("/api/asistente",{mensajes:previos.concat([mia]).slice(-12).map(function(m){return {rol:m.rol,texto:m.texto.slice(0,3000)}})}).then(function(r){
+    var j=r.j||{}, f=(j.archivos||[]).map(chatArchivo);
+    listo(r.ok?{rol:"asistente",texto:j.respuesta,archivos:f}:{rol:"asistente",texto:j.error||"No se pudo consultar. Inténtalo de nuevo.",archivos:f,mal:true});
+  }).catch(function(){listo({rol:"asistente",texto:"Sin conexión: no se pudo consultar. Inténtalo de nuevo.",mal:true})});
 }
 function renderAdminBase(){
   var paid=S.orders.filter(function(o){return o.pay}), unpaid=S.orders.filter(function(o){return !o.pay});
@@ -1553,6 +1596,11 @@ document.addEventListener("click",function(ev){
   else if(a==="xdiahoy"){$("x-dia").value="";loadCruces()}
   else if(a==="elegircam"){FILACAM=FILACAM===t.dataset.id?"":t.dataset.id;renderCam()}
   else if(a==="vermes")cargarMes();
+  else if(a==="chat"){$("ov-chat").classList.add("on");renderChat()}
+  else if(a==="chatcerrar")$("ov-chat").classList.remove("on");
+  else if(a==="chatnuevo"){CHAT.forEach(function(m){(m.archivos||[]).forEach(function(f){URL.revokeObjectURL(f.url)})});CHAT=[];CHATOCUPADO=false;CHATVEZ++;renderChat()}
+  else if(a==="chatenviar")chatEnviar($("chat-in").value);
+  else if(a==="chatsug")chatEnviar(CHATSUG[+t.dataset.i]);
   else if(a==="adiahoy"){$("a-dia").value=hoyCaracas();elegirDiaAdmin("")}
   else if(a==="xval"){jpost("/api/camara/cruces/validar",{id:t.dataset.id,ok:t.dataset.v==="1"}).then(function(){loadCruces()})}
   else if(a==="hreal"){var hi=$("hr-"+t.dataset.id);if(hi)jpost("/api/camara/historial/real",{id:t.dataset.id,real:hi.value}).then(function(r){hi.blur();if(r.ok&&r.j.enlazada)toastWa("Listo: esa moto quedó enlazada con la factura #"+r.j.enlazada+".");else if(r.ok&&r.j.fusionada)toastWa("Listo: es la misma moto de la factura #"+r.j.fusionada+" y ya no cuenta como moto sin factura.");loadHist();loadSinFact();loadHoyH()})}
@@ -1682,6 +1730,7 @@ document.addEventListener("input",function(ev){
 });
 $("c-buscar").addEventListener("input",renderClientes);
 $("a-mes").addEventListener("change",cargarMes);
+$("chat-in").addEventListener("keydown",function(ev){if(ev.key==="Enter"&&!ev.shiftKey&&!ev.isComposing&&!ESMOVIL){ev.preventDefault();chatEnviar(this.value)}}); // en el teléfono Enter baja de línea
 /* Menú del teléfono: se abre con su botón y se cierra al tocar fuera. Tocar dentro no lo cierra ("Borrar datos" pide un segundo toque). */
 document.addEventListener("click",function(ev){
   if($("acciones").contains(ev.target))return;
@@ -1718,7 +1767,7 @@ if(location.protocol!=="file:"&&window.fetch){fetch("/api/yo").then(function(r){
   loadDia().then(ejemploDesdeEnlace); loadAuts(); setInterval(loadAuts,5000); setInterval(refrescarDia,5000); setInterval(function(){if($("v-clientes").classList.contains("on"))loadClientes()},15000); iniciarEnVivo();
   if(u.permisos.indexOf("tablet")>=0||u.permisos.indexOf("vigilante")>=0){loadPend();setInterval(loadPend,10000)}
   renderCola();vaciarCola();setInterval(vaciarCola,15000);window.addEventListener("online",vaciarCola);
-  if(u.permisos.indexOf("admin")>=0){loadSemana();mesesAdmin()}
+  if(u.permisos.indexOf("admin")>=0){loadSemana();mesesAdmin();$("btn-chat").hidden=false}
   if(u.permisos.indexOf("vigilante")>=0){loadCam();setInterval(loadCam,2000);loadHist();setInterval(loadHist,5000);loadCruces();setInterval(loadCruces,5000);loadHoyH();setInterval(loadHoyH,5000);loadSinFact();setInterval(loadSinFact,5000);loadConsumo();setInterval(loadConsumo,30000);$("h-dia").addEventListener("change",function(){HIST=null;loadHist()});$("h-ahora").addEventListener("change",renderHist)}
 }).catch(function(){})}
  $("a-meta").value=S.meta; renderRules(); setInterval(function(){renderVigilante();renderMeta()},30000);

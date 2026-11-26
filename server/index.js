@@ -546,6 +546,18 @@ async function api(req, res, ruta) {
     const u = lista.find(x => x.id === yo.id); u.sal = crypto.randomBytes(16).toString('hex'); u.hash = cifrar(d.clave, u.sal); guardarUsuarios(lista);
     return json(res, 200, { ok: true }, { 'set-cookie': cookieSesion(u) });
   }
+  if (ruta === '/api/asistente') {
+    if (!puede(yo, 'admin')) return json(res, 403, { error: 'Solo Administración puede usar el asistente.' });
+    // Cada pregunta cuesta dinero: una a la vez por persona y un tope por día.
+    const hoy = fechaCaracas(new Date()), tope = Number(process.env.ASISTENTE_MAX_DIA) || 150;
+    if (preguntas.dia !== hoy) preguntas = { dia: hoy, n: 0 };
+    if (preguntando.has(yo.id)) return json(res, 429, { error: 'Todavía estoy respondiendo la pregunta anterior.' });
+    if (preguntas.n >= tope) return json(res, 429, { error: 'Se llegó al máximo de ' + tope + ' preguntas por hoy.' });
+    preguntas.n++; preguntando.add(yo.id);
+    try { const r = await asistente.responder(d.mensajes); return json(res, r.error ? 502 : 200, r); }
+    catch (e) { console.error('asistente:', e.message); return json(res, 500, { error: 'El asistente falló. Inténtalo de nuevo.' }); }
+    finally { preguntando.delete(yo.id); }
+  }
   if (ruta === '/api/ejemplo' || ruta === '/api/ejemplo/borrar') {
     if (yo.rol !== 'dueno') return json(res, 403, { error: 'Solo el dueño.' });
     const r = ruta === '/api/ejemplo' ? cargarEjemplo(d, yo) : borrarEjemplo();
@@ -706,6 +718,12 @@ async function api(req, res, ruta) {
 }
 
 const consumo = require('./consumo').crear({ DATA, fechaCaracas });
+// Asistente de IA de Administración: solo lee datos (ventas, clientes, cámara) y entrega archivos.
+const asistente = require('./asistente').crear({
+  fechaCaracas, registrarUso: consumo.registrar, tasa: () => tasa.valor, clientes: () => Object.values(leerClientes()).filter(c => !c.ejemplo), camara: dia => camara.cierre(diaDeHoy(dia).ventas, dia),
+  ventas: (desde, hasta) => archivosVentas().filter(f => { const m = f.slice(-13, -6); return m >= desde.slice(0, 7) && m <= hasta.slice(0, 7); }).sort().flatMap(leerLineas).filter(v => !v.ejemplo && v.dia >= desde && v.dia <= hasta),
+});
+const preguntando = new Set(); let preguntas = { dia: '', n: 0 };
 const camara = require('./camara').crear({ DATA, json, fechaCaracas, registrarUso: consumo.registrar, ventasDeHoy: () => diaDeHoy().ventas, avisarDueno: texto => avisarDueno(texto), completarPlaca: (id, placa) => !corregirPlaca(id, placa, 'cámara', true).error, marcarValidada });
 // FTP para las fotos 4K de la cámara. Solo arranca si hay clave en vault/.env (CAMARA_FTP_CLAVE); no lleva nada más: la carpeta es propia y solo acepta subir .jpg.
 // CAMARA_FTP_USUARIO (por defecto "camara"), CAMARA_FTP_PUERTO (2121), CAMARA_FTP_PASIVO ("30000-30009"), CAMARA_FTP_IP (IP pública del servidor; si falta se usa la de la conexión).

@@ -21,10 +21,10 @@ const letra = i => (i >= 26 ? letra(Math.floor(i / 26) - 1) : '') + String.fromC
 const CAB = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>', MAIN = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main', REL = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
 
 // ---------- estilos (colores del logo). El orden de cellXfs define los números que se usan en las celdas ----------
-const TIPOS = ['texto', 'dinero', 'entero', 'decimal', 'fecha'], FORMATO = { texto: 0, dinero: 164, entero: 3, decimal: 4, fecha: 165 };
+const TIPOS = ['texto', 'dinero', 'entero', 'decimal', 'fecha', 'euro', 'bs'], FORMATO = { texto: 0, dinero: 164, entero: 3, decimal: 4, fecha: 165, euro: 166, bs: 167 };
 const TITULO = 1, SUBTITULO = 2, DETALLE = 3, ENCABEZADO = 4;
 const estiloDato = (tipo, banda) => 5 + TIPOS.indexOf(tipo) * 2 + (banda ? 1 : 0);
-const estiloTotal = tipo => 15 + TIPOS.indexOf(tipo);
+const estiloTotal = tipo => 5 + TIPOS.length * 2 + TIPOS.indexOf(tipo);
 function estilos() {
   const fuente = (extra, tam, color) => '<font>' + extra + '<sz val="' + tam + '"/><color rgb="' + color + '"/><name val="Calibri"/><family val="2"/></font>';
   const relleno = color => '<fill><patternFill patternType="solid"><fgColor rgb="' + color + '"/><bgColor indexed="64"/></patternFill></fill>';
@@ -34,7 +34,7 @@ function estilos() {
   const celdas = [xf(0, 0, 0, 0), xf(0, 1, 0, 0, 'vertical="center"'), xf(0, 2, 0, 0, 'vertical="center"'), xf(0, 3, 0, 0, 'vertical="center"'), xf(0, 4, 2, 1, 'horizontal="center" vertical="center" wrapText="1"')];
   TIPOS.forEach(t => [0, 3].forEach(banda => celdas.push(xf(FORMATO[t], 0, banda, 1, t === 'texto' ? 'vertical="top" wrapText="1"' : t === 'fecha' ? 'horizontal="center" vertical="top"' : 'vertical="top"'))));
   TIPOS.forEach(t => celdas.push(xf(FORMATO[t], 5, 4, 1, 'vertical="center"')));
-  return CAB + '<styleSheet xmlns="' + MAIN + '"><numFmts count="2"><numFmt numFmtId="164" formatCode="&quot;$&quot;#,##0.00"/><numFmt numFmtId="165" formatCode="dd/mm/yyyy"/></numFmts>'
+  return CAB + '<styleSheet xmlns="' + MAIN + '"><numFmts count="4"><numFmt numFmtId="164" formatCode="&quot;$&quot;#,##0.00"/><numFmt numFmtId="165" formatCode="dd/mm/yyyy"/><numFmt numFmtId="166" formatCode="#,##0.00 &quot;€&quot;"/><numFmt numFmtId="167" formatCode="&quot;Bs&quot; #,##0.00"/></numFmts>'
     + '<fonts count="6">' + fuente('', 11, 'FF11202B') + fuente('<b/>', 20, 'FF0B6E6A') + fuente('<b/>', 13, 'FF11202B') + fuente('', 10, 'FF5A6B78') + fuente('<b/>', 11, 'FFFFFFFF') + fuente('<b/>', 11, 'FF04302E') + '</fonts>'
     + '<fills count="5"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill>' + relleno('FF0B6E6A') + relleno('FFEAF8F7') + relleno('FFBFEDEA') + '</fills>'
     + '<borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border>' + borde('FFC9DEDD') + '</borders>'
@@ -48,12 +48,12 @@ const tamanoPng = b => ({ w: b.readUInt32BE(16), h: b.readUInt32BE(20) });
 // opc: { hoja, titulo, subtitulo, detalle, totales: [índices de columnas a sumar], logo: Buffer PNG }
 function crear(columnas, filas, opc) {
   opc = opc || {};
-  // Cada columna es de dinero si su nombre lleva "$" o "USD"; si no, entera o decimal según sus valores.
+  // Cada columna es de dinero según su nombre ("$" o "USD", "€", "Bs"); si no, entera o decimal según sus valores.
   const tipos = columnas.map((n, c) => {
     const nums = filas.map(f => f[c]).filter(v => typeof v === 'number' && Number.isFinite(v));
-    return /\$|usd/i.test(n) ? 'dinero' : nums.every(Number.isInteger) ? 'entero' : 'decimal';
+    return /\$|usd/i.test(n) ? 'dinero' : /€/.test(n) ? 'euro' : /\bbs\b/i.test(n) ? 'bs' : nums.every(Number.isInteger) ? 'entero' : 'decimal';
   });
-  const largo = (v, c) => v == null ? 0 : esFecha(v) ? 10 : typeof v === 'number' && tipos[c] === 'dinero' ? v.toFixed(2).length + 3 : String(v).length;
+  const largo = (v, c) => v == null ? 0 : esFecha(v) ? 10 : typeof v === 'number' && ['dinero', 'euro', 'bs'].includes(tipos[c]) ? v.toFixed(2).length + 3 : String(v).length;
   const anchos = columnas.map((n, c) => Math.min(42, Math.max(9, Math.min(24, String(n).length + 4), ...filas.slice(0, 500).map(f => largo(f[c], c) + 3))));
   if (opc.logo && anchos.length && anchos.length <= 6) anchos[0] = Math.max(anchos[0], 18); // en tablas angostas la primera columna alcanza para el logo y el título queda al lado
   const celda = (ref, v, estilo) => '<c r="' + ref + '" s="' + estilo + '"' + (typeof v === 'number' && Number.isFinite(v) ? '><v>' + v + '</v></c>' : v == null || v === '' ? '/>' : ' t="inlineStr"><is><t xml:space="preserve">' + xml(String(v).slice(0, 32000)) + '</t></is></c>');

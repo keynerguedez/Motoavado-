@@ -382,7 +382,6 @@ function json(res, codigo, obj, extra) {
   res.writeHead(codigo, Object.assign({ 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }, extra || {}));
   res.end(JSON.stringify(obj));
 }
-const nomina = require('./nomina');
 function cuerpoBinario(req, max) {
   return new Promise((ok, mal) => {
     const partes = []; let n = 0;
@@ -438,10 +437,15 @@ async function api(req, res, ruta) {
       const mes = /^\d{4}-(0[1-9]|1[0-2])$/.test(pedido) ? pedido : fechaCaracas(new Date()).slice(0, 7);
       return json(res, 200, { mes, ventas: leerLineas(path.join(DATA, 'ventas-' + mes + '.jsonl')).filter(v => !v.ejemplo && String(v.dia).startsWith(mes)) });
     }
-    if (ruta === '/api/nomina') { // sueldos: solo los dueños
+    if (ruta === '/api/reglas') return yo ? json(res, 200, enNomina(() => nominaSistema.reglas())) : json(res, 401, { error: 'Sin sesión.' }); // porcentajes y pagos por servicio (sin sueldos)
+    if (ruta === '/api/nomina' || ruta === '/api/nomina/excel') { // sueldos: solo los dueños
       if (!yo || yo.rol !== 'dueno') return json(res, 403, { error: 'Solo el dueño puede ver la nómina.' });
-      let n = null; try { n = JSON.parse(fs.readFileSync(path.join(DATA, 'nomina.json'), 'utf8')); } catch (e) {}
-      return json(res, 200, n || { vacia: true });
+      try {
+        if (ruta === '/api/nomina') return json(res, 200, nominaSistema.datos());
+        const x = nominaSistema.archivoExcel(new URL(req.url, 'http://localhost').searchParams.get('mes') || '');
+        res.writeHead(200, { 'content-type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'content-disposition': 'attachment; filename="' + x.nombre + '"', 'cache-control': 'no-store' });
+        return res.end(x.buffer);
+      } catch (e) { return errorNomina(res, e); }
     }
     if (ruta === '/api/cliente') {
       if (!puede(yo, 'tablet')) return json(res, 403, { error: 'No tienes permiso.' });
@@ -532,15 +536,11 @@ async function api(req, res, ruta) {
     if (!v || jpeg.length < 1000) return json(res, 404, { error: 'No se encontró la factura de hoy.' });
     return json(res, 200, Object.assign({ ok: true }, await camara.cruzar(v, jpeg)));
   }
-  // El Excel de la nómina llega como archivo crudo.
-  if (ruta === '/api/nomina') {
+  // Importar la nómina: el Excel llega como archivo crudo.
+  if (ruta === '/api/nomina/importar') {
     if (!yo || yo.rol !== 'dueno') return json(res, 403, { error: 'Solo el dueño puede cargar la nómina.' });
     let archivo; try { archivo = await cuerpoBinario(req, 3e6); } catch (e) { return json(res, 400, { error: 'El archivo es demasiado grande (máximo 3 MB).' }); }
-    try {
-      const n = Object.assign(nomina.leer(archivo), { archivo: limpio(new URL(req.url, 'http://localhost').searchParams.get('nombre'), 120), subida: new Date().toISOString(), por: yo.nombre });
-      const destino = path.join(DATA, 'nomina.json'); fs.writeFileSync(destino + '.tmp', JSON.stringify(n), { mode: 0o600 }); fs.renameSync(destino + '.tmp', destino);
-      return json(res, 200, n);
-    } catch (e) { if (!(e instanceof nomina.ErrorNomina)) console.error('nómina:', e.message); return json(res, 400, { error: e instanceof nomina.ErrorNomina ? e.message : 'No se pudo guardar la nómina.' }); }
+    try { return json(res, 200, nominaSistema.importar(archivo)); } catch (e) { return errorNomina(res, e); }
   }
   let d; try { d = await cuerpoJson(req); } catch (e) { return json(res, 400, { error: 'Datos no válidos.' }); }
   const lista = leerUsuarios(), ip = ipDe(req);
@@ -580,6 +580,15 @@ async function api(req, res, ruta) {
     try { const r = await asistente.responder(d.mensajes); return json(res, r.error ? 502 : 200, r); }
     catch (e) { console.error('asistente:', e.message); return json(res, 500, { error: 'El asistente falló. Inténtalo de nuevo.' }); }
     finally { preguntando.delete(yo.id); }
+  }
+  if (ruta.startsWith('/api/nomina/')) {
+    if (yo.rol !== 'dueno') return json(res, 403, { error: 'Solo el dueño puede cambiar la nómina.' });
+    try {
+      if (ruta === '/api/nomina/reglas') return json(res, 200, nominaSistema.guardarReglas(d.reglas));
+      if (ruta === '/api/nomina/trabajadores') return json(res, 200, nominaSistema.guardarTrabajadores(d.trabajadores));
+      if (ruta === '/api/nomina/mes') return json(res, 200, nominaSistema.mes(d, yo.nombre));
+    } catch (e) { return errorNomina(res, e); }
+    return json(res, 404, { error: 'No encontrado.' });
   }
   if (ruta === '/api/ejemplo' || ruta === '/api/ejemplo/borrar') {
     if (yo.rol !== 'dueno') return json(res, 403, { error: 'Solo el dueño.' });
@@ -746,6 +755,17 @@ const asistente = require('./asistente').crear({
   fechaCaracas, registrarUso: consumo.registrar, tasa: () => tasa.valor, clientes: () => Object.values(leerClientes()).filter(c => !c.ejemplo), camara: dia => camara.cierre(diaDeHoy(dia).ventas, dia),
   ventas: (desde, hasta) => archivosVentas().filter(f => { const m = f.slice(-13, -6); return m >= desde.slice(0, 7) && m <= hasta.slice(0, 7); }).sort().flatMap(leerLineas).filter(v => !v.ejemplo && v.dia >= desde && v.dia <= hasta),
 });
+// Nómina de los dueños.
+const nominaSistema = require('./nomina-sistema').crear({
+  DATA, fechaCaracas, tasa: () => tasa.valor, ventasDeMes: m => leerLineas(path.join(DATA, 'ventas-' + m + '.jsonl')).filter(v => !v.ejemplo && String(v.dia).startsWith(m)),
+  logo: (() => { try { return fs.readFileSync(path.join(__dirname, 'logo-excel.png')); } catch (e) { return null; } })(),
+});
+const enNomina = f => { try { return f(); } catch (e) { console.error('nómina:', e.message); return {}; } };
+function errorNomina(res, e) {
+  const propio = e instanceof require('./nomina-sistema').ErrorNomina;
+  if (!propio) console.error('nómina:', e.message);
+  return json(res, propio ? 400 : 500, { error: propio ? e.message : 'No se pudo completar la operación de nómina.' });
+}
 const preguntando = new Set(); let preguntas = { dia: '', n: 0 };
 const camara = require('./camara').crear({ DATA, json, fechaCaracas, registrarUso: consumo.registrar, ventasDeHoy: () => diaDeHoy().ventas, avisarDueno: texto => avisarDueno(texto), completarPlaca: (id, placa) => !corregirPlaca(id, placa, 'cámara', true).error, marcarValidada });
 // FTP para las fotos 4K de la cámara. Solo arranca si hay clave en vault/.env (CAMARA_FTP_CLAVE); no lleva nada más: la carpeta es propia y solo acepta subir .jpg.

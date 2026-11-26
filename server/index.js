@@ -424,6 +424,12 @@ async function api(req, res, ruta) {
       }
       return json(res, 200, { dias, fin });
     }
+    if (ruta === '/api/mes') { // facturas de un mes completo, para el acumulado de Administración (sin los datos de ejemplo)
+      if (!puede(yo, 'admin')) return json(res, 403, { error: 'Solo Administración puede ver el acumulado del mes.' });
+      const pedido = new URL(req.url, 'http://localhost').searchParams.get('mes') || '';
+      const mes = /^\d{4}-(0[1-9]|1[0-2])$/.test(pedido) ? pedido : fechaCaracas(new Date()).slice(0, 7);
+      return json(res, 200, { mes, ventas: leerLineas(path.join(DATA, 'ventas-' + mes + '.jsonl')).filter(v => !v.ejemplo && String(v.dia).startsWith(mes)) });
+    }
     if (ruta === '/api/cliente') {
       if (!puede(yo, 'tablet')) return json(res, 403, { error: 'No tienes permiso.' });
       const q = new URL(req.url, 'http://localhost').searchParams;

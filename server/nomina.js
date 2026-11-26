@@ -69,17 +69,17 @@ function leer(archivo) {
       if (!(f > 0 && f <= MAX_FILAS && c >= 0 && c < MAX_COLS) || tapadas.has(f + ':' + c)) return;
       const tipo = atributo(x.a, 't'), estilo = xfs[+atributo(x.a, 's') || 0] || { num: 0, b: false };
       const crudo = (todos(x.c, 'v')[0] || {}).c;
-      let v = '', num = false;
+      let v = '', num = false, valor;
       if (tipo === 'inlineStr') v = textos(x.c);
       else if (crudo == null || crudo === '') return;
       else if (tipo === 's') v = compartidos[+crudo] || '';
       else if (tipo === 'str' || tipo === 'e') v = texto(crudo);
       else if (tipo === 'b') v = crudo === '1' ? 'Sí' : 'No';
-      else if (Number.isFinite(+crudo)) { v = formatear(+crudo, estilo.num, codigos[estilo.num] || ''); num = true; }
+      else if (Number.isFinite(+crudo)) { valor = +crudo; v = formatear(valor, estilo.num, codigos[estilo.num] || ''); num = true; }
       v = v.trim().slice(0, 600); if (!v) return;
       const u = unidas.get(ref) || { cs: 1, rs: 1 };
       if (!filas.has(f)) filas.set(f, []);
-      filas.get(f).push({ c, v, num, b: estilo.b, cs: u.cs, rs: u.rs });
+      filas.get(f).push(Object.assign({ c, v, num, b: estilo.b, cs: u.cs, rs: u.rs }, num ? { r: valor } : {}));
     });
     if (!filas.size) throw new ErrorNomina('La pestaña "' + hoja.nombre + '" está vacía.');
     return { hoja: hoja.nombre, filas: [...filas.keys()].sort((a, b) => a - b).map(n => ({ n, celdas: filas.get(n).sort((a, b) => a.c - b.c) })) };

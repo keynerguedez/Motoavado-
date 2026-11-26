@@ -139,13 +139,18 @@ details.grp summary{cursor:pointer;font-weight:600;font-size:.9rem;color:var(--m
 .msg .btn{display:inline-block;margin-top:8px;margin-right:6px;text-decoration:none;color:var(--ink);white-space:normal}
 #chat-log .sug{align-self:flex-start;text-align:left}
 #chat-in{font:inherit;font-size:16px;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px 12px;width:100%;resize:none}
-.sheet.nomina{max-width:1100px;height:100%;display:flex;flex-direction:column;gap:10px;overflow:hidden}
-#nom-cuerpo{flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column;gap:12px}
+.sheet.nomina{max-width:1100px;height:100%;display:flex;flex-direction:column;gap:10px;overflow:hidden;background:var(--bg)}
+#nom-cuerpo{flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column;gap:12px;padding:2px}
 #nom-cuerpo>*{flex:none}
-#nom-cuerpo table{min-width:max-content}
-#nom-cuerpo td{border:1px solid var(--line);max-width:260px}
-#nom-cuerpo td.b{font-weight:700;background:var(--bg)}
-#nom-cuerpo td.r{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+.nom-tabs{align-self:flex-start;flex-wrap:wrap}
+.nom-lista{display:grid;grid-template-columns:repeat(auto-fill,minmax(310px,1fr));gap:12px;align-items:start}
+.nom-campos{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px}
+.nom-campos label.f{min-width:0}
+.nom-total{font-family:var(--display);font-size:1.6rem;font-weight:700;white-space:nowrap}
+.nom-det{display:flex;flex-direction:column;gap:2px;font-size:.88rem;border-top:1px solid var(--line);padding-top:8px}
+.nom-det div{display:flex;justify-content:space-between;gap:10px}
+.nom-det div.suma{font-weight:700}
+#nom-cuerpo input:disabled,#nom-cuerpo select:disabled{opacity:.65}
 /* ---------- menú: en computador se ve como siempre; en teléfono, barra de secciones abajo y lo demás dentro de "Menú" ---------- */
 .tabs .ico,.tabs .cor,#btn-menu{display:none}
 .acciones{display:contents}
@@ -180,7 +185,11 @@ header.top [hidden],#a-hist[hidden]{display:none!important}
   .kpis{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.kpi b{font-size:1.6rem;overflow-wrap:anywhere}
   .cols{grid-template-columns:minmax(0,1fr);gap:10px}
   .bar{grid-template-columns:110px 1fr 70px}
-  #nom-cuerpo td{max-width:150px;font-size:.78rem;padding:5px 6px}
+  .sheet.nomina{padding:12px}.nom-lista{grid-template-columns:minmax(0,1fr)}
+  #nom-pie{flex-wrap:nowrap;gap:6px}#nom-pie .btn{flex:1;margin-left:0!important;padding:10px 6px;font-size:.85rem}
+  .tabs.nom-tabs{position:static;align-self:stretch;border:0;border-radius:10px;background:var(--surface2);padding:4px}
+  .tabs.nom-tabs button{flex-direction:row;justify-content:center;font-size:.8rem;padding:8px 4px}
+  .tabs.nom-tabs button[aria-selected="true"]{background:var(--accent);color:var(--accent-ink)}
   .order{flex-wrap:wrap}.order .info{flex:1 1 0}
   .order .side{flex-basis:100%;flex-direction:row;flex-wrap:wrap;justify-content:flex-end;align-items:center;text-align:left}
   .grid-tablet>*{min-width:0}
@@ -449,10 +458,11 @@ header.top [hidden],#a-hist[hidden]{display:none!important}
 </div></div>
 
 <div class="overlay" id="ov-nomina"><div class="sheet nomina">
-  <div class="row" style="flex-wrap:nowrap"><h2 style="margin-right:auto">Nómina</h2><label class="btn sm pri" style="cursor:pointer">Cargar Excel<input id="nom-file" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" style="position:absolute;opacity:0;width:1px;height:1px"></label><button class="btn sm" data-act="nomcerrar">Cerrar</button></div>
-  <span class="note" id="nom-info"></span>
+  <div class="row" style="flex-wrap:nowrap"><h2 style="margin-right:auto">Nómina</h2><button class="btn sm" data-act="nomcerrar">Cerrar</button></div>
+  <div class="tabs nom-tabs" role="tablist"><button role="tab" data-act="nomtab" data-t="mes">Nómina del mes</button><button role="tab" data-act="nomtab" data-t="gente">Trabajadores</button><button role="tab" data-act="nomtab" data-t="reglas">Comisiones y reglas</button></div>
   <div class="err" id="nom-err" role="alert"></div>
   <div id="nom-cuerpo"></div>
+  <div class="row" id="nom-pie"></div>
 </div></div>
 
 <div class="overlay" id="ov-cierre"><div class="sheet stack">
@@ -948,45 +958,152 @@ function renderMes(j){
     +'<p class="note">Cada factura cuenta en el día en que se hizo. Las comisiones usan las reglas de pago actuales. No incluye gastos ni préstamos, porque no se guardan en el servidor.</p>';
 }
 function cerrarMenu(){document.querySelector("header.top").classList.remove("abierto");$("btn-menu").setAttribute("aria-expanded",false)}
-/* Nómina (solo dueños): se muestra la pestaña de sueldos del Excel que cargan. */
-function renderNomina(n){
-  var c=$("nom-cuerpo");
-  if(n.vacia){$("nom-info").textContent="";c.innerHTML='<span class="note">Todavía no se ha cargado la nómina. Toca "Cargar Excel" y elige tu archivo: se mostrará la pestaña de sueldos o nómina.</span>';return}
-  $("nom-info").textContent=n.hoja+" · "+(n.archivo||"archivo")+" · cargado el "+new Date(n.subida).toLocaleString("es-VE",{timeZone:"America/Caracas",dateStyle:"short",timeStyle:"short"})+" por "+n.por;
-  var html="", grupo=[], antes=null;
-  var tabla=function(){ // las filas seguidas forman una tabla, con las celdas unidas como en el Excel
-    if(!grupo.length)return;
-    var min=99,max=0,ocupada={};
-    grupo.forEach(function(f){f.celdas.forEach(function(x){min=Math.min(min,x.c);max=Math.max(max,x.c+x.cs-1)})});
-    html+='<div class="tablewrap"><table>'+grupo.map(function(f,i){
-      var tds="",col=min;
-      while(col<=max){
-        if(ocupada[f.n+":"+col]){col++;continue}
-        var x=f.celdas.filter(function(y){return y.c===col})[0];
-        if(!x){tds+="<td></td>";col++;continue}
-        var rs=Math.min(x.rs,grupo.length-i);
-        for(var a=1;a<rs;a++)for(var b=0;b<x.cs;b++)ocupada[(f.n+a)+":"+(col+b)]=1;
-        tds+='<td class="'+(x.b?"b ":"")+(x.num?"r":"")+'"'+(x.cs>1?' colspan="'+x.cs+'"':"")+(rs>1?' rowspan="'+rs+'"':"")+'>'+esc(x.v)+'</td>';
-        col+=x.cs;
-      }
-      return "<tr>"+tds+"</tr>"}).join("")+'</table></div>';
-    grupo=[];
-  };
-  n.filas.forEach(function(f){
-    var solo=f.celdas.length===1&&f.celdas[0].cs>1&&!f.celdas[0].num;
-    if(antes!==null&&f.n>antes+1)tabla();
-    antes=f.n;
-    if(solo){tabla();var x=f.celdas[0];html+=x.b?'<h3>'+esc(x.v)+'</h3>':'<span class="note">'+esc(x.v)+'</span>'}else grupo.push(f);
-  });
-  tabla(); c.innerHTML=html;
+/* Nómina (solo dueños). El servidor guarda los datos y hace todas las cuentas; aquí solo se muestran y se editan. */
+var NOM={tab:"mes",mes:"",datos:null,calc:null,gente:null,sucio:false,sec:0};
+function nf(n){return (Number(n)||0).toLocaleString("es-VE",{minimumFractionDigits:2,maximumFractionDigits:2})}
+function eur(n){return nf(n)+" €"}
+function nomPedir(url,cuerpo){
+  var p=cuerpo===undefined?fetch(url):fetch(url,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(cuerpo)});
+  return p.then(function(r){return r.json().catch(function(){return{}}).then(function(j){if(!r.ok)throw new Error(j.error||"No se pudo completar.");return j})},function(){throw new Error("Sin conexión con el servidor.")});
 }
+function nomError(e){$("nom-err").textContent=e&&e.message?e.message:(e||"")}
+function nomMeses(){
+  var h=hoyCaracas(),a=+h.slice(0,4),m=+h.slice(5,7),l=[];
+  for(var i=0;i<12;i++){var f=new Date(a,m-1-i,1),v=f.getFullYear()+"-"+String(f.getMonth()+1).padStart(2,"0"),n=f.toLocaleDateString("es-VE",{month:"long",year:"numeric"});l.push([v,n.charAt(0).toUpperCase()+n.slice(1)])}
+  return l;
+}
+function opciones(l,sel){return l.map(function(o){return '<option value="'+esc(o[0])+'"'+(o[0]===sel?' selected':'')+'>'+esc(o[1])+'</option>'}).join("")}
+function campo(titulo,attr,valor,extra){return '<label class="f">'+titulo+'<input type="number" step="any" inputmode="decimal" '+attr+' value="'+(valor==null?"":esc(valor))+'" '+(extra||"")+'></label>'}
 function abrirNomina(){
-  cerrarMenu(); $("ov-nomina").classList.add("on"); $("nom-err").textContent=""; $("nom-info").textContent=""; $("nom-cuerpo").innerHTML='<span class="note">Cargando…</span>';
-  fetch("/api/nomina").then(function(r){return r.ok?r.json():null}).then(function(n){if(n)renderNomina(n);else $("nom-cuerpo").innerHTML='<span class="note">No se pudo consultar la nómina.</span>'}).catch(function(){$("nom-cuerpo").innerHTML='<span class="note">Sin conexión: no se pudo consultar la nómina.</span>'});
+  cerrarMenu(); $("ov-nomina").classList.add("on"); nomError(""); NOM.tab="mes"; NOM.mes=NOM.mes||hoyCaracas().slice(0,7); NOM.calc=null; NOM.sucio=false;
+  $("nom-cuerpo").innerHTML='<span class="note">Cargando…</span>'; $("nom-pie").innerHTML="";
+  nomPedir("/api/nomina").then(function(d){NOM.datos=d;NOM.gente=null;nomPintar()}).catch(function(e){$("nom-cuerpo").innerHTML="";nomError(e)});
 }
-function subirNomina(input){
-  var f=input.files&&input.files[0]; if(!f)return; $("nom-err").textContent=""; $("nom-info").textContent="Cargando "+f.name+"…";
-  fetch("/api/nomina?nombre="+encodeURIComponent(f.name),{method:"POST",headers:{"content-type":"application/octet-stream"},body:f}).then(function(r){return r.json().then(function(j){if(!r.ok){$("nom-info").textContent="";$("nom-err").textContent=j.error||"No se pudo cargar."}else renderNomina(j)})}).catch(function(){$("nom-info").textContent="";$("nom-err").textContent="Sin conexión: no se pudo cargar."}).then(function(){input.value=""});
+function nomPintar(){
+  if(!NOM.datos)return;
+  [].forEach.call(document.querySelectorAll(".nom-tabs button"),function(b){b.setAttribute("aria-selected",b.dataset.t===NOM.tab)});
+  nomError(""); $("nom-cuerpo").scrollTop=0;
+  if(NOM.tab==="gente")nomPintarGente(); else if(NOM.tab==="reglas")nomPintarReglas(); else nomCargarMes();
+}
+/* ----- nómina del mes ----- */
+function nomCargarMes(){
+  var sec=++NOM.sec; $("nom-cuerpo").innerHTML='<span class="note">Calculando…</span>'; $("nom-pie").innerHTML=""; NOM.sucio=false;
+  nomPedir("/api/nomina/mes",{mes:NOM.mes,accion:"ver"}).then(function(r){if(sec!==NOM.sec)return;NOM.calc=r;nomPintarMes()}).catch(function(e){if(sec!==NOM.sec)return;$("nom-cuerpo").innerHTML="";nomError(e)});
+}
+function nomPintarMes(){
+  var r=NOM.calc, fija=r.estado==="cerrada", no=fija?"disabled":"";
+  var cab='<div class="card row" style="align-items:flex-end"><label class="f">Mes<select id="nom-mes">'+opciones(nomMeses(),NOM.mes)+'</select></label>'
+    +campo("Tasa euro (Bs por €)",'data-nomtasa="eur"',fija?r.tasaEur:r.tasaFija.eur,no+' placeholder="Hoy: '+esc(r.tasaEur)+'"')+campo("Tasa dólar (Bs por $)",'data-nomtasa="usd"',fija?r.tasaUsd:r.tasaFija.usd,no+' placeholder="Igual a la del euro"')
+    +'<span class="pill '+(fija?"ok":"warn")+'">'+(fija?"Cerrada el "+new Date(r.cierre.fecha).toLocaleDateString("es-VE",{timeZone:"America/Caracas"})+" por "+esc(r.cierre.por):"Borrador")+'</span></div>';
+  var tarjetas=r.lineas.map(function(l){
+    var e=l.entradas, c="", d=function(k){return 'data-nom="'+k+'" data-id="'+esc(l.id)+'"'};
+    if(l.tipo==="secador")c+=campo("Días trabajados",d("dias"),e.dias||"",no+' placeholder="0" min="0" max="31"');
+    if(l.tipo==="lavador")c+=campo("Lavados",d("lavados"),e.lavados,no+' min="0" placeholder="'+l.autoLavados+' del sistema"')+campo("Pulituras",d("pulituras"),e.pulituras,no+' min="0" placeholder="'+l.autoPulituras+' del sistema"')+campo("Días de guardia",d("guardias"),e.guardias||"",no+' placeholder="0" min="0"');
+    c+=campo("Préstamo a descontar €",d("prestamo"),e.prestamo||"",no+' placeholder="0" min="0"')+campo("Ajuste € (+ o −)",d("ajuste"),e.ajuste||"",no+' placeholder="0"');
+    c+='<label class="f" style="grid-column:1/-1">Nota<input type="text" maxlength="120" '+d("nota")+' value="'+esc(e.nota||"")+'" '+no+'></label>';
+    return '<div class="card stack"><div class="row" style="justify-content:space-between;flex-wrap:nowrap"><div><b>'+esc(l.nombre)+'</b><br><span class="note">'+esc(l.cargo||l.tipo)+'</span></div><span class="nom-total" id="nt-'+esc(l.id)+'"></span></div><div class="nom-campos">'+c+'</div><div class="nom-det" id="nd-'+esc(l.id)+'"></div></div>';
+  }).join("");
+  if(!r.lineas.length)tarjetas='<div class="card stack"><span class="note">Todavía no hay trabajadores. Agrégalos en "Trabajadores" o impórtalos desde tu Excel.</span><button class="btn pri" data-act="nomtab" data-t="gente">Ir a Trabajadores</button></div>';
+  var hist=(r.cerradas||[]).length?'<div class="card stack"><h3>Nóminas cerradas</h3>'+r.cerradas.map(function(x){var n=nomMeses().filter(function(m){return m[0]===x.mes})[0];return '<button class="btn row" style="justify-content:space-between" data-act="nomver" data-m="'+esc(x.mes)+'"><span>'+esc(n?n[1]:x.mes)+'</span><span class="num">Bs '+nf(x.totalBs)+'</span></button>'}).join("")+'</div>':"";
+  $("nom-cuerpo").innerHTML=cab+'<div class="kpis" id="nom-kpis"></div><div class="stack" id="nom-avisos"></div><div class="nom-lista">'+tarjetas+'</div>'+hist;
+  $("nom-pie").innerHTML=(fija?'<button class="btn" data-act="nomaccion" data-a="reabrir">Reabrir</button>':'<button class="btn" data-act="nomaccion" data-a="guardar">Guardar borrador</button><button class="btn pri" data-act="nomaccion" data-a="cerrar">Cerrar nómina</button>')
+    +'<button class="btn" data-act="nomexcel" style="margin-left:auto">&#11015; Excel</button>';
+  nomCifras();
+}
+/* Actualiza solo las cifras, sin volver a crear los campos (así no se pierde el cursor al escribir). */
+function nomCifras(){
+  var r=NOM.calc,t=r.totales;
+  var k=$("nom-kpis"); if(!k)return;
+  k.innerHTML=[["Bs "+nf(t.totalBs),"Total a pagar"],[eur(t.netoEur),"En euros"+(t.guardiasUsd?" · más "+usd(t.guardiasUsd)+" de guardias":"")],[usd(r.ventas),"Vendido en el mes"],[r.lineas.length,"Trabajadores"]].map(function(x){return '<div class="card kpi"><b class="num">'+x[0]+'</b><span>'+x[1]+'</span></div>'}).join("");
+  $("nom-avisos").innerHTML=r.estado==="cerrada"?"":(r.avisos||[]).map(function(a){return '<div class="auth"><div>'+esc(a)+'</div></div>'}).join("");
+  r.lineas.forEach(function(l){
+    var tot=$("nt-"+l.id); if(!tot)return; tot.textContent="Bs "+nf(l.totalBs);
+    var f=[], p=function(a,b,c){f.push('<div'+(c?' class="'+c+'"':'')+'><span>'+a+'</span><span class="num">'+b+'</span></div>')};
+    if(l.tipo==="secador")p(l.dias+" días × "+eur(r.reglas.diaSecador),eur(l.base)); else if(l.base||l.tipo==="fijo"||l.tipo==="encargado")p("Sueldo base",eur(l.base));
+    if(l.tipo==="encargado")p("Comisión "+r.reglas.encPct+" % de "+usd(l.ventas)+" vendido",eur(l.comision));
+    if(l.tipo==="lavador"){p(l.lavados+" lavados × "+eur(r.reglas.lavPago)+" + "+l.pulituras+" pulituras × "+eur(r.reglas.pulPago),eur(l.comision)); if(l.productos)p("Productos ("+r.reglas.prodPct+" %)","− "+eur(l.productos))}
+    if(l.ajuste)p("Ajuste",(l.ajuste<0?"− ":"+ ")+eur(Math.abs(l.ajuste)));
+    if(l.prestamo)p("Préstamo","− "+eur(l.prestamo));
+    p("Neto",eur(l.netoEur),"suma"); if(l.guardias)p(l.guardias+" guardias × "+usd(r.reglas.guardia),usd(l.guardiasUsd),"suma");
+    $("nd-"+l.id).innerHTML=f.join("");
+  });
+}
+function nomEntradas(){
+  var e={};
+  (NOM.calc.lineas||[]).forEach(function(l){e[l.id]={dias:0,guardias:0,lavados:null,pulituras:null,prestamo:0,ajuste:0,nota:""}});
+  [].forEach.call(document.querySelectorAll("#nom-cuerpo [data-nom]"),function(i){var x=e[i.dataset.id];if(x)x[i.dataset.nom]=i.value});
+  return e;
+}
+function nomCuerpoMes(accion){
+  var t=function(k){var i=document.querySelector('#nom-cuerpo [data-nomtasa="'+k+'"]');return i?i.value:""};
+  return {mes:NOM.mes,accion:accion,entradas:nomEntradas(),tasaEur:t("eur"),tasaUsd:t("usd")};
+}
+function nomRecalcular(){
+  var sec=++NOM.sec; NOM.sucio=true;
+  nomPedir("/api/nomina/mes",nomCuerpoMes("calcular")).then(function(r){if(sec!==NOM.sec)return;NOM.calc=r;nomError("");nomCifras()}).catch(function(e){if(sec===NOM.sec)nomError(e)});
+}
+function nomAccion(boton,a){
+  if(a!=="guardar"&&boton.dataset.ok!=="1"){boton.dataset.ok="1";boton.textContent=a==="cerrar"?"¿Cerrar? Toca otra vez":"¿Reabrir? Toca otra vez";return}
+  var sec=++NOM.sec; boton.disabled=true; nomError("");
+  nomPedir("/api/nomina/mes",a==="reabrir"?{mes:NOM.mes,accion:a}:nomCuerpoMes(a)).then(function(r){
+    if(sec!==NOM.sec)return; NOM.calc=r; NOM.sucio=false; nomPintarMes(); toastWa(a==="cerrar"?"Nómina cerrada.":a==="reabrir"?"Nómina reabierta: ya puedes cambiarla.":"Borrador guardado.");
+  }).catch(function(e){boton.disabled=false;boton.dataset.ok="";nomError(e)});
+}
+function nomExcel(boton){
+  boton.disabled=true; nomError("");
+  (NOM.sucio?nomPedir("/api/nomina/mes",nomCuerpoMes("guardar")).then(function(){NOM.sucio=false}):Promise.resolve()).then(function(){return fetch("/api/nomina/excel?mes="+NOM.mes)}).then(function(r){
+    if(!r.ok)throw new Error("No se pudo crear el Excel.");
+    var nombre=(/filename="([^"]+)"/.exec(r.headers.get("content-disposition")||"")||[])[1]||"nomina.xlsx";
+    return r.blob().then(function(b){var a=document.createElement("a");a.href=URL.createObjectURL(b);a.download=nombre;document.body.appendChild(a);a.click();a.remove();setTimeout(function(){URL.revokeObjectURL(a.href)},60000)});
+  }).catch(nomError).then(function(){boton.disabled=false});
+}
+/* ----- trabajadores ----- */
+function nomPintarGente(){
+  if(!NOM.gente)NOM.gente=NOM.datos.trabajadores.map(function(t){return Object.assign({},t)});
+  var unir=function(a,b){return a.concat(b).filter(function(x,i,l){return x&&l.findIndex(function(y){return y.toLowerCase()===x.toLowerCase()})===i})};
+  var lavs=unir(S.lavadores.concat(S.lavAntiguos),NOM.datos.lavadores), usus=NOM.datos.usuarios;
+  var tipos=[["fijo","Sueldo fijo"],["encargado","Encargado (fijo + % de ventas)"],["secador","Secador (por día)"],["lavador","Lavador (por moto)"]];
+  var h=NOM.gente.map(function(t,i){
+    var d=function(k){return 'data-gente="'+k+'" data-i="'+i+'"'};
+    var c='<label class="f">Nombre<input type="text" maxlength="60" '+d("nombre")+' value="'+esc(t.nombre)+'"></label><label class="f">Cargo<input type="text" maxlength="60" '+d("cargo")+' value="'+esc(t.cargo)+'"></label><label class="f">Cómo se le paga<select '+d("tipo")+'>'+opciones(tipos,t.tipo)+'</select></label>';
+    if(t.tipo!=="secador")c+=campo("Sueldo base del mes €",d("base"),t.base||"",'min="0" placeholder="0"');
+    if(t.tipo==="lavador")c+='<label class="f">Lavador en el sistema<select '+d("lavador")+'>'+opciones([["","Sin enlazar"]].concat(unir(lavs,[t.lavador]).map(function(x){return[x,x]})),t.lavador||"")+'</select></label>';
+    if(t.tipo==="encargado")c+='<label class="f">Comisión sobre<select '+d("usuario")+'>'+opciones([["","Todas las ventas"]].concat(unir(usus,[t.usuario]).map(function(x){return[x,"Lo que factura "+x]})),t.usuario||"")+'</select></label>';
+    return '<div class="card stack"><div class="nom-campos">'+c+'</div><div class="row" style="justify-content:space-between"><label class="row note" style="gap:6px"><input type="checkbox" style="width:auto" '+d("activo")+(t.activo!==false?" checked":"")+'> Activo en la nómina</label><button class="btn sm" data-act="nomquitar" data-i="'+i+'">Quitar</button></div></div>';
+  }).join("");
+  $("nom-cuerpo").innerHTML='<div class="card stack"><div class="row"><span class="note" style="flex:1;min-width:220px">Puedes traer trabajadores y reglas desde tu Excel. Reemplaza esta lista; las nóminas ya cerradas no cambian.</span><label class="btn sm" style="cursor:pointer">Importar desde Excel<input id="nom-file" type="file" accept=".xlsx" style="position:absolute;opacity:0;width:1px;height:1px"></label></div></div>'
+    +'<div class="nom-lista">'+(h||'<span class="note">No hay trabajadores todavía.</span>')+'</div>';
+  $("nom-pie").innerHTML='<button class="btn" data-act="nomagregar">+ Agregar trabajador</button><button class="btn pri" data-act="nomguardargente" style="margin-left:auto">Guardar cambios</button>';
+}
+function nomImportar(input){
+  var f=input.files&&input.files[0]; if(!f)return;
+  if(NOM.datos.trabajadores.length&&!window.confirm("Importar "+f.name+" reemplaza la lista de trabajadores y las reglas de pago. ¿Continuar?")){input.value="";return}
+  nomError("");
+  fetch("/api/nomina/importar",{method:"POST",headers:{"content-type":"application/octet-stream"},body:f}).then(function(r){return r.json().then(function(j){if(!r.ok)throw new Error(j.error||"No se pudo importar.");NOM.datos=j;NOM.gente=null;aplicarReglas(j.reglas);nomPintar();toastWa("Importados "+j.importados+" trabajadores. Enlaza cada lavador con su nombre en el sistema.")})}).catch(nomError).then(function(){input.value=""});
+}
+function nomGuardarGente(){
+  nomPedir("/api/nomina/trabajadores",{trabajadores:NOM.gente}).then(function(d){NOM.datos=d;NOM.gente=null;nomPintar();toastWa("Trabajadores guardados.")}).catch(nomError);
+}
+/* ----- comisiones y reglas ----- */
+var NOMREGLAS=[["encPct","Encargado: % de lo vendido"],["lavPago","Lavador: € por lavado"],["pulPago","Lavador: € por pulitura"],["prodPct","Lavador: % que se descuenta por productos"],["guardia","Guardia: $ por día"],["diaSecador","Secador: € por día"]];
+function nomPintarReglas(){
+  var R=NOM.datos.reglas;
+  $("nom-cuerpo").innerHTML='<div class="card stack" style="max-width:640px"><div class="nom-campos">'+NOMREGLAS.map(function(x){return campo(x[1],'data-regla="'+x[0]+'"',R[x[0]],'min="0"')}).join("")+'</div><span class="note">Las cuatro primeras también se usan en Comisiones y en el cierre del día. Las nóminas ya cerradas no cambian.</span></div>';
+  $("nom-pie").innerHTML='<button class="btn pri" data-act="nomguardarreglas" style="margin-left:auto">Guardar reglas</button>';
+}
+function nomGuardarReglas(){
+  var r={}; [].forEach.call(document.querySelectorAll("#nom-cuerpo [data-regla]"),function(i){r[i.dataset.regla]=i.value});
+  nomPedir("/api/nomina/reglas",{reglas:r}).then(function(j){NOM.datos.reglas=j.reglas;aplicarReglas(j.reglas);nomPintarReglas();toastWa("Reglas guardadas.")}).catch(nomError);
+}
+/* Las reglas de pago guardadas valen para todas las pantallas (antes se perdían al recargar). */
+function aplicarReglas(r){
+  if(!r)return; ["encPct","lavPago","pulPago","prodPct"].forEach(function(k){if(typeof r[k]==="number")S[k]=r[k]}); renderRules(); renderAll();
+}
+function cargarReglas(){fetch("/api/reglas").then(function(r){return r.ok?r.json():null}).then(function(r){if(r&&typeof r.encPct==="number")aplicarReglas(r)}).catch(function(){})}
+var REGLAST=null;
+function guardarReglasAdmin(){
+  if(!window.__yo||window.__yo.rol!=="dueno")return; clearTimeout(REGLAST);
+  REGLAST=setTimeout(function(){nomPedir("/api/nomina/reglas",{reglas:{encPct:S.encPct,lavPago:S.lavPago,pulPago:S.pulPago,prodPct:S.prodPct}}).then(function(){toastWa("Reglas de pago guardadas.")}).catch(function(e){toastWa("No se guardaron las reglas: "+e.message)})},900);
 }
 /* Asistente IA: la conversación vive en la pantalla; los datos los consulta el servidor. */
 var CHAT=[], CHATOCUPADO=false, CHATVEZ=0;
@@ -1656,7 +1773,15 @@ document.addEventListener("click",function(ev){
   else if(a==="vermes")cargarMes();
   else if(a==="chat"){cerrarMenu();$("ov-chat").classList.add("on");renderChat()}
   else if(a==="nomina")abrirNomina();
-  else if(a==="nomcerrar"){$("ov-nomina").classList.remove("on");$("nom-cuerpo").innerHTML=""}
+  else if(a==="nomcerrar"){if((NOM.sucio||NOM.gente&&JSON.stringify(NOM.gente)!==JSON.stringify(NOM.datos.trabajadores))&&t.dataset.ok!=="1"){t.dataset.ok="1";t.textContent="¿Salir sin guardar?";return} t.dataset.ok="";t.textContent="Cerrar";NOM.sucio=false;NOM.gente=null;NOM.sec++;$("ov-nomina").classList.remove("on");$("nom-cuerpo").innerHTML="";$("nom-pie").innerHTML=""}
+  else if(a==="nomtab"){if(NOM.tab==="mes"&&NOM.sucio){nomPedir("/api/nomina/mes",nomCuerpoMes("guardar")).then(function(){NOM.sucio=false;NOM.tab=t.dataset.t;nomPintar()}).catch(nomError)}else{NOM.tab=t.dataset.t;nomPintar()}}
+  else if(a==="nomver"){NOM.mes=t.dataset.m;nomCargarMes()}
+  else if(a==="nomaccion")nomAccion(t,t.dataset.a);
+  else if(a==="nomexcel")nomExcel(t);
+  else if(a==="nomagregar"){NOM.gente.push({nombre:"",cargo:"",tipo:"fijo",base:0,activo:true});nomPintarGente();$("nom-cuerpo").scrollTop=$("nom-cuerpo").scrollHeight}
+  else if(a==="nomquitar"){if(t.dataset.ok!=="1"){t.dataset.ok="1";t.textContent="¿Quitar? Toca otra vez";return}NOM.gente.splice(+t.dataset.i,1);nomPintarGente()}
+  else if(a==="nomguardargente")nomGuardarGente();
+  else if(a==="nomguardarreglas")nomGuardarReglas();
   else if(a==="chatcerrar")$("ov-chat").classList.remove("on");
   else if(a==="chatnuevo"){CHAT.forEach(function(m){(m.archivos||[]).forEach(function(f){URL.revokeObjectURL(f.url)})});CHAT=[];CHATOCUPADO=false;CHATVEZ++;renderChat()}
   else if(a==="chatenviar")chatEnviar($("chat-in").value);
@@ -1773,9 +1898,10 @@ document.addEventListener("input",function(ev){
     renderCam();
     var pq=pv.replace(/[^A-Z0-9]/g,""); if(pq.length>=5)buscarCli("placa="+encodeURIComponent(pq));
   }
-  else if(t.id==="r-enc"||t.id==="r-lav"||t.id==="r-prod"||(t.dataset&&t.dataset.pres)){
+  else if(t.id==="r-enc"||t.id==="r-lav"||t.id==="r-pul"||t.id==="r-prod"||(t.dataset&&t.dataset.pres)){
     var rv=parseFloat(t.value); if(!(rv>=0))return;
     if(t.id==="r-enc")S.encPct=rv; else if(t.id==="r-lav")S.lavPago=rv; else if(t.id==="r-pul")S.pulPago=rv; else if(t.id==="r-prod")S.prodPct=rv; else S.prestamos[t.dataset.pres]=rv;
+    if(!t.dataset.pres)guardarReglasAdmin();
     renderAdminCom();renderMeta();
   }
   else if(t.dataset&&t.dataset.greal){var gr=S.gastos.filter(function(x){return x.id===+t.dataset.greal})[0], rr=parseFloat(t.value);gr.real=rr>=0?rr:null}
@@ -1790,7 +1916,14 @@ document.addEventListener("input",function(ev){
 });
 $("c-buscar").addEventListener("input",renderClientes);
 $("a-mes").addEventListener("change",cargarMes);
-$("nom-file").addEventListener("change",function(){subirNomina(this)});
+$("nom-cuerpo").addEventListener("input",function(ev){var t=ev.target;if(t.dataset.gente&&t.type!=="checkbox"&&t.tagName!=="SELECT")NOM.gente[+t.dataset.i][t.dataset.gente]=t.value;else if(t.dataset.nom||t.dataset.nomtasa)NOM.sucio=true});
+$("nom-cuerpo").addEventListener("change",function(ev){
+  var t=ev.target;
+  if(t.id==="nom-file")nomImportar(t);
+  else if(t.id==="nom-mes"){var m=t.value, ir=function(){NOM.mes=m;nomCargarMes()}; if(NOM.sucio)nomPedir("/api/nomina/mes",nomCuerpoMes("guardar")).then(ir).catch(nomError); else ir()} // lo escrito en el mes anterior no se pierde
+  else if(t.dataset.nom||t.dataset.nomtasa)nomRecalcular();
+  else if(t.dataset.gente){var g=NOM.gente[+t.dataset.i];g[t.dataset.gente]=t.type==="checkbox"?t.checked:t.value;if(t.dataset.gente==="tipo")nomPintarGente()}
+});
 $("chat-in").addEventListener("keydown",function(ev){if(ev.key==="Enter"&&!ev.shiftKey&&!ev.isComposing&&!ESMOVIL){ev.preventDefault();chatEnviar(this.value)}}); // en el teléfono Enter baja de línea
 /* Menú del teléfono: se abre con su botón y se cierra al tocar fuera. Tocar dentro no lo cierra ("Borrar datos" pide un segundo toque). */
 document.addEventListener("click",function(ev){
@@ -1824,7 +1957,7 @@ if(location.protocol!=="file:"&&window.fetch){fetch("/api/yo").then(function(r){
   $("btn-salir").hidden=false;
   if(u.permisos.indexOf("usuarios")>=0)$("lnk-usuarios").hidden=false; if(u.rol==="dueno"){$("lnk-wa").hidden=false;$("btn-nomina").hidden=false} if(u.rol!=="dueno"){$("role").value="enc";$("role-lbl").style.display="none"}
   $("btn-reset").hidden=true; applyRole(); renderAll();
-  loadTasa(); setInterval(loadTasa,30*60*1000);
+  loadTasa(); setInterval(loadTasa,30*60*1000); cargarReglas();
   loadDia().then(ejemploDesdeEnlace); loadAuts(); setInterval(loadAuts,5000); setInterval(refrescarDia,5000); setInterval(function(){if($("v-clientes").classList.contains("on"))loadClientes()},15000); iniciarEnVivo();
   if(u.permisos.indexOf("tablet")>=0||u.permisos.indexOf("vigilante")>=0){loadPend();setInterval(loadPend,10000)}
   renderCola();vaciarCola();setInterval(vaciarCola,15000);window.addEventListener("online",vaciarCola);
